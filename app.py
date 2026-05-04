@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
@@ -44,6 +45,18 @@ class AuxiliaryWindow(QMainWindow):
 
 
 class MainWindow(QMainWindow):
+    PRECISION_OPTIONS = [
+        ("step_100", 100.0),
+        ("step_10", 10.0),
+        ("step_1_int", 1.0),
+        ("step_1", 0.1),
+        ("step_2", 0.01),
+        ("step_3", 0.001),
+        ("step_4", 0.0001),
+        ("step_5", 0.00001),
+        ("step_6", 0.000001),
+    ]
+
     def __init__(self) -> None:
         super().__init__()
         self.service = DlcProService()
@@ -53,13 +66,26 @@ class MainWindow(QMainWindow):
         self.snapshot: DeviceSnapshot | None = None
         self.pending_future: Future | None = None
         self.pending_success_handler = None
+        self.pending_task_kind = "action"
         self.current_set_dirty = False
         self.current_set_programmatic_update = False
         self.cc_programmatic_update = False
         self.feedforward_programmatic_update = False
         self.arc_programmatic_update = False
         self.tc_programmatic_update = False
+        self.pc_programmatic_update = False
         self.last_device_current_set: float | None = None
+        self.cc_precision_step = 0.1
+        self.tc_precision_step = 0.001
+        self.pc_precision_step = 0.000001
+        self.module_precision_defaults: dict[str, QDoubleSpinBox] = {}
+        self.module_precision_selected: dict[str, QDoubleSpinBox] = {}
+        self.module_precision_target_buttons: dict[str, list[QPushButton]] = {
+            "cc": [],
+            "tc": [],
+            "pc": [],
+        }
+        self.connection_loss_notified = False
 
         self.refresh_timer = QTimer(self)
         self.refresh_timer.setInterval(2000)
@@ -75,6 +101,8 @@ class MainWindow(QMainWindow):
         self.current_apply_timer.timeout.connect(self._apply_current_if_needed)
 
         self._build_ui()
+        self._apply_module_precisions()
+        self._update_all_precision_buttons()
         self._apply_base_style()
         self._apply_texts()
         self._populate_environment_hints()
@@ -147,7 +175,7 @@ class MainWindow(QMainWindow):
         root.setStretch(2, 1)
 
         self.laser_window = AuxiliaryWindow()
-        self.laser_window.resize(760, 720)
+        self.laser_window.resize(860, 900)
         self.laser_window.setCentralWidget(self.laser_page)
 
     def _build_connection_group(self) -> QGroupBox:
@@ -231,8 +259,19 @@ class MainWindow(QMainWindow):
     def _build_laser_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(14)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setObjectName("LaserScrollArea")
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(16, 16, 16, 16)
+        content_layout.setSpacing(14)
 
         self.laser_group = QGroupBox()
         group_layout = QVBoxLayout(self.laser_group)
@@ -265,41 +304,35 @@ class MainWindow(QMainWindow):
         top_form.setVerticalSpacing(14)
 
         self.precision_label = QLabel()
-        self.precision_combo = QComboBox()
-        self.precision_combo.addItem("", 100.0)
-        self.precision_combo.addItem("", 10.0)
-        self.precision_combo.addItem("", 1.0)
-        self.precision_combo.addItem("", 0.1)
-        self.precision_combo.addItem("", 0.01)
-        self.precision_combo.addItem("", 0.001)
-        self.precision_combo.addItem("", 0.0001)
-        self.precision_combo.addItem("", 0.00001)
-        self.precision_combo.setCurrentIndex(3)
-        self.precision_combo.currentIndexChanged.connect(self._update_precision)
+        self.precision_button_layout, self.precision_buttons = self._create_precision_button_row(
+            self._set_cc_precision
+        )
 
         self.current_set_label = QLabel()
         self.current_set_spin = QDoubleSpinBox()
         self.current_set_spin.setRange(-1000000.0, 1000000.0)
         self.current_set_spin.setDecimals(5)
         self.current_set_spin.setSingleStep(0.1)
+        self.current_set_spin.setSuffix(" mA")
         self.current_set_spin.setKeyboardTracking(False)
         self.current_set_spin.valueChanged.connect(self._on_current_set_changed)
 
         self.current_act_label = QLabel()
-        self.current_act_value = QLabel("-")
+        self.current_act_value = QLabel()
         self.current_act_value.setObjectName("ReadValue")
 
         self.current_clip_label = QLabel()
         self.current_clip_spin = QDoubleSpinBox()
         self.current_clip_spin.setRange(-1000000.0, 1000000.0)
         self.current_clip_spin.setDecimals(5)
+        self.current_clip_spin.setSuffix(" mA")
         self.current_clip_spin.setKeyboardTracking(False)
         self.current_clip_spin.editingFinished.connect(self._on_current_clip_finished)
 
-        top_form.addRow(self.precision_label, self.precision_combo)
-        top_form.addRow(self.current_set_label, self.current_set_spin)
+        top_form.addRow(self.precision_label, self._wrap_layout(self.precision_button_layout))
+        top_form.addRow(self.current_set_label, self._create_spinbox_target_row("cc", self.current_set_spin))
         top_form.addRow(self.current_act_label, self.current_act_value)
-        top_form.addRow(self.current_clip_label, self.current_clip_spin)
+        top_form.addRow(self.current_clip_label, self._create_spinbox_target_row("cc", self.current_clip_spin))
         panel_layout.addLayout(top_form)
 
         self.current_meta_hint = QLabel()
@@ -324,9 +357,10 @@ class MainWindow(QMainWindow):
         self.feedforward_factor_spin = QDoubleSpinBox()
         self.feedforward_factor_spin.setRange(-1000000.0, 1000000.0)
         self.feedforward_factor_spin.setDecimals(5)
+        self.feedforward_factor_spin.setSuffix(f" {TEXT[self.language]['feedforward_factor_unit']}")
         self.feedforward_factor_spin.setKeyboardTracking(False)
         self.feedforward_factor_spin.editingFinished.connect(self._on_feedforward_factor_finished)
-        ff_form.addRow(self.feedforward_factor_label, self.feedforward_factor_spin)
+        ff_form.addRow(self.feedforward_factor_label, self._create_spinbox_target_row("cc", self.feedforward_factor_spin))
         panel_layout.addLayout(ff_form)
 
         divider_2 = QFrame()
@@ -349,11 +383,12 @@ class MainWindow(QMainWindow):
         self.arc_factor_label = QLabel()
         self.arc_factor_spin = QDoubleSpinBox()
         self.arc_factor_spin.setRange(-1000000.0, 1000000.0)
-        self.arc_factor_spin.setDecimals(5)
+        self.arc_factor_spin.setDecimals(4)
+        self.arc_factor_spin.setSuffix(f" {TEXT[self.language]['arc_factor_unit']}")
         self.arc_factor_spin.setKeyboardTracking(False)
         self.arc_factor_spin.editingFinished.connect(self._on_arc_factor_finished)
         arc_form.addRow(self.arc_signal_label, self.arc_signal_combo)
-        arc_form.addRow(self.arc_factor_label, self.arc_factor_spin)
+        arc_form.addRow(self.arc_factor_label, self._create_spinbox_target_row("cc", self.arc_factor_spin))
         panel_layout.addLayout(arc_form)
 
         self.auto_apply_hint_label = QLabel()
@@ -384,15 +419,22 @@ class MainWindow(QMainWindow):
         self.temp_set_label = QLabel()
         self.temp_set_spin = QDoubleSpinBox()
         self.temp_set_spin.setRange(-1000000.0, 1000000.0)
-        self.temp_set_spin.setDecimals(5)
+        self.temp_set_spin.setDecimals(3)
+        self.temp_set_spin.setSuffix(f" {TEXT[self.language]['temperature_unit']}")
         self.temp_set_spin.setKeyboardTracking(False)
         self.temp_set_spin.editingFinished.connect(self._on_temp_set_finished)
 
         self.temp_act_label = QLabel()
-        self.temp_act_value = QLabel("-")
+        self.temp_act_value = QLabel()
         self.temp_act_value.setObjectName("ReadValue")
 
-        tc_form.addRow(self.temp_set_label, self.temp_set_spin)
+        self.tc_precision_label = QLabel()
+        self.tc_precision_button_layout, self.tc_precision_buttons = self._create_precision_button_row(
+            self._set_tc_precision
+        )
+
+        tc_form.addRow(self.tc_precision_label, self._wrap_layout(self.tc_precision_button_layout))
+        tc_form.addRow(self.temp_set_label, self._create_spinbox_target_row("tc", self.temp_set_spin))
         tc_form.addRow(self.temp_act_label, self.temp_act_value)
         tc_panel_layout.addLayout(tc_form)
 
@@ -416,17 +458,176 @@ class MainWindow(QMainWindow):
         self.tc_arc_factor_label = QLabel()
         self.tc_arc_factor_spin = QDoubleSpinBox()
         self.tc_arc_factor_spin.setRange(-1000000.0, 1000000.0)
-        self.tc_arc_factor_spin.setDecimals(5)
+        self.tc_arc_factor_spin.setDecimals(4)
+        self.tc_arc_factor_spin.setSuffix(f" {TEXT[self.language]['tc_arc_factor_unit']}")
         self.tc_arc_factor_spin.setKeyboardTracking(False)
         self.tc_arc_factor_spin.editingFinished.connect(self._on_tc_arc_factor_finished)
         tc_arc_form.addRow(self.tc_arc_signal_label, self.tc_arc_signal_combo)
-        tc_arc_form.addRow(self.tc_arc_factor_label, self.tc_arc_factor_spin)
+        tc_arc_form.addRow(self.tc_arc_factor_label, self._create_spinbox_target_row("tc", self.tc_arc_factor_spin))
         tc_panel_layout.addLayout(tc_arc_form)
+
+        pc_panel = QFrame()
+        pc_panel.setObjectName("LaserPanel")
+        pc_panel_layout = QVBoxLayout(pc_panel)
+        pc_panel_layout.setContentsMargins(18, 18, 18, 18)
+        pc_panel_layout.setSpacing(16)
+
+        pc_header = QHBoxLayout()
+        self.pc_label = QLabel()
+        self.pc_label.setObjectName("SectionTitle")
+        pc_header.addWidget(self.pc_label)
+        pc_header.addStretch(1)
+        self.pc_enable_button = self._create_toggle_button(self._on_pc_enable_toggled)
+        pc_header.addWidget(self.pc_enable_button)
+        pc_panel_layout.addLayout(pc_header)
+
+        pc_form = QFormLayout()
+        pc_form.setLabelAlignment(Qt.AlignLeft)
+        pc_form.setFormAlignment(Qt.AlignTop)
+        pc_form.setHorizontalSpacing(18)
+        pc_form.setVerticalSpacing(14)
+
+        self.pc_voltage_set_label = QLabel()
+        self.pc_voltage_set_spin = QDoubleSpinBox()
+        self.pc_voltage_set_spin.setRange(-1000000.0, 1000000.0)
+        self.pc_voltage_set_spin.setDecimals(6)
+        self.pc_voltage_set_spin.setSuffix(f" {TEXT[self.language]['voltage_unit']}")
+        self.pc_voltage_set_spin.setKeyboardTracking(False)
+        self.pc_voltage_set_spin.editingFinished.connect(self._on_pc_voltage_set_finished)
+
+        self.pc_voltage_act_label = QLabel()
+        self.pc_voltage_act_value = QLabel()
+        self.pc_voltage_act_value.setObjectName("ReadValue")
+
+        self.pc_precision_label = QLabel()
+        self.pc_precision_button_layout, self.pc_precision_buttons = self._create_precision_button_row(
+            self._set_pc_precision
+        )
+
+        pc_form.addRow(self.pc_precision_label, self._wrap_layout(self.pc_precision_button_layout))
+        pc_form.addRow(self.pc_voltage_set_label, self._create_spinbox_target_row("pc", self.pc_voltage_set_spin))
+        pc_form.addRow(self.pc_voltage_act_label, self.pc_voltage_act_value)
+        pc_panel_layout.addLayout(pc_form)
+
+        divider_4 = QFrame()
+        divider_4.setFrameShape(QFrame.HLine)
+        divider_4.setObjectName("Divider")
+        pc_panel_layout.addWidget(divider_4)
+
+        pc_slew_form = QFormLayout()
+        pc_slew_form.setLabelAlignment(Qt.AlignLeft)
+        pc_slew_form.setFormAlignment(Qt.AlignTop)
+        pc_slew_form.setHorizontalSpacing(18)
+        pc_slew_form.setVerticalSpacing(14)
+
+        self.pc_slew_rate_enable_label = QLabel()
+        self.pc_slew_rate_enable_button = self._create_toggle_button(self._on_pc_slew_rate_enable_toggled)
+        self.pc_slew_rate_label = QLabel()
+        self.pc_slew_rate_spin = QDoubleSpinBox()
+        self.pc_slew_rate_spin.setRange(-1000000.0, 1000000.0)
+        self.pc_slew_rate_spin.setDecimals(5)
+        self.pc_slew_rate_spin.setSuffix(f" {TEXT[self.language]['slew_rate_unit']}")
+        self.pc_slew_rate_spin.setKeyboardTracking(False)
+        self.pc_slew_rate_spin.editingFinished.connect(self._on_pc_slew_rate_finished)
+        pc_slew_form.addRow(self.pc_slew_rate_enable_label, self.pc_slew_rate_enable_button)
+        pc_slew_form.addRow(self.pc_slew_rate_label, self._create_spinbox_target_row("pc", self.pc_slew_rate_spin))
+        pc_panel_layout.addLayout(pc_slew_form)
+
+        divider_5 = QFrame()
+        divider_5.setFrameShape(QFrame.HLine)
+        divider_5.setObjectName("Divider")
+        pc_panel_layout.addWidget(divider_5)
+
+        pc_arc_header = QHBoxLayout()
+        self.pc_arc_label = QLabel()
+        pc_arc_header.addWidget(self.pc_arc_label)
+        pc_arc_header.addStretch(1)
+        self.pc_arc_enable_button = self._create_toggle_button(self._on_pc_arc_enable_toggled)
+        pc_arc_header.addWidget(self.pc_arc_enable_button)
+        pc_panel_layout.addLayout(pc_arc_header)
+
+        pc_arc_form = QFormLayout()
+        self.pc_arc_signal_label = QLabel()
+        self.pc_arc_signal_combo = QComboBox()
+        self.pc_arc_signal_combo.currentIndexChanged.connect(self._on_pc_arc_signal_changed)
+        self.pc_arc_factor_label = QLabel()
+        self.pc_arc_factor_spin = QDoubleSpinBox()
+        self.pc_arc_factor_spin.setRange(-1000000.0, 1000000.0)
+        self.pc_arc_factor_spin.setDecimals(4)
+        self.pc_arc_factor_spin.setSuffix(f" {TEXT[self.language]['pc_arc_factor_unit']}")
+        self.pc_arc_factor_spin.setKeyboardTracking(False)
+        self.pc_arc_factor_spin.editingFinished.connect(self._on_pc_arc_factor_finished)
+        pc_arc_form.addRow(self.pc_arc_signal_label, self.pc_arc_signal_combo)
+        pc_arc_form.addRow(self.pc_arc_factor_label, self._create_spinbox_target_row("pc", self.pc_arc_factor_spin))
+        pc_panel_layout.addLayout(pc_arc_form)
+
+        divider_6 = QFrame()
+        divider_6.setFrameShape(QFrame.HLine)
+        divider_6.setObjectName("Divider")
+        pc_panel_layout.addWidget(divider_6)
+
+        self.pressure_comp_label = QLabel()
+        self.pressure_comp_label.setObjectName("SectionTitle")
+        pc_panel_layout.addWidget(self.pressure_comp_label)
+
+        pressure_comp_form = QFormLayout()
+        pressure_comp_form.setLabelAlignment(Qt.AlignLeft)
+        pressure_comp_form.setFormAlignment(Qt.AlignTop)
+        pressure_comp_form.setHorizontalSpacing(18)
+        pressure_comp_form.setVerticalSpacing(14)
+
+        self.pressure_comp_enable_label = QLabel()
+        self.pressure_comp_enable_button = self._create_toggle_button(self._on_pressure_comp_enable_toggled)
+        self.pressure_comp_air_pressure_label = QLabel()
+        self.pressure_comp_air_pressure_value = QLabel()
+        self.pressure_comp_air_pressure_value.setObjectName("ReadValue")
+        self.pressure_comp_factor_label = QLabel()
+        self.pressure_comp_factor_spin = QDoubleSpinBox()
+        self.pressure_comp_factor_spin.setRange(-1000000.0, 1000000.0)
+        self.pressure_comp_factor_spin.setDecimals(3)
+        self.pressure_comp_factor_spin.setSuffix(f" {TEXT[self.language]['pressure_comp_factor_unit']}")
+        self.pressure_comp_factor_spin.setKeyboardTracking(False)
+        self.pressure_comp_factor_spin.editingFinished.connect(self._on_pressure_comp_factor_finished)
+        self.pressure_comp_voltage_label = QLabel()
+        self.pressure_comp_voltage_value = QLabel()
+        self.pressure_comp_voltage_value.setObjectName("ReadValue")
+
+        pressure_comp_form.addRow(self.pressure_comp_enable_label, self.pressure_comp_enable_button)
+        pressure_comp_form.addRow(self.pressure_comp_air_pressure_label, self.pressure_comp_air_pressure_value)
+        pressure_comp_form.addRow(self.pressure_comp_factor_label, self._create_spinbox_target_row("pc", self.pressure_comp_factor_spin))
+        pressure_comp_form.addRow(self.pressure_comp_voltage_label, self.pressure_comp_voltage_value)
+        pc_panel_layout.addLayout(pressure_comp_form)
+
+        self._register_module_precision_targets(
+            "cc",
+            self.current_set_spin,
+            self.current_set_spin,
+            self.current_clip_spin,
+            self.feedforward_factor_spin,
+            self.arc_factor_spin,
+        )
+        self._register_module_precision_targets(
+            "tc",
+            self.temp_set_spin,
+            self.temp_set_spin,
+            self.tc_arc_factor_spin,
+        )
+        self._register_module_precision_targets(
+            "pc",
+            self.pc_voltage_set_spin,
+            self.pc_voltage_set_spin,
+            self.pc_slew_rate_spin,
+            self.pc_arc_factor_spin,
+            self.pressure_comp_factor_spin,
+        )
 
         group_layout.addWidget(panel)
         group_layout.addWidget(tc_panel)
+        group_layout.addWidget(pc_panel)
         group_layout.addStretch(1)
-        layout.addWidget(self.laser_group)
+        content_layout.addWidget(self.laser_group)
+        scroll_area.setWidget(content)
+        layout.addWidget(scroll_area)
         return page
 
     def _build_placeholder_page(self) -> QWidget:
@@ -460,6 +661,63 @@ class MainWindow(QMainWindow):
         button.setMinimumWidth(124)
         button.clicked.connect(slot)
         return button
+
+    def _create_precision_button_row(self, setter) -> tuple[QHBoxLayout, list[QPushButton]]:
+        layout = QHBoxLayout()
+        layout.setSpacing(8)
+        buttons: list[QPushButton] = []
+        for text_key, step in self.PRECISION_OPTIONS:
+            button = QPushButton()
+            button.setObjectName("PrecisionButton")
+            button.setCheckable(True)
+            button.clicked.connect(lambda checked=False, s=step: setter(s))
+            button._text_key = text_key
+            button._precision_step = step
+            buttons.append(button)
+            layout.addWidget(button)
+        layout.addStretch(1)
+        return layout, buttons
+
+    def _create_precision_target_button(self, module: str, spinbox: QDoubleSpinBox) -> QPushButton:
+        button = QPushButton()
+        button.setObjectName("StepTargetButton")
+        button.setCheckable(True)
+        button.clicked.connect(lambda checked=False, m=module, s=spinbox: self._select_precision_target(m, s))
+        button._precision_module = module
+        button._precision_target = spinbox
+        self.module_precision_target_buttons[module].append(button)
+        return button
+
+    def _create_spinbox_target_row(self, module: str, spinbox: QDoubleSpinBox) -> QWidget:
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(spinbox, 1)
+        layout.addWidget(self._create_precision_target_button(module, spinbox), 0)
+        return self._wrap_layout(layout)
+
+    def _wrap_layout(self, inner_layout) -> QWidget:
+        widget = QWidget()
+        widget.setLayout(inner_layout)
+        return widget
+
+    def _register_module_precision_targets(self, module: str, default_target: QDoubleSpinBox, *spinboxes: QDoubleSpinBox) -> None:
+        self.module_precision_defaults[module] = default_target
+        self.module_precision_selected[module] = default_target
+        for spinbox in spinboxes:
+            spinbox.setProperty("precision_module", module)
+        self._sync_precision_target_buttons(module)
+
+    def _select_precision_target(self, module: str, spinbox: QDoubleSpinBox) -> None:
+        self.module_precision_selected[module] = spinbox
+        self._sync_precision_target_buttons(module)
+
+    def _sync_precision_target_buttons(self, module: str) -> None:
+        current = self.module_precision_selected.get(module, self.module_precision_defaults.get(module))
+        for button in self.module_precision_target_buttons.get(module, []):
+            button.blockSignals(True)
+            button.setChecked(button._precision_target is current)
+            button.blockSignals(False)
 
     def _open_laser_window(self) -> None:
         if self.laser_window.isHidden():
@@ -498,6 +756,9 @@ class MainWindow(QMainWindow):
                 padding: 6px 8px;
                 color: #f6f6f6;
             }
+            QScrollArea, QScrollArea > QWidget > QWidget {
+                background: #2d2d2d;
+            }
             QTableWidget {
                 gridline-color: #5a5a5a;
             }
@@ -512,6 +773,31 @@ class MainWindow(QMainWindow):
             }
             QPushButton:pressed {
                 background: #4a4a4a;
+            }
+            QPushButton#PrecisionButton {
+                min-width: 72px;
+                padding: 6px 10px;
+                border-radius: 8px;
+            }
+            QPushButton#PrecisionButton:checked {
+                background: #45614c;
+                border: 1px solid #6b9474;
+                color: #f7fbf8;
+                font-weight: 700;
+            }
+            QPushButton#StepTargetButton {
+                min-width: 88px;
+                padding: 6px 10px;
+                border-radius: 8px;
+                background: #4a4a4a;
+                border: 1px solid #666;
+                color: #d8d8d8;
+            }
+            QPushButton#StepTargetButton:checked {
+                background: #5d5140;
+                border: 1px solid #8f7a58;
+                color: #fff6e5;
+                font-weight: 700;
             }
             QLabel#StatusBadge {
                 background: #1f3d2a;
@@ -595,6 +881,11 @@ class MainWindow(QMainWindow):
 
         self.cc_label.setText(t["laser_page_title"])
         self.precision_label.setText(t["step_precision"])
+        self.tc_precision_label.setText(t["step_precision"])
+        self.pc_precision_label.setText(t["step_precision"])
+        for module_buttons in self.module_precision_target_buttons.values():
+            for button in module_buttons:
+                button.setText(t["precision_target"])
         self.current_set_label.setText(t["current_set"])
         self.current_act_label.setText(t["current_act"])
         self.current_clip_label.setText(t["maximum_current"])
@@ -609,23 +900,42 @@ class MainWindow(QMainWindow):
         self.tc_arc_label.setText(t["arc"])
         self.tc_arc_signal_label.setText(t["arc_signal_input"])
         self.tc_arc_factor_label.setText(t["arc_factor"])
+        self.pc_label.setText(t["piezo_control"])
+        self.pc_voltage_set_label.setText(t["set_voltage"])
+        self.pc_voltage_act_label.setText(t["actual_voltage"])
+        self.pc_slew_rate_enable_label.setText(t["slew_rate_enable"])
+        self.pc_slew_rate_label.setText(t["slew_rate"])
+        self.pc_arc_label.setText(t["arc"])
+        self.pc_arc_signal_label.setText(t["arc_signal_input"])
+        self.pc_arc_factor_label.setText(t["arc_factor"])
+        self.pressure_comp_label.setText(t["pressure_compensation"])
+        self.pressure_comp_enable_label.setText(t["enabled_label"])
+        self.pressure_comp_air_pressure_label.setText(t["air_pressure"])
+        self.pressure_comp_factor_label.setText(t["pressure_comp_factor"])
+        self.pressure_comp_voltage_label.setText(t["compensation_voltage"])
         self.current_meta_hint.setText(
             f"{t['current_clip_tuning']} / {t['current_clip_limit']} / {t['effective_current_max']}"
         )
         self.cc_status_label = t["cc_status"]
         self.auto_apply_hint_label.setText(t["auto_apply_hint"])
 
-        self.precision_combo.setItemText(0, t["step_100"])
-        self.precision_combo.setItemText(1, t["step_10"])
-        self.precision_combo.setItemText(2, t["step_1_int"])
-        self.precision_combo.setItemText(3, t["step_1"])
-        self.precision_combo.setItemText(4, t["step_2"])
-        self.precision_combo.setItemText(5, t["step_3"])
-        self.precision_combo.setItemText(6, t["step_4"])
-        self.precision_combo.setItemText(7, t["step_5"])
+        self._refresh_spinbox_suffixes()
+        if self.snapshot is None:
+            self.current_act_value.setText(self._unit_only_text("mA"))
+            self.temp_act_value.setText(self._unit_only_text(t["temperature_unit"]))
+            self.pc_voltage_act_value.setText(self._unit_only_text(t["voltage_unit"]))
+            self.pressure_comp_air_pressure_value.setText(self._unit_only_text(t["air_pressure_unit"]))
+            self.pressure_comp_voltage_value.setText(self._unit_only_text(t["voltage_unit"]))
+        for buttons in (self.precision_buttons, self.tc_precision_buttons, self.pc_precision_buttons):
+            for button in buttons:
+                button.setText(t[button._text_key])
+        self._update_all_precision_buttons()
+        for module in self.module_precision_target_buttons:
+            self._sync_precision_target_buttons(module)
 
         self._populate_arc_signal_options()
         self._populate_tc_arc_signal_options()
+        self._populate_pc_arc_signal_options()
         if self.snapshot is not None:
             self._render_snapshot(self.snapshot)
         else:
@@ -634,6 +944,10 @@ class MainWindow(QMainWindow):
             self._update_toggle_button(self.arc_enable_button, False)
             self._update_toggle_button(self.tc_enable_button, False)
             self._update_toggle_button(self.tc_arc_enable_button, False)
+            self._update_toggle_button(self.pc_enable_button, False)
+            self._update_toggle_button(self.pc_slew_rate_enable_button, False)
+            self._update_toggle_button(self.pc_arc_enable_button, False)
+            self._update_toggle_button(self.pressure_comp_enable_button, False)
 
     def _populate_environment_hints(self) -> None:
         t = TEXT[self.language]
@@ -653,6 +967,9 @@ class MainWindow(QMainWindow):
 
     def _populate_tc_arc_signal_options(self) -> None:
         self._populate_signal_combo(self.tc_arc_signal_combo)
+
+    def _populate_pc_arc_signal_options(self) -> None:
+        self._populate_signal_combo(self.pc_arc_signal_combo)
 
     def _populate_signal_combo(self, combo: QComboBox) -> None:
         current = combo.currentData()
@@ -698,20 +1015,34 @@ class MainWindow(QMainWindow):
             self.temp_set_spin,
             self.tc_arc_signal_combo,
             self.tc_arc_factor_spin,
+            self.pc_voltage_set_spin,
+            self.pc_slew_rate_spin,
+            self.pc_arc_signal_combo,
+            self.pc_arc_factor_spin,
+            self.pressure_comp_factor_spin,
             self.cc_enable_button,
             self.feedforward_enable_button,
             self.arc_enable_button,
             self.tc_enable_button,
             self.tc_arc_enable_button,
-            self.precision_combo,
+            self.pc_enable_button,
+            self.pc_slew_rate_enable_button,
+            self.pc_arc_enable_button,
+            self.pressure_comp_enable_button,
         ):
             widget.setEnabled(writable)
+        for button in (*self.precision_buttons, *self.tc_precision_buttons, *self.pc_precision_buttons):
+            button.setEnabled(not busy)
+        for module_buttons in self.module_precision_target_buttons.values():
+            for button in module_buttons:
+                button.setEnabled(not busy)
 
-    def _run_task(self, fn, on_success) -> None:
+    def _run_task(self, fn, on_success, task_kind: str = "action") -> None:
         if self.busy:
             return
         self._set_busy(True)
         self.pending_success_handler = on_success
+        self.pending_task_kind = task_kind
         self.pending_future = self.executor.submit(fn)
         self.future_poll_timer.start()
 
@@ -724,42 +1055,102 @@ class MainWindow(QMainWindow):
         self.pending_future = None
         on_success = self.pending_success_handler
         self.pending_success_handler = None
+        task_kind = self.pending_task_kind
+        self.pending_task_kind = "action"
 
         try:
             result = future.result()
         except Exception as exc:  # noqa: BLE001
-            self._handle_task_done(on_success, False, exc)
+            self._handle_task_done(on_success, False, exc, task_kind)
             return
 
-        self._handle_task_done(on_success, True, result)
+        self._handle_task_done(on_success, True, result, task_kind)
 
-    def _handle_task_done(self, on_success, ok: bool, result: object) -> None:
+    def _handle_task_done(self, on_success, ok: bool, result: object, task_kind: str) -> None:
         self._set_busy(False)
         if ok:
+            self.connection_loss_notified = False
             if on_success is not None:
                 on_success(result)
             return
+        if isinstance(result, Exception) and self._handle_connection_failure(result, task_kind):
+            return
         message = self.service.format_error(result) if isinstance(result, Exception) else str(result)
         QMessageBox.critical(self, "Error", message)
+
+    def _handle_connection_failure(self, exc: Exception, task_kind: str) -> bool:
+        if task_kind != "poll":
+            return False
+        self._reset_after_disconnect(silent=True)
+        if self.connection_loss_notified:
+            return True
+        self.connection_loss_notified = True
+        t = TEXT[self.language]
+        QMessageBox.critical(self, t["connection_lost_title"], self.service.format_error(exc))
+        return True
 
     def _on_language_changed(self) -> None:
         self.language = self.language_combo.currentData()
         self._apply_texts()
 
-    def _update_precision(self) -> None:
-        step = float(self.precision_combo.currentData())
-        decimals = {
-            100.0: 0,
-            10.0: 0,
-            1.0: 0,
-            0.1: 1,
-            0.01: 2,
-            0.001: 3,
-            0.0001: 4,
-            0.00001: 5,
-        }[step]
-        self.current_set_spin.setDecimals(decimals)
-        self.current_set_spin.setSingleStep(step)
+    def _refresh_spinbox_suffixes(self) -> None:
+        t = TEXT[self.language]
+        self.current_set_spin.setSuffix(" mA")
+        self.current_clip_spin.setSuffix(" mA")
+        self.feedforward_factor_spin.setSuffix(f" {t['feedforward_factor_unit']}")
+        self.arc_factor_spin.setSuffix(f" {t['arc_factor_unit']}")
+        self.temp_set_spin.setSuffix(f" {t['temperature_unit']}")
+        self.tc_arc_factor_spin.setSuffix(f" {t['tc_arc_factor_unit']}")
+        self.pc_voltage_set_spin.setSuffix(f" {t['voltage_unit']}")
+        self.pc_slew_rate_spin.setSuffix(f" {t['slew_rate_unit']}")
+        self.pc_arc_factor_spin.setSuffix(f" {t['pc_arc_factor_unit']}")
+        self.pressure_comp_factor_spin.setSuffix(f" {t['pressure_comp_factor_unit']}")
+
+    def _set_cc_precision(self, step: float) -> None:
+        self.cc_precision_step = step
+        self._apply_step(self._active_precision_target("cc"), step)
+        self._update_precision_buttons(self.precision_buttons, step)
+
+    def _set_tc_precision(self, step: float) -> None:
+        self.tc_precision_step = step
+        self._apply_step(self._active_precision_target("tc"), step)
+        self._update_precision_buttons(self.tc_precision_buttons, step)
+
+    def _set_pc_precision(self, step: float) -> None:
+        self.pc_precision_step = step
+        self._apply_step(self._active_precision_target("pc"), step)
+        self._update_precision_buttons(self.pc_precision_buttons, step)
+
+    def _active_precision_target(self, module: str) -> QDoubleSpinBox:
+        return self.module_precision_selected.get(module, self.module_precision_defaults[module])
+
+    def _apply_step(self, spinbox: QDoubleSpinBox, step: float) -> None:
+        spinbox.setSingleStep(step)
+
+    def _apply_module_precisions(self) -> None:
+        self.current_set_spin.setSingleStep(self.cc_precision_step)
+        self.temp_set_spin.setSingleStep(self.tc_precision_step)
+        self.pc_voltage_set_spin.setSingleStep(self.pc_precision_step)
+
+    def _update_precision_buttons(self, buttons: list[QPushButton], current_step: float) -> None:
+        for button in buttons:
+            button.blockSignals(True)
+            button.setChecked(abs(button._precision_step - current_step) < 1e-12)
+            button.blockSignals(False)
+
+    def _update_all_precision_buttons(self) -> None:
+        self._update_precision_buttons(self.precision_buttons, self.cc_precision_step)
+        self._update_precision_buttons(self.tc_precision_buttons, self.tc_precision_step)
+        self._update_precision_buttons(self.pc_precision_buttons, self.pc_precision_step)
+
+    def _format_value_with_unit(self, value: float, decimals: int, unit: str) -> str:
+        return f"{value:.{decimals}f} {unit}"
+
+    def _unit_only_text(self, unit: str) -> str:
+        return unit
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        return super().eventFilter(watched, event)
 
     def _on_current_set_changed(self) -> None:
         if self.current_set_programmatic_update:
@@ -901,6 +1292,75 @@ class MainWindow(QMainWindow):
             return
         self._run_task(lambda: self.service.set_tc_arc_factor(value), self._on_snapshot_updated)
 
+    def _on_pc_enable_toggled(self, checked: bool) -> None:
+        if not self.service.is_connected or self.pc_programmatic_update:
+            return
+        self._run_task(lambda: self.service.set_pc_enabled(checked), self._on_snapshot_updated)
+
+    def _on_pc_voltage_set_finished(self) -> None:
+        if not self.service.is_connected or self.pc_programmatic_update or self.snapshot is None:
+            return
+        value = self.pc_voltage_set_spin.value()
+        current = self.snapshot.pc_voltage_set
+        if abs(value - current) < 1e-9:
+            return
+        self._confirm_and_run(
+            TEXT[self.language]["set_voltage"],
+            f"{current:.6f} {TEXT[self.language]['voltage_unit']}",
+            f"{value:.6f} {TEXT[self.language]['voltage_unit']}",
+            lambda: self.service.set_pc_voltage_set(value),
+        )
+
+    def _on_pc_slew_rate_enable_toggled(self, checked: bool) -> None:
+        if not self.service.is_connected or self.pc_programmatic_update:
+            return
+        self._run_task(lambda: self.service.set_pc_slew_rate_enabled(checked), self._on_snapshot_updated)
+
+    def _on_pc_slew_rate_finished(self) -> None:
+        if not self.service.is_connected or self.pc_programmatic_update or self.snapshot is None:
+            return
+        value = self.pc_slew_rate_spin.value()
+        current = self.snapshot.pc_slew_rate
+        if abs(value - current) < 1e-9:
+            return
+        self._run_task(lambda: self.service.set_pc_slew_rate(value), self._on_snapshot_updated)
+
+    def _on_pc_arc_enable_toggled(self, checked: bool) -> None:
+        if not self.service.is_connected or self.pc_programmatic_update:
+            return
+        self._run_task(lambda: self.service.set_pc_arc_enabled(checked), self._on_snapshot_updated)
+
+    def _on_pc_arc_signal_changed(self) -> None:
+        if not self.service.is_connected or self.pc_programmatic_update or self.snapshot is None:
+            return
+        value = int(self.pc_arc_signal_combo.currentData())
+        if value == self.snapshot.pc_arc_signal:
+            return
+        self._run_task(lambda: self.service.set_pc_arc_signal(value), self._on_snapshot_updated)
+
+    def _on_pc_arc_factor_finished(self) -> None:
+        if not self.service.is_connected or self.pc_programmatic_update or self.snapshot is None:
+            return
+        value = self.pc_arc_factor_spin.value()
+        current = self.snapshot.pc_arc_factor
+        if abs(value - current) < 1e-9:
+            return
+        self._run_task(lambda: self.service.set_pc_arc_factor(value), self._on_snapshot_updated)
+
+    def _on_pressure_comp_enable_toggled(self, checked: bool) -> None:
+        if not self.service.is_connected or self.pc_programmatic_update:
+            return
+        self._run_task(lambda: self.service.set_pressure_comp_enabled(checked), self._on_snapshot_updated)
+
+    def _on_pressure_comp_factor_finished(self) -> None:
+        if not self.service.is_connected or self.pc_programmatic_update or self.snapshot is None:
+            return
+        value = self.pressure_comp_factor_spin.value()
+        current = self.snapshot.pressure_comp_factor
+        if abs(value - current) < 1e-9:
+            return
+        self._run_task(lambda: self.service.set_pressure_comp_factor(value), self._on_snapshot_updated)
+
     def _on_cc_enable_toggled(self, checked: bool) -> None:
         if not self.service.is_connected or self.cc_programmatic_update:
             return
@@ -920,13 +1380,14 @@ class MainWindow(QMainWindow):
         )
         self._run_task(lambda: self.service.connect(settings), self._on_snapshot_updated)
 
-    def disconnect_device(self) -> None:
+    def _reset_after_disconnect(self, silent: bool = False) -> None:
         self.refresh_timer.stop()
         self.current_apply_timer.stop()
         try:
             self.service.disconnect()
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Error", self.service.format_error(exc))
+            if not silent:
+                QMessageBox.critical(self, "Error", self.service.format_error(exc))
             return
         self.snapshot = None
         self.last_device_current_set = None
@@ -934,25 +1395,41 @@ class MainWindow(QMainWindow):
         self.current_set_programmatic_update = True
         self.current_set_spin.setValue(0.0)
         self.current_set_programmatic_update = False
-        self.current_act_value.setText("-")
+        self.current_act_value.setText(self._unit_only_text("mA"))
         self.current_clip_spin.setValue(0.0)
         self.feedforward_factor_spin.setValue(0.0)
         self.arc_factor_spin.setValue(0.0)
         self.temp_set_spin.setValue(0.0)
-        self.temp_act_value.setText("-")
+        self.temp_act_value.setText(self._unit_only_text(TEXT[self.language]["temperature_unit"]))
         self.tc_arc_factor_spin.setValue(0.0)
+        self.pc_voltage_set_spin.setValue(0.0)
+        self.pc_voltage_act_value.setText(self._unit_only_text(TEXT[self.language]["voltage_unit"]))
+        self.pc_slew_rate_spin.setValue(0.0)
+        self.pc_arc_factor_spin.setValue(0.0)
+        self.pressure_comp_air_pressure_value.setText(self._unit_only_text(TEXT[self.language]["air_pressure_unit"]))
+        self.pressure_comp_factor_spin.setValue(0.0)
+        self.pressure_comp_voltage_value.setText(self._unit_only_text(TEXT[self.language]["voltage_unit"]))
         self.current_set_dirty = False
         self._update_toggle_button(self.cc_enable_button, False)
         self._update_toggle_button(self.feedforward_enable_button, False)
         self._update_toggle_button(self.arc_enable_button, False)
         self._update_toggle_button(self.tc_enable_button, False)
         self._update_toggle_button(self.tc_arc_enable_button, False)
+        self._update_toggle_button(self.pc_enable_button, False)
+        self._update_toggle_button(self.pc_slew_rate_enable_button, False)
+        self._update_toggle_button(self.pc_arc_enable_button, False)
+        self._update_toggle_button(self.pressure_comp_enable_button, False)
         self._set_busy(False)
+        if not silent:
+            self.connection_loss_notified = False
+
+    def disconnect_device(self) -> None:
+        self._reset_after_disconnect(silent=False)
 
     def refresh_snapshot(self) -> None:
         if not self.service.is_connected or self.busy:
             return
-        self._run_task(self.service.read_snapshot, self._on_snapshot_updated)
+        self._run_task(self.service.read_snapshot, self._on_snapshot_updated, task_kind="poll")
 
     def _on_snapshot_updated(self, snapshot: DeviceSnapshot) -> None:
         self.snapshot = snapshot
@@ -990,6 +1467,18 @@ class MainWindow(QMainWindow):
             "tc_arc_enabled",
             "tc_arc_signal",
             "tc_arc_factor",
+            "pc_enabled",
+            "pc_voltage_set",
+            "pc_voltage_act",
+            "pc_slew_rate_enabled",
+            "pc_slew_rate",
+            "pc_arc_enabled",
+            "pc_arc_signal",
+            "pc_arc_factor",
+            "pressure_comp_enabled",
+            "pressure_comp_air_pressure",
+            "pressure_comp_factor",
+            "pressure_comp_voltage",
             "use_current_clip_tuning",
             "cc_status_txt",
             "latest_message",
@@ -998,7 +1487,7 @@ class MainWindow(QMainWindow):
         for row, key in enumerate(display_order):
             label = PARAMETER_LABELS.get(key, {"zh": key, "en": key})[self.language]
             value = values[key]
-            if key in {"arc_signal", "tc_arc_signal"}:
+            if key in {"arc_signal", "tc_arc_signal", "pc_arc_signal"}:
                 value = self._arc_signal_name(int(value))
             elif isinstance(value, bool):
                 value = TEXT[self.language]["enabled_state"] if value else TEXT[self.language]["disabled_state"]
@@ -1021,13 +1510,14 @@ class MainWindow(QMainWindow):
         self.feedforward_programmatic_update = True
         self.arc_programmatic_update = True
         self.tc_programmatic_update = True
+        self.pc_programmatic_update = True
 
         self.current_clip_spin.blockSignals(True)
         self.current_clip_spin.setValue(snapshot.current_clip)
         self.current_clip_spin.blockSignals(False)
         self.current_clip_spin.setMaximum(max(snapshot.effective_current_max, self.current_clip_spin.minimum()))
 
-        self.current_act_value.setText(f"{snapshot.current_act:.5f} mA")
+        self.current_act_value.setText(self._format_value_with_unit(snapshot.current_act, 5, "mA"))
         self.feedforward_factor_spin.blockSignals(True)
         self.feedforward_factor_spin.setValue(snapshot.feedforward_factor)
         self.feedforward_factor_spin.blockSignals(False)
@@ -1037,10 +1527,33 @@ class MainWindow(QMainWindow):
         self.temp_set_spin.blockSignals(True)
         self.temp_set_spin.setValue(snapshot.temp_set)
         self.temp_set_spin.blockSignals(False)
-        self.temp_act_value.setText(f"{snapshot.temp_act:.5f} {TEXT[self.language]['temperature_unit']}")
+        self.temp_act_value.setText(
+            self._format_value_with_unit(snapshot.temp_act, 3, TEXT[self.language]["temperature_unit"])
+        )
         self.tc_arc_factor_spin.blockSignals(True)
         self.tc_arc_factor_spin.setValue(snapshot.tc_arc_factor)
         self.tc_arc_factor_spin.blockSignals(False)
+        self.pc_voltage_set_spin.blockSignals(True)
+        self.pc_voltage_set_spin.setValue(snapshot.pc_voltage_set)
+        self.pc_voltage_set_spin.blockSignals(False)
+        self.pc_voltage_act_value.setText(
+            self._format_value_with_unit(snapshot.pc_voltage_act, 6, TEXT[self.language]["voltage_unit"])
+        )
+        self.pc_slew_rate_spin.blockSignals(True)
+        self.pc_slew_rate_spin.setValue(snapshot.pc_slew_rate)
+        self.pc_slew_rate_spin.blockSignals(False)
+        self.pc_arc_factor_spin.blockSignals(True)
+        self.pc_arc_factor_spin.setValue(snapshot.pc_arc_factor)
+        self.pc_arc_factor_spin.blockSignals(False)
+        self.pressure_comp_air_pressure_value.setText(
+            self._format_value_with_unit(snapshot.pressure_comp_air_pressure, 3, TEXT[self.language]["air_pressure_unit"])
+        )
+        self.pressure_comp_factor_spin.blockSignals(True)
+        self.pressure_comp_factor_spin.setValue(snapshot.pressure_comp_factor)
+        self.pressure_comp_factor_spin.blockSignals(False)
+        self.pressure_comp_voltage_value.setText(
+            self._format_value_with_unit(snapshot.pressure_comp_voltage, 3, TEXT[self.language]["voltage_unit"])
+        )
 
         index = self.arc_signal_combo.findData(snapshot.arc_signal)
         if index >= 0:
@@ -1052,12 +1565,21 @@ class MainWindow(QMainWindow):
             self.tc_arc_signal_combo.blockSignals(True)
             self.tc_arc_signal_combo.setCurrentIndex(index)
             self.tc_arc_signal_combo.blockSignals(False)
+        index = self.pc_arc_signal_combo.findData(snapshot.pc_arc_signal)
+        if index >= 0:
+            self.pc_arc_signal_combo.blockSignals(True)
+            self.pc_arc_signal_combo.setCurrentIndex(index)
+            self.pc_arc_signal_combo.blockSignals(False)
 
         self._update_toggle_button(self.cc_enable_button, snapshot.cc_enabled)
         self._update_toggle_button(self.feedforward_enable_button, snapshot.feedforward_enabled)
         self._update_toggle_button(self.arc_enable_button, snapshot.arc_enabled)
         self._update_toggle_button(self.tc_enable_button, snapshot.tc_enabled)
         self._update_toggle_button(self.tc_arc_enable_button, snapshot.tc_arc_enabled)
+        self._update_toggle_button(self.pc_enable_button, snapshot.pc_enabled)
+        self._update_toggle_button(self.pc_slew_rate_enable_button, snapshot.pc_slew_rate_enabled)
+        self._update_toggle_button(self.pc_arc_enable_button, snapshot.pc_arc_enabled)
+        self._update_toggle_button(self.pressure_comp_enable_button, snapshot.pressure_comp_enabled)
 
         self.current_meta_hint.setText(
             f"{TEXT[self.language]['current_clip_tuning']}: {snapshot.current_clip_tuning:.5f} mA   |   "
@@ -1069,6 +1591,7 @@ class MainWindow(QMainWindow):
         self.feedforward_programmatic_update = False
         self.arc_programmatic_update = False
         self.tc_programmatic_update = False
+        self.pc_programmatic_update = False
 
     def _arc_signal_name(self, value: int) -> str:
         for key, signal in ARC_SIGNAL_OPTIONS:
@@ -1077,11 +1600,22 @@ class MainWindow(QMainWindow):
         return str(value)
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        t = TEXT[self.language]
+        confirmed = QMessageBox.question(
+            self,
+            t["exit_confirm_title"],
+            t["exit_confirm_body"],
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirmed != QMessageBox.Yes:
+            event.ignore()
+            return
         self.refresh_timer.stop()
         self.future_poll_timer.stop()
         self.current_apply_timer.stop()
         self.laser_window.close()
-        self.service.disconnect()
+        self._reset_after_disconnect(silent=True)
         self.executor.shutdown(wait=False, cancel_futures=True)
         super().closeEvent(event)
 

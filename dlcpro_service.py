@@ -59,6 +59,18 @@ class DeviceSnapshot:
     tc_arc_enabled: bool
     tc_arc_signal: int
     tc_arc_factor: float
+    pc_enabled: bool
+    pc_voltage_set: float
+    pc_voltage_act: float
+    pc_slew_rate_enabled: bool
+    pc_slew_rate: float
+    pc_arc_enabled: bool
+    pc_arc_signal: int
+    pc_arc_factor: float
+    pressure_comp_enabled: bool
+    pressure_comp_air_pressure: float
+    pressure_comp_factor: float
+    pressure_comp_voltage: float
 
 
 class DlcProService:
@@ -184,6 +196,60 @@ class DlcProService:
             ext.factor.set(float(value))
             return self._read_snapshot_unlocked()
 
+    def set_pc_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            pc = self._pc()
+            pc.enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_pc_voltage_set(self, value_v: float) -> DeviceSnapshot:
+        with self._lock:
+            pc = self._pc()
+            pc.voltage_set.set(float(value_v))
+            return self._read_snapshot_unlocked()
+
+    def set_pc_slew_rate_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            output_filter = self._pc().output_filter
+            output_filter.slew_rate_enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_pc_slew_rate(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            output_filter = self._pc().output_filter
+            output_filter.slew_rate.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_pc_arc_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            ext = self._pc().external_input
+            ext.enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_pc_arc_signal(self, signal: int) -> DeviceSnapshot:
+        with self._lock:
+            ext = self._pc().external_input
+            ext.signal.set(int(signal))
+            return self._read_snapshot_unlocked()
+
+    def set_pc_arc_factor(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            ext = self._pc().external_input
+            ext.factor.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_pressure_comp_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            pressure_comp = self._pressure_comp()
+            pressure_comp.enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_pressure_comp_factor(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            pressure_comp = self._pressure_comp()
+            pressure_comp.factor.set(float(value))
+            return self._read_snapshot_unlocked()
+
     def list_serial_ports(self) -> list[str]:
         if list_ports is None:
             return []
@@ -231,6 +297,12 @@ class DlcProService:
     def _tc(self):
         return self._device_required().laser1.dl.tc
 
+    def _pc(self):
+        return self._device_required().laser1.dl.pc
+
+    def _pressure_comp(self):
+        return self._device_required().laser1.dl.pressure_compensation
+
     def _read_snapshot_unlocked(self) -> DeviceSnapshot:
         device = self._device_required()
         settings = self._settings
@@ -239,6 +311,10 @@ class DlcProService:
         ext = cc.external_input
         tc = device.laser1.dl.tc
         tc_ext = tc.external_input
+        pc = device.laser1.dl.pc
+        pc_ext = pc.external_input
+        pc_filter = pc.output_filter
+        pressure_comp = device.laser1.dl.pressure_compensation
         return DeviceSnapshot(
             connection_mode=settings.mode,
             connection_target=settings.target,
@@ -272,6 +348,18 @@ class DlcProService:
             tc_arc_enabled=bool(tc_ext.enabled.get()),
             tc_arc_signal=int(tc_ext.signal.get()),
             tc_arc_factor=float(tc_ext.factor.get()),
+            pc_enabled=bool(pc.enabled.get()),
+            pc_voltage_set=float(pc.voltage_set.get()),
+            pc_voltage_act=float(pc.voltage_act.get()),
+            pc_slew_rate_enabled=bool(pc_filter.slew_rate_enabled.get()),
+            pc_slew_rate=float(pc_filter.slew_rate.get()),
+            pc_arc_enabled=bool(pc_ext.enabled.get()),
+            pc_arc_signal=int(pc_ext.signal.get()),
+            pc_arc_factor=float(pc_ext.factor.get()),
+            pressure_comp_enabled=bool(pressure_comp.enabled.get()),
+            pressure_comp_air_pressure=float(pressure_comp.air_pressure.get()),
+            pressure_comp_factor=float(pressure_comp.factor.get()),
+            pressure_comp_voltage=float(pressure_comp.compensation_voltage.get()),
         )
 
     @staticmethod
