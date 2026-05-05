@@ -54,14 +54,6 @@ class LaserController:
         owner.pressure_comp_factor_label.setText(t["pressure_comp_factor"])
         owner.pressure_comp_voltage_label.setText(t["compensation_voltage"])
 
-        owner.sc_label.setText(t["scan_control"])
-        owner.sc_precision_label.setText(t["step_precision"])
-        owner.scan_amplitude_label.setText(t["scan_amplitude"])
-        owner.scan_offset_label.setText(t["scan_offset"])
-        owner.scan_output_label.setText(t["scan_output"])
-        owner.scan_frequency_label.setText(t["scan_frequency"])
-        owner.scan_shape_label.setText(t["scan_shape"])
-
         owner.current_meta_hint.setText(
             f"{t['current_clip_tuning']} / {t['current_clip_limit']} / {t['effective_current_max']}"
         )
@@ -77,12 +69,10 @@ class LaserController:
         owner.pc_slew_rate_spin.setSuffix(f" {t['slew_rate_unit']}")
         owner.pc_arc_factor_spin.setSuffix(f" {t['pc_arc_factor_unit']}")
         owner.pressure_comp_factor_spin.setSuffix(f" {t['pressure_comp_factor_unit']}")
-        self._apply_scan_unit_suffixes(t["voltage_unit"])
-
         for module_buttons in owner.module_precision_target_buttons.values():
             for button in module_buttons:
                 button.setText(t["precision_target"])
-        for buttons in (owner.precision_buttons, owner.tc_precision_buttons, owner.pc_precision_buttons, owner.sc_precision_buttons):
+        for buttons in (owner.precision_buttons, owner.tc_precision_buttons, owner.pc_precision_buttons):
             for button in buttons:
                 button.setText(t[button._text_key])
         owner._update_all_precision_buttons()
@@ -99,7 +89,6 @@ class LaserController:
             owner._update_toggle_button(owner.pc_enable_button, False)
             owner._update_toggle_button(owner.pc_slew_rate_enable_button, False)
             owner._update_toggle_button(owner.pc_arc_enable_button, False)
-            owner._update_toggle_button(owner.sc_enable_button, False)
             owner._update_toggle_button(owner.pressure_comp_enable_button, False)
 
     def reset_readbacks(self) -> None:
@@ -157,6 +146,12 @@ class LaserController:
             "sc_frequency",
             "sc_signal_type",
             "sc_unit",
+            "lock_enabled",
+            "lock_hold",
+            "lock_input_channel",
+            "lock_type",
+            "lock_pid_selection",
+            "lock_without_lockpoint",
             "pressure_comp_enabled",
             "pressure_comp_air_pressure",
             "pressure_comp_factor",
@@ -175,6 +170,12 @@ class LaserController:
                 value = self.scan_output_name(int(value))
             elif key == "sc_signal_type":
                 value = self.scan_shape_name(int(value))
+            elif key == "lock_input_channel":
+                value = self.scan_lock_input_name(int(value))
+            elif key == "lock_type":
+                value = self.scan_lock_type_name(int(value))
+            elif key == "lock_pid_selection":
+                value = self.scan_lock_pid_name(int(value))
             elif isinstance(value, bool):
                 value = TEXT[owner.language]["enabled_state"] if value else TEXT[owner.language]["disabled_state"]
             elif isinstance(value, float):
@@ -197,8 +198,6 @@ class LaserController:
         owner.arc_programmatic_update = True
         owner.tc_programmatic_update = True
         owner.pc_programmatic_update = True
-        owner.sc_programmatic_update = True
-
         owner.current_clip_spin.blockSignals(True)
         owner.current_clip_spin.setValue(snapshot.current_clip)
         owner.current_clip_spin.blockSignals(False)
@@ -241,22 +240,9 @@ class LaserController:
         owner.pressure_comp_voltage_value.setText(
             owner._format_value_with_unit(snapshot.pressure_comp_voltage, 3, TEXT[owner.language]["voltage_unit"])
         )
-        self._apply_scan_unit_suffixes(snapshot.sc_unit)
-        owner.scan_amplitude_spin.blockSignals(True)
-        owner.scan_amplitude_spin.setValue(snapshot.sc_amplitude)
-        owner.scan_amplitude_spin.blockSignals(False)
-        owner.scan_offset_spin.blockSignals(True)
-        owner.scan_offset_spin.setValue(snapshot.sc_offset)
-        owner.scan_offset_spin.blockSignals(False)
-        owner.scan_frequency_spin.blockSignals(True)
-        owner.scan_frequency_spin.setValue(snapshot.sc_frequency)
-        owner.scan_frequency_spin.blockSignals(False)
-
         self._sync_combo(owner.arc_signal_combo, snapshot.arc_signal)
         self._sync_combo(owner.tc_arc_signal_combo, snapshot.tc_arc_signal)
         self._sync_combo(owner.pc_arc_signal_combo, snapshot.pc_arc_signal)
-        self._sync_combo(owner.scan_output_combo, snapshot.sc_output_channel)
-        self._sync_combo(owner.scan_shape_combo, snapshot.sc_signal_type)
 
         owner._update_toggle_button(owner.cc_enable_button, snapshot.cc_enabled)
         owner._update_toggle_button(owner.feedforward_enable_button, snapshot.feedforward_enabled)
@@ -266,7 +252,6 @@ class LaserController:
         owner._update_toggle_button(owner.pc_enable_button, snapshot.pc_enabled)
         owner._update_toggle_button(owner.pc_slew_rate_enable_button, snapshot.pc_slew_rate_enabled)
         owner._update_toggle_button(owner.pc_arc_enable_button, snapshot.pc_arc_enabled)
-        owner._update_toggle_button(owner.sc_enable_button, snapshot.sc_enabled)
         owner._update_toggle_button(owner.pressure_comp_enable_button, snapshot.pressure_comp_enabled)
 
         owner.current_meta_hint.setText(
@@ -280,8 +265,6 @@ class LaserController:
         owner.arc_programmatic_update = False
         owner.tc_programmatic_update = False
         owner.pc_programmatic_update = False
-        owner.sc_programmatic_update = False
-
     def _sync_combo(self, combo, value: int) -> None:
         index = combo.findData(value)
         if index >= 0:
@@ -307,14 +290,26 @@ class LaserController:
                 return TEXT[self.owner.language][key]
         return str(value)
 
-    def _apply_scan_unit_suffixes(self, unit: str) -> None:
-        owner = self.owner
-        amplitude_unit = TEXT[owner.language]["scan_amplitude_unit"]
-        base_unit = unit or TEXT[owner.language]["voltage_unit"]
-        if base_unit == TEXT[owner.language]["voltage_unit"]:
-            amplitude_unit = TEXT[owner.language]["scan_amplitude_unit"]
-        else:
-            amplitude_unit = f"{base_unit} pp"
-        owner.scan_amplitude_spin.setSuffix(f" {amplitude_unit}")
-        owner.scan_offset_spin.setSuffix(f" {base_unit}")
-        owner.scan_frequency_spin.setSuffix(" Hz")
+    def scan_lock_input_name(self, value: int) -> str:
+        from ui_text import LOCK_INPUT_SIGNAL_OPTIONS
+
+        for key, option in LOCK_INPUT_SIGNAL_OPTIONS:
+            if option == value:
+                return TEXT[self.owner.language][key]
+        return str(value)
+
+    def scan_lock_type_name(self, value: int) -> str:
+        from ui_text import LOCK_TYPE_OPTIONS
+
+        for key, option in LOCK_TYPE_OPTIONS:
+            if option == value:
+                return TEXT[self.owner.language][key]
+        return str(value)
+
+    def scan_lock_pid_name(self, value: int) -> str:
+        from ui_text import LOCK_PID_SELECTION_OPTIONS
+
+        for key, option in LOCK_PID_SELECTION_OPTIONS:
+            if option == value:
+                return TEXT[self.owner.language][key]
+        return str(value)

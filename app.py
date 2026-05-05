@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractScrollArea,
     QApplication,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -28,9 +29,24 @@ from PySide6.QtWidgets import (
 )
 
 from dlcpro_service import ConnectionSettings, DeviceSnapshot, DlcProService
-from ui_text import ARC_SIGNAL_OPTIONS, SCAN_OUTPUT_OPTIONS, SCAN_SHAPE_OPTIONS, TEXT
-from controllers import LaserController
-from windows.laser_window import LaserWindow, build_laser_page
+from ui_text import (
+    ARC_SIGNAL_OPTIONS,
+    LOCK_INPUT_SIGNAL_OPTIONS,
+    LOCK_PID_SELECTION_OPTIONS,
+    LOCK_TYPE_OPTIONS,
+    SCAN_OUTPUT_OPTIONS,
+    SCAN_SHAPE_OPTIONS,
+    TEXT,
+)
+from controllers import LaserController, ScanLockController
+from windows import (
+    LaserWindow,
+    RelockWindow,
+    ScanLockWindow,
+    StabilizationWindow,
+    build_laser_page,
+    build_scan_lock_page,
+)
 
 FAST_CURRENT_ADJUST_CONFIRM_THRESHOLD_MA = 10.0
 AUTO_APPLY_DEBOUNCE_MS = 150
@@ -67,6 +83,7 @@ class MainWindow(QMainWindow):
         self.tc_programmatic_update = False
         self.pc_programmatic_update = False
         self.sc_programmatic_update = False
+        self.lock_programmatic_update = False
         self.last_device_current_set: float | None = None
         self.cc_precision_step = 0.1
         self.tc_precision_step = 0.001
@@ -82,6 +99,7 @@ class MainWindow(QMainWindow):
         }
         self.connection_loss_notified = False
         self.laser_controller = LaserController(self)
+        self.scan_lock_controller = ScanLockController(self)
 
         self.refresh_timer = QTimer(self)
         self.refresh_timer.setInterval(2000)
@@ -139,9 +157,9 @@ class MainWindow(QMainWindow):
         self.nav_layout.setSpacing(10)
         self.overview_button = self._create_nav_button(lambda: self.page_stack.setCurrentIndex(0))
         self.laser_button = self._create_nav_button(self._open_laser_window)
-        self.scan_lock_button = self._create_nav_button(lambda: self.page_stack.setCurrentIndex(1))
-        self.relock_button = self._create_nav_button(lambda: self.page_stack.setCurrentIndex(2))
-        self.stabilization_button = self._create_nav_button(lambda: self.page_stack.setCurrentIndex(3))
+        self.scan_lock_button = self._create_nav_button(self._open_scan_lock_window)
+        self.relock_button = self._create_nav_button(self._open_relock_window)
+        self.stabilization_button = self._create_nav_button(self._open_stabilization_window)
         for button in (
             self.overview_button,
             self.laser_button,
@@ -156,14 +174,8 @@ class MainWindow(QMainWindow):
         self.page_stack.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         self.overview_page = self._build_overview_page()
         self.laser_page = self._build_laser_page()
-        self.scan_lock_page = self._build_placeholder_page()
-        self.relock_page = self._build_placeholder_page()
-        self.stabilization_page = self._build_placeholder_page()
 
         self.page_stack.addWidget(self.overview_page)
-        self.page_stack.addWidget(self.scan_lock_page)
-        self.page_stack.addWidget(self.relock_page)
-        self.page_stack.addWidget(self.stabilization_page)
         workspace_layout.addWidget(self.page_stack, 1)
         root.addWidget(self.workspace_group, 1)
         root.setStretch(0, 0)
@@ -171,6 +183,10 @@ class MainWindow(QMainWindow):
         root.setStretch(2, 1)
 
         self.laser_window = LaserWindow(self.laser_page)
+        self.scan_lock_page = self._build_scan_lock_page()
+        self.scan_lock_window = ScanLockWindow(self.scan_lock_page)
+        self.relock_window = RelockWindow()
+        self.stabilization_window = StabilizationWindow()
 
     def _build_connection_group(self) -> QGroupBox:
         box = QGroupBox()
@@ -253,29 +269,14 @@ class MainWindow(QMainWindow):
     def _build_laser_page(self) -> QWidget:
         return build_laser_page(self)
 
+    def _build_scan_lock_page(self) -> QWidget:
+        return build_scan_lock_page(self)
+
     def _create_target_row(self, module: str, spinbox: QDoubleSpinBox) -> QWidget:
         # 面板层只负责创建控件，目标绑定规则仍由主窗口统一管理。
         from windows.laser_window import _create_target_row
 
         return _create_target_row(self, module, spinbox)
-
-    def _build_placeholder_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addStretch(1)
-        title = QLabel()
-        title.setObjectName("PageTitle")
-        body = QLabel()
-        body.setWordWrap(True)
-        body.setAlignment(Qt.AlignCenter)
-        body.setObjectName("PlaceholderBody")
-        layout.addWidget(title, alignment=Qt.AlignCenter)
-        layout.addWidget(body, alignment=Qt.AlignCenter)
-        layout.addStretch(1)
-        page._title_label = title
-        page._body_label = body
-        return page
 
     def _create_nav_button(self, slot) -> QPushButton:
         button = QPushButton()
@@ -309,6 +310,30 @@ class MainWindow(QMainWindow):
         self.laser_window.show()
         self.laser_window.raise_()
         self.laser_window.activateWindow()
+
+    def _open_scan_lock_window(self) -> None:
+        if self.scan_lock_window.isHidden():
+            self.scan_lock_window.move(self.x() + 60, self.y() + 60)
+        self.scan_lock_window.showNormal()
+        self.scan_lock_window.show()
+        self.scan_lock_window.raise_()
+        self.scan_lock_window.activateWindow()
+
+    def _open_relock_window(self) -> None:
+        if self.relock_window.isHidden():
+            self.relock_window.move(self.x() + 80, self.y() + 80)
+        self.relock_window.showNormal()
+        self.relock_window.show()
+        self.relock_window.raise_()
+        self.relock_window.activateWindow()
+
+    def _open_stabilization_window(self) -> None:
+        if self.stabilization_window.isHidden():
+            self.stabilization_window.move(self.x() + 100, self.y() + 100)
+        self.stabilization_window.showNormal()
+        self.stabilization_window.show()
+        self.stabilization_window.raise_()
+        self.stabilization_window.activateWindow()
 
     def _apply_base_style(self) -> None:
         stylesheet = """
@@ -452,21 +477,25 @@ class MainWindow(QMainWindow):
         self.scan_lock_button.setText(t["scan_lock"])
         self.relock_button.setText(t["relock"])
         self.stabilization_button.setText(t["stabilization"])
-        self.scan_lock_page._title_label.setText(t["scan_lock"])
-        self.relock_page._title_label.setText(t["relock"])
-        self.stabilization_page._title_label.setText(t["stabilization"])
-        self.scan_lock_page._body_label.setText(t["placeholder_body"])
-        self.relock_page._body_label.setText(t["placeholder_body"])
-        self.stabilization_page._body_label.setText(t["placeholder_body"])
+        self.relock_window.setWindowTitle(f"{t['window_title']} - {t['relock']}")
+        self.stabilization_window.setWindowTitle(f"{t['window_title']} - {t['stabilization']}")
+        self.relock_window.title_label.setText(t["relock"])
+        self.stabilization_window.title_label.setText(t["stabilization"])
+        self.relock_window.body_label.setText(t["placeholder_body"])
+        self.stabilization_window.body_label.setText(t["placeholder_body"])
 
         self.cc_status_label = t["cc_status"]
         self.laser_controller.apply_texts()
+        self.scan_lock_controller.apply_texts()
 
         self._populate_arc_signal_options()
         self._populate_tc_arc_signal_options()
         self._populate_pc_arc_signal_options()
         self._populate_sc_output_options()
         self._populate_sc_shape_options()
+        self._populate_lock_input_signal_options()
+        self._populate_lock_type_options()
+        self._populate_lock_pid_selection_options()
         if self.snapshot is not None:
             self._render_snapshot(self.snapshot)
 
@@ -515,6 +544,42 @@ class MainWindow(QMainWindow):
             if index >= 0:
                 self.scan_shape_combo.setCurrentIndex(index)
         self.scan_shape_combo.blockSignals(False)
+
+    def _populate_lock_input_signal_options(self) -> None:
+        current = self.lock_input_signal_combo.currentData()
+        self.lock_input_signal_combo.blockSignals(True)
+        self.lock_input_signal_combo.clear()
+        for text_key, value in LOCK_INPUT_SIGNAL_OPTIONS:
+            self.lock_input_signal_combo.addItem(TEXT[self.language][text_key], value)
+        if current is not None:
+            index = self.lock_input_signal_combo.findData(current)
+            if index >= 0:
+                self.lock_input_signal_combo.setCurrentIndex(index)
+        self.lock_input_signal_combo.blockSignals(False)
+
+    def _populate_lock_type_options(self) -> None:
+        current = self.lock_type_combo.currentData()
+        self.lock_type_combo.blockSignals(True)
+        self.lock_type_combo.clear()
+        for text_key, value in LOCK_TYPE_OPTIONS:
+            self.lock_type_combo.addItem(TEXT[self.language][text_key], value)
+        if current is not None:
+            index = self.lock_type_combo.findData(current)
+            if index >= 0:
+                self.lock_type_combo.setCurrentIndex(index)
+        self.lock_type_combo.blockSignals(False)
+
+    def _populate_lock_pid_selection_options(self) -> None:
+        current = self.lock_pid_selection_combo.currentData()
+        self.lock_pid_selection_combo.blockSignals(True)
+        self.lock_pid_selection_combo.clear()
+        for text_key, value in LOCK_PID_SELECTION_OPTIONS:
+            self.lock_pid_selection_combo.addItem(TEXT[self.language][text_key], value)
+        if current is not None:
+            index = self.lock_pid_selection_combo.findData(current)
+            if index >= 0:
+                self.lock_pid_selection_combo.setCurrentIndex(index)
+        self.lock_pid_selection_combo.blockSignals(False)
 
     def _populate_signal_combo(self, combo: QComboBox) -> None:
         current = combo.currentData()
@@ -569,6 +634,10 @@ class MainWindow(QMainWindow):
             self.scan_output_combo,
             self.scan_frequency_spin,
             self.scan_shape_combo,
+            self.lock_input_signal_combo,
+            self.lock_type_combo,
+            self.lock_pid_selection_combo,
+            self.lock_without_lockpoint_check,
             self.pressure_comp_factor_spin,
             self.cc_enable_button,
             self.feedforward_enable_button,
@@ -579,6 +648,8 @@ class MainWindow(QMainWindow):
             self.pc_slew_rate_enable_button,
             self.pc_arc_enable_button,
             self.sc_enable_button,
+            self.lock_enable_button,
+            self.lock_hold_button,
             self.pressure_comp_enable_button,
         ):
             widget.setEnabled(writable)
@@ -674,7 +745,6 @@ class MainWindow(QMainWindow):
         self.current_set_spin.setSingleStep(self.cc_precision_step)
         self.temp_set_spin.setSingleStep(self.tc_precision_step)
         self.pc_voltage_set_spin.setSingleStep(self.pc_precision_step)
-        self.scan_amplitude_spin.setSingleStep(self.sc_precision_step)
 
     def _update_precision_buttons(self, buttons: list[QPushButton], current_step: float) -> None:
         for button in buttons:
@@ -686,7 +756,6 @@ class MainWindow(QMainWindow):
         self._update_precision_buttons(self.precision_buttons, self.cc_precision_step)
         self._update_precision_buttons(self.tc_precision_buttons, self.tc_precision_step)
         self._update_precision_buttons(self.pc_precision_buttons, self.pc_precision_step)
-        self._update_precision_buttons(self.sc_precision_buttons, self.sc_precision_step)
 
     def _format_value_with_unit(self, value: float, decimals: int, unit: str) -> str:
         return f"{value:.{decimals}f} {unit}"
@@ -954,6 +1023,48 @@ class MainWindow(QMainWindow):
             return
         self._run_task(lambda: self.service.set_sc_signal_type(value), self._on_snapshot_updated)
 
+    def _on_lock_enabled_toggled(self, checked: bool) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update:
+            return
+        self._run_task(lambda: self.service.set_lock_enabled(checked), self._on_snapshot_updated)
+
+    def _on_lock_hold_toggled(self, checked: bool) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update:
+            return
+        self._run_task(lambda: self.service.set_lock_hold(checked), self._on_snapshot_updated)
+
+    def _on_lock_input_signal_changed(self) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
+            return
+        value = int(self.lock_input_signal_combo.currentData())
+        if value == self.snapshot.lock_input_channel:
+            return
+        self._run_task(lambda: self.service.set_lock_input_channel(value), self._on_snapshot_updated)
+
+    def _on_lock_type_changed(self) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
+            return
+        value = int(self.lock_type_combo.currentData())
+        if value == self.snapshot.lock_type:
+            return
+        self._run_task(lambda: self.service.set_lock_type(value), self._on_snapshot_updated)
+
+    def _on_lock_pid_selection_changed(self) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
+            return
+        value = int(self.lock_pid_selection_combo.currentData())
+        if value == self.snapshot.lock_pid_selection:
+            return
+        self._run_task(lambda: self.service.set_lock_pid_selection(value), self._on_snapshot_updated)
+
+    def _on_lock_without_lockpoint_changed(self) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
+            return
+        checked = self.lock_without_lockpoint_check.isChecked()
+        if checked == self.snapshot.lock_without_lockpoint:
+            return
+        self._run_task(lambda: self.service.set_lock_without_lockpoint(checked), self._on_snapshot_updated)
+
     def _on_cc_enable_toggled(self, checked: bool) -> None:
         if not self.service.is_connected or self.cc_programmatic_update:
             return
@@ -999,8 +1110,12 @@ class MainWindow(QMainWindow):
         self.scan_amplitude_spin.setValue(0.0)
         self.scan_offset_spin.setValue(0.0)
         self.scan_frequency_spin.setValue(0.0)
+        self.lock_without_lockpoint_check.blockSignals(True)
+        self.lock_without_lockpoint_check.setChecked(False)
+        self.lock_without_lockpoint_check.blockSignals(False)
         self.pressure_comp_factor_spin.setValue(0.0)
         self.laser_controller.reset_readbacks()
+        self.scan_lock_controller.render_snapshot(self._empty_scan_snapshot())
         self.current_set_dirty = False
         self._update_toggle_button(self.cc_enable_button, False)
         self._update_toggle_button(self.feedforward_enable_button, False)
@@ -1011,6 +1126,8 @@ class MainWindow(QMainWindow):
         self._update_toggle_button(self.pc_slew_rate_enable_button, False)
         self._update_toggle_button(self.pc_arc_enable_button, False)
         self._update_toggle_button(self.sc_enable_button, False)
+        self._update_toggle_button(self.lock_enable_button, False)
+        self._update_toggle_button(self.lock_hold_button, False)
         self._update_toggle_button(self.pressure_comp_enable_button, False)
         self._set_busy(False)
         if not silent:
@@ -1032,6 +1149,28 @@ class MainWindow(QMainWindow):
 
     def _render_snapshot(self, snapshot: DeviceSnapshot) -> None:
         self.laser_controller.render_snapshot(snapshot)
+        self.scan_lock_controller.render_snapshot(snapshot)
+
+    def _empty_scan_snapshot(self):
+        return type(
+            "ScanResetSnapshot",
+            (),
+            {
+                "sc_amplitude": 0.0,
+                "sc_offset": 0.0,
+                "sc_frequency": 0.0,
+                "sc_output_channel": SCAN_OUTPUT_OPTIONS[0][1],
+                "sc_signal_type": SCAN_SHAPE_OPTIONS[0][1],
+                "sc_enabled": False,
+                "sc_unit": TEXT[self.language]["voltage_unit"],
+                "lock_enabled": False,
+                "lock_hold": False,
+                "lock_input_channel": LOCK_INPUT_SIGNAL_OPTIONS[0][1],
+                "lock_type": LOCK_TYPE_OPTIONS[0][1],
+                "lock_pid_selection": LOCK_PID_SELECTION_OPTIONS[0][1],
+                "lock_without_lockpoint": False,
+            },
+        )()
 
     def closeEvent(self, event) -> None:  # noqa: N802
         t = TEXT[self.language]

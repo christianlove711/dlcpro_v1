@@ -3,10 +3,9 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDoubleSpinBox, QFrame, QGroupBox, QLabel, QScrollArea, QVBoxLayout, QWidget
 
-from widgets.cc_panel import CcPanel
-from widgets.pc_panel import PcPanel
-from widgets.sc_panel import ScPanel
-from widgets.tc_panel import TcPanel
+from widgets.laser.cc_panel import CcPanel
+from widgets.laser.pc_panel import PcPanel
+from widgets.laser.tc_panel import TcPanel
 from widgets.common_controls import StepTargetSpinBoxRow
 from windows.base_window import AuxiliaryWindow
 
@@ -56,9 +55,6 @@ def build_laser_page(owner) -> QWidget:
     owner.tc_panel.bind_to(owner)
     owner.pc_panel = PcPanel(owner)
     owner.pc_panel.bind_to(owner)
-    owner.sc_panel = ScPanel(owner)
-    owner.sc_panel.bind_to(owner)
-
     owner._register_module_precision_targets(
         "cc",
         owner.current_set_spin,
@@ -81,18 +77,9 @@ def build_laser_page(owner) -> QWidget:
         owner.pc_arc_factor_spin,
         owner.pressure_comp_factor_spin,
     )
-    owner._register_module_precision_targets(
-        "sc",
-        owner.scan_amplitude_spin,
-        owner.scan_amplitude_spin,
-        owner.scan_offset_spin,
-        owner.scan_frequency_spin,
-    )
-
     group_layout.addWidget(owner.cc_panel)
     group_layout.addWidget(owner.tc_panel)
     group_layout.addWidget(owner.pc_panel)
-    group_layout.addWidget(owner.sc_panel)
     group_layout.addStretch(1)
     content_layout.addWidget(owner.laser_group)
     scroll_area.setWidget(content)

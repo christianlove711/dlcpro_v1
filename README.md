@@ -1,6 +1,6 @@
 # DLC pro 3.3.3 PySide6 Control App
 
-这是一个基于 TOPTICA 官方 Python SDK 与 `PySide6` 的自定义 DLC pro 控制界面项目，当前重点围绕 `laser` 独立弹窗进行开发。
+这是一个基于 TOPTICA 官方 Python SDK 与 `PySide6` 的自定义 DLC pro 控制界面项目，当前重点围绕 `Laser`、`Scan&Lock` 等独立弹窗逐步开发。
 
 本项目实现时遵循两条原则：
 
@@ -14,9 +14,12 @@
 - 网络连接和串口连接
 - 基础设备参数读取与展示
 - `Laser` 按钮弹出独立 `QMainWindow`
+- `Scan&Lock / Relock / Stabilization` 按钮弹出独立 `QMainWindow`
 - `CC - 电流控制` 模块
 - `TC - 温度控制` 模块
 - `PC - 压电控制` 模块
+- `Scan&Lock` 弹窗中的 `SC - Scan Control`
+- `Scan&Lock` 弹窗中的 `Lock Settings` 基础项
 - 中英文界面文本切换
 - 主界面与 `Laser` 弹窗一致的深灰主题样式
 - 后台线程 + 定时轮询的设备刷新机制
@@ -25,7 +28,16 @@
 - 程序关闭确认框
 - `windows / widgets / controllers` 初步分层
 
-## Laser 弹窗已实现内容
+当前 `Lock Settings` 已接入的 SDK 字段为：
+
+- `laser1.dl.lock.lock_enabled`
+- `laser1.dl.lock.hold`
+- `laser1.dl.lock.spectrum_input_channel`
+- `laser1.dl.lock.type`
+- `laser1.dl.lock.pid_selection`
+- `laser1.dl.lock.lock_without_lockpoint`
+
+## 已实现弹窗内容
 
 `Laser` 独立窗口当前包含以下模块：
 
@@ -36,11 +48,24 @@
 - `PC - Piezo Control`
   支持启用、设定电压、实际电压、Slew Rate、ARC、Pressure Compensation
 
+`Scan&Lock` 独立窗口当前包含以下模块：
+
+- `SC - Scan Control`
+  支持 `Enable / Scan Amplitude / Scan Offset / Scan Output / Scan Frequency / Scan Shape`
+- `Lock Settings`
+  支持 `Enable / Hold / Lock Input Signal / Lock Type / PID Selection / Lock Without Lockpoint`
+
 说明：
 
-- `Laser` 不是主界面中的切页，而是独立顶层窗口
+- `Laser / Scan&Lock / Relock / Stabilization` 都不是主界面中的切页，而是独立顶层窗口
 - 弹窗样式与主界面使用同一套应用级样式表
 - 普通文字标签已避免出现不必要的深色背景块
+
+关于 `Scan&Lock` 的结构说明：
+
+- `Scan&Lock` 使用独立的 `widgets/scan_lock/` 与 `controllers/scan_lock_controller.py`
+- 虽然 `SC` 和 `Lock Settings` 底层仍然复用同一个 DLC pro service / SDK 接口层，但页面 widget 和页面 controller 不再挂在 `Laser` 页面名下
+- 这样后续继续开发 `Lockpoint`、`ReLock`、`PDH`、`FALC` 相关功能时，不会再被 `Laser` 页面的控件命名和布局耦合住
 
 ## 数值步进交互
 
@@ -67,15 +92,15 @@
 - [app.py](/Users/YieFanMeng/Documents/DlcPro_v1/app.py)
   当前主窗口、连接区、全局导航、后台任务调度、错误提示都在这里
 - [dlcpro_service.py](/Users/YieFanMeng/Documents/DlcPro_v1/dlcpro_service.py)
-  DLC pro 通信层，负责连接、读快照、写 CC/TC/PC 参数
+  DLC pro 通信层，负责连接、读快照、写 `CC / TC / PC / SC / Lock Settings` 参数
 - [ui_text.py](/Users/YieFanMeng/Documents/DlcPro_v1/ui_text.py)
   中英文文案、参数显示名称、单位文本
 - [windows/](/Users/YieFanMeng/Documents/DlcPro_v1/windows)
-  独立窗口外壳与页面装配，当前已包含 `laser_window.py` 及其他预留窗口文件
+  独立窗口外壳与页面装配，当前已包含 `laser_window.py`、`scan_lock_window.py` 及其他窗口文件
 - [widgets/](/Users/YieFanMeng/Documents/DlcPro_v1/widgets)
-  复用控件与功能面板，当前已包含 `CcPanel`、`TcPanel`、`PcPanel` 和通用控件
+  复用控件与功能面板，当前已按页面拆分为 `widgets/laser/`、`widgets/scan_lock/` 与通用控件
 - [controllers/](/Users/YieFanMeng/Documents/DlcPro_v1/controllers)
-  页面级流程与渲染协调，当前已包含 `LaserController`
+  页面级流程与渲染协调，当前已包含 `LaserController`、`ScanLockController`
 - [PROJECT_OVERVIEW.md](/Users/YieFanMeng/Documents/DlcPro_v1/PROJECT_OVERVIEW.md)
   当前实现细节与项目总览
 - [Manual.md](/Users/YieFanMeng/Documents/DlcPro_v1/Manual.md)
@@ -92,7 +117,7 @@
 - `widgets/`：模块面板与通用控件
 - `controllers/`：页面级业务流程和渲染协调
 
-这套结构比之前更适合继续加 `FALC`、扫频、`Scan&Lock`、`Relock`、`Stabilization`。
+这套结构比之前更适合继续加 `Lockpoint`、`ReLock`、`PDH`、`FALC`、`Stabilization` 等后续页面能力。
 
 ## 推荐的下一步重构方向
 
@@ -100,15 +125,18 @@
 
 1. 保留 `MainWindow` 和 `DlcProService`
 2. 把 `Laser` 独立窗口拆到 `windows/laser_window.py`
-3. 把 `CC / TC / PC` 三个面板拆到独立 widget 文件
+3. 把 `CC / TC / PC` 三个面板拆到 `widgets/laser/`
 4. 把通用控件抽到 `widgets/common_controls.py`
 5. 增加 `controllers/laser_controller.py` 承接激光页文本刷新和快照渲染
+6. 把 `Scan&Lock` 独立窗口拆到 `windows/scan_lock_window.py`
+7. 为 `Scan&Lock` 建立 `widgets/scan_lock/` 和 `controllers/scan_lock_controller.py`
 
 下一步比较合适的是：
 
-1. 让 `Scan&Lock / Relock / Stabilization / FALC pro` 逐步接入各自窗口类
-2. 继续把主窗口中的业务事件按功能迁移到更明确的 controller 中
-3. 让更多模块直接复用 `widgets/common_controls.py` 里的通用控件
+1. 继续补完 `Scan&Lock` 下的 `Lockpoint / ReLock / PDH / Window/Detection` 相关区域
+2. 让 `Relock / Stabilization / FALC pro` 逐步接入各自页面结构和 controller
+3. 继续把主窗口中的业务事件按功能迁移到更明确的 controller 中
+4. 让更多模块直接复用 `widgets/common_controls.py` 里的通用控件
 
 一个比较合适的目标结构可以是：
 
@@ -124,12 +152,17 @@ DlcPro_v1/
     stabilization_window.py
     falcpro_window.py
   widgets/
+    laser/
+      cc_panel.py
+      tc_panel.py
+      pc_panel.py
+    scan_lock/
+      sc_panel.py
+      lock_panel.py
     common_controls.py
-    cc_panel.py
-    tc_panel.py
-    pc_panel.py
   controllers/
     laser_controller.py
+    scan_lock_controller.py
 ```
 
 ## 依赖说明
@@ -207,12 +240,24 @@ python -m py_compile /Users/YieFanMeng/Documents/DlcPro_v1/app.py /Users/YieFanM
 ### 2026-05-05
 
 - 将 `Laser` 独立窗口正式拆到 [windows/laser_window.py](/Users/YieFanMeng/Documents/DlcPro_v1/windows/laser_window.py)
-- 新建 `Scan&Lock / Relock / Stabilization / FALC pro` 的独立窗口文件占位
-- 将 `CC / TC / PC` 分别拆成独立 widget：
-  [widgets/cc_panel.py](/Users/YieFanMeng/Documents/DlcPro_v1/widgets/cc_panel.py)
-  [widgets/tc_panel.py](/Users/YieFanMeng/Documents/DlcPro_v1/widgets/tc_panel.py)
-  [widgets/pc_panel.py](/Users/YieFanMeng/Documents/DlcPro_v1/widgets/pc_panel.py)
+- 将主窗口中的 `Scan&Lock / Relock / Stabilization` 从页签入口改为和 `Laser` 一样的独立弹窗入口
+- 将 `CC / TC / PC` 分别拆到 `Laser` 专属目录：
+  [widgets/laser/cc_panel.py](/Users/YieFanMeng/Documents/DlcPro_v1/widgets/laser/cc_panel.py)
+  [widgets/laser/tc_panel.py](/Users/YieFanMeng/Documents/DlcPro_v1/widgets/laser/tc_panel.py)
+  [widgets/laser/pc_panel.py](/Users/YieFanMeng/Documents/DlcPro_v1/widgets/laser/pc_panel.py)
 - 抽出复用控件到 [widgets/common_controls.py](/Users/YieFanMeng/Documents/DlcPro_v1/widgets/common_controls.py)，统一管理开关按钮、步进按钮行和带“当前调节”按钮的输入行
 - 引入 [controllers/laser_controller.py](/Users/YieFanMeng/Documents/DlcPro_v1/controllers/laser_controller.py)，把激光页文本刷新、读回渲染和页面级协调逻辑从主窗口中拆出
+- 建立 [windows/scan_lock_window.py](/Users/YieFanMeng/Documents/DlcPro_v1/windows/scan_lock_window.py)、[widgets/scan_lock/](/Users/YieFanMeng/Documents/DlcPro_v1/widgets/scan_lock)、[controllers/scan_lock_controller.py](/Users/YieFanMeng/Documents/DlcPro_v1/controllers/scan_lock_controller.py)，让 `Scan&Lock` 开始独立演进
+- 将 `Laser` 页面里的旧 `SC` 面板移除，避免 `Laser` 与 `Scan&Lock` 共用同一套页面 widget / 页面 controller
+- 在 `Scan&Lock` 弹窗中实现 `SC - Scan Control`
+- 在 `Scan&Lock` 弹窗中实现 `Lock Settings` 基础项，并接入以下 SDK 字段：
+  `laser1.dl.lock.lock_enabled`、
+  `laser1.dl.lock.hold`、
+  `laser1.dl.lock.spectrum_input_channel`、
+  `laser1.dl.lock.type`、
+  `laser1.dl.lock.pid_selection`、
+  `laser1.dl.lock.lock_without_lockpoint`
+- 按 Manual 中确认的枚举补上 `Lock Input Signal / Lock Type / PID Selection` 选项文本
 - 补充了简短中文注释，说明结构拆分目的和关键协调规则
-- 更新中英文 skill，把窗口拆分、widget 复用、controller 引入时机、中文注释要求写成后续开发标准
+- 更新中英文 skill，把“同一 SDK 参数组可被多个页面复用，但页面 widget/controller 不应混挂”的经验写成后续开发标准
+- 更新 README，使其反映当前真实窗口结构、目录结构和 `Scan&Lock` 进展

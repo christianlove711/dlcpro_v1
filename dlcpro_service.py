@@ -74,6 +74,12 @@ class DeviceSnapshot:
     sc_frequency: float
     sc_signal_type: int
     sc_unit: str
+    lock_enabled: bool
+    lock_hold: bool
+    lock_input_channel: int
+    lock_type: int
+    lock_pid_selection: int
+    lock_without_lockpoint: bool
     pressure_comp_enabled: bool
     pressure_comp_air_pressure: float
     pressure_comp_factor: float
@@ -293,6 +299,42 @@ class DlcProService:
             scan.signal_type.set(int(value))
             return self._read_snapshot_unlocked()
 
+    def set_lock_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            lock = self._lock_control()
+            lock.lock_enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_lock_hold(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            lock = self._lock_control()
+            lock.hold.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_lock_input_channel(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            lock = self._lock_control()
+            lock.spectrum_input_channel.set(int(value))
+            return self._read_snapshot_unlocked()
+
+    def set_lock_type(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            lock = self._lock_control()
+            lock.type.set(int(value))
+            return self._read_snapshot_unlocked()
+
+    def set_lock_pid_selection(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            lock = self._lock_control()
+            lock.pid_selection.set(int(value))
+            return self._read_snapshot_unlocked()
+
+    def set_lock_without_lockpoint(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            lock = self._lock_control()
+            lock.lock_without_lockpoint.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
     def list_serial_ports(self) -> list[str]:
         if list_ports is None:
             return []
@@ -349,6 +391,9 @@ class DlcProService:
     def _scan(self):
         return self._device_required().laser1.scan
 
+    def _lock_control(self):
+        return self._device_required().laser1.dl.lock
+
     def _read_snapshot_unlocked(self) -> DeviceSnapshot:
         device = self._device_required()
         settings = self._settings
@@ -362,6 +407,7 @@ class DlcProService:
         pc_filter = pc.output_filter
         pressure_comp = device.laser1.dl.pressure_compensation
         scan = device.laser1.scan
+        lock = device.laser1.dl.lock
         return DeviceSnapshot(
             connection_mode=settings.mode,
             connection_target=settings.target,
@@ -410,6 +456,12 @@ class DlcProService:
             sc_frequency=float(scan.frequency.get()),
             sc_signal_type=int(scan.signal_type.get()),
             sc_unit=scan.unit.get(),
+            lock_enabled=bool(lock.lock_enabled.get()),
+            lock_hold=bool(lock.hold.get()),
+            lock_input_channel=int(lock.spectrum_input_channel.get()),
+            lock_type=int(lock.type.get()),
+            lock_pid_selection=int(lock.pid_selection.get()),
+            lock_without_lockpoint=bool(lock.lock_without_lockpoint.get()),
             pressure_comp_enabled=bool(pressure_comp.enabled.get()),
             pressure_comp_air_pressure=float(pressure_comp.air_pressure.get()),
             pressure_comp_factor=float(pressure_comp.factor.get()),
