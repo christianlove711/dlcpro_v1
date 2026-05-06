@@ -5,9 +5,19 @@ from PySide6.QtWidgets import QLabel, QMainWindow, QVBoxLayout, QWidget
 
 
 class AuxiliaryWindow(QMainWindow):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._shutdown_requested = False
+
     def closeEvent(self, event) -> None:  # noqa: N802
+        if self._shutdown_requested:
+            event.accept()
+            return
         self.hide()
         event.ignore()
+
+    def request_shutdown(self) -> None:
+        self._shutdown_requested = True
 
 
 class PlaceholderWindow(AuxiliaryWindow):

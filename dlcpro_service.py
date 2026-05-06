@@ -26,6 +26,45 @@ class ConnectionSettings:
 
 
 @dataclass(slots=True)
+class FalcMainSnapshot:
+    enabled: bool
+    gain_all: float
+    i1_enabled: bool
+    i1: int
+    i2_enabled: bool
+    i2: int
+    i3_enabled: bool
+    i3: int
+    d1_enabled: bool
+    d1: int
+    d2_enabled: bool
+    d2: int
+
+
+@dataclass(slots=True)
+class FalcUnlimSnapshot:
+    enabled: bool
+    hold: bool
+    sign: bool
+    slew_rate: int
+    gain: float
+    output_range: float
+    input_offset: float
+
+
+@dataclass(slots=True)
+class FalcSnapshot:
+    serial_number: str
+    label: str
+    fw_ver: str
+    status_txt: str
+    input_gain: int
+    input_offset: float
+    main: FalcMainSnapshot
+    unlim: FalcUnlimSnapshot
+
+
+@dataclass(slots=True)
 class DeviceSnapshot:
     connection_mode: str
     connection_target: str
@@ -84,6 +123,7 @@ class DeviceSnapshot:
     pressure_comp_air_pressure: float
     pressure_comp_factor: float
     pressure_comp_voltage: float
+    falc1: FalcSnapshot | None
 
 
 class DlcProService:
@@ -335,6 +375,68 @@ class DlcProService:
             lock.lock_without_lockpoint.set(bool(enabled))
             return self._read_snapshot_unlocked()
 
+    def set_falc1_input_gain(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            self._falc(1).input.gain.set(int(value))
+            return self._read_snapshot_unlocked()
+
+    def set_falc1_input_offset(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._falc(1).input.offset.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_falc1_main_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._falc(1).main.enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_falc1_main_gain_all(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._falc(1).main.gain.all.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_falc1_main_filter_enabled(self, filter_name: str, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            gain = self._falc(1).main.gain
+            getattr(gain, f"{filter_name}_enabled").set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_falc1_main_filter_value(self, filter_name: str, value: int) -> DeviceSnapshot:
+        with self._lock:
+            gain = self._falc(1).main.gain
+            getattr(gain, filter_name).set(int(value))
+            return self._read_snapshot_unlocked()
+
+    def set_falc1_unlim_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._falc(1).unlim.enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_falc1_unlim_hold(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._falc(1).unlim.hold.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_falc1_unlim_input_offset(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._falc(1).unlim.input_offset.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_falc1_unlim_output_range(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._falc(1).unlim.output_range.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_falc1_unlim_slew_rate(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            self._falc(1).unlim.slew_rate.set(int(value))
+            return self._read_snapshot_unlocked()
+
+    def set_falc1_unlim_sign(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._falc(1).unlim.sign.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
     def list_serial_ports(self) -> list[str]:
         if list_ports is None:
             return []
@@ -393,6 +495,9 @@ class DlcProService:
 
     def _lock_control(self):
         return self._device_required().laser1.dl.lock
+
+    def _falc(self, board_index: int):
+        return getattr(self._device_required(), f"falc{board_index}")
 
     def _read_snapshot_unlocked(self) -> DeviceSnapshot:
         device = self._device_required()
@@ -466,6 +571,7 @@ class DlcProService:
             pressure_comp_air_pressure=float(pressure_comp.air_pressure.get()),
             pressure_comp_factor=float(pressure_comp.factor.get()),
             pressure_comp_voltage=float(pressure_comp.compensation_voltage.get()),
+            falc1=self._read_falc_snapshot(device, 1),
         )
 
     @staticmethod
@@ -477,3 +583,43 @@ class DlcProService:
             current_clip_tuning = float(cc.current_clip_tuning.get())
             return min(current_clip, current_clip_tuning, current_clip_limit)
         return min(current_clip, current_clip_limit)
+
+    @staticmethod
+    def _read_falc_snapshot(device: DLCpro, board_index: int) -> FalcSnapshot | None:
+        board = getattr(device, f"falc{board_index}")
+        try:
+            main_gain = board.main.gain
+            unlim = board.unlim
+            return FalcSnapshot(
+                serial_number=board.serial_number.get(),
+                label=board.label.get(),
+                fw_ver=board.fw_ver.get(),
+                status_txt=board.status_txt.get(),
+                input_gain=int(board.input.gain.get()),
+                input_offset=float(board.input.offset.get()),
+                main=FalcMainSnapshot(
+                    enabled=bool(board.main.enabled.get()),
+                    gain_all=float(main_gain.all.get()),
+                    i1_enabled=bool(main_gain.i1_enabled.get()),
+                    i1=int(main_gain.i1.get()),
+                    i2_enabled=bool(main_gain.i2_enabled.get()),
+                    i2=int(main_gain.i2.get()),
+                    i3_enabled=bool(main_gain.i3_enabled.get()),
+                    i3=int(main_gain.i3.get()),
+                    d1_enabled=bool(main_gain.d1_enabled.get()),
+                    d1=int(main_gain.d1.get()),
+                    d2_enabled=bool(main_gain.d2_enabled.get()),
+                    d2=int(main_gain.d2.get()),
+                ),
+                unlim=FalcUnlimSnapshot(
+                    enabled=bool(unlim.enabled.get()),
+                    hold=bool(unlim.hold.get()),
+                    sign=bool(unlim.sign.get()),
+                    slew_rate=int(unlim.slew_rate.get()),
+                    gain=float(unlim.gain.get()),
+                    output_range=float(unlim.output_range.get()),
+                    input_offset=float(unlim.input_offset.get()),
+                ),
+            )
+        except DecopError:
+            return None

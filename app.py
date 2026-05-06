@@ -40,6 +40,7 @@ from ui_text import (
 )
 from controllers import LaserController, ScanLockController
 from windows import (
+    FalcProWindow,
     LaserWindow,
     RelockWindow,
     ScanLockWindow,
@@ -115,6 +116,7 @@ class MainWindow(QMainWindow):
         self.current_apply_timer.timeout.connect(self._apply_current_if_needed)
 
         self._build_ui()
+        self._configure_combo_boxes()
         self._apply_module_precisions()
         self._update_all_precision_buttons()
         self._apply_base_style()
@@ -157,12 +159,14 @@ class MainWindow(QMainWindow):
         self.nav_layout.setSpacing(10)
         self.overview_button = self._create_nav_button(lambda: self.page_stack.setCurrentIndex(0))
         self.laser_button = self._create_nav_button(self._open_laser_window)
+        self.falc_button = self._create_nav_button(self._open_falc_window)
         self.scan_lock_button = self._create_nav_button(self._open_scan_lock_window)
         self.relock_button = self._create_nav_button(self._open_relock_window)
         self.stabilization_button = self._create_nav_button(self._open_stabilization_window)
         for button in (
             self.overview_button,
             self.laser_button,
+            self.falc_button,
             self.scan_lock_button,
             self.relock_button,
             self.stabilization_button,
@@ -183,6 +187,7 @@ class MainWindow(QMainWindow):
         root.setStretch(2, 1)
 
         self.laser_window = LaserWindow(self.laser_page)
+        self.falc_window = FalcProWindow(self)
         self.scan_lock_page = self._build_scan_lock_page()
         self.scan_lock_window = ScanLockWindow(self.scan_lock_page)
         self.relock_window = RelockWindow()
@@ -310,6 +315,14 @@ class MainWindow(QMainWindow):
         self.laser_window.show()
         self.laser_window.raise_()
         self.laser_window.activateWindow()
+
+    def _open_falc_window(self) -> None:
+        if self.falc_window.isHidden():
+            self.falc_window.move(self.x() + 60, self.y() + 60)
+        self.falc_window.showNormal()
+        self.falc_window.show()
+        self.falc_window.raise_()
+        self.falc_window.activateWindow()
 
     def _open_scan_lock_window(self) -> None:
         if self.scan_lock_window.isHidden():
@@ -474,9 +487,11 @@ class MainWindow(QMainWindow):
 
         self.overview_button.setText(t["device_overview"])
         self.laser_button.setText(t["laser"])
+        self.falc_button.setText(t["falc"])
         self.scan_lock_button.setText(t["scan_lock"])
         self.relock_button.setText(t["relock"])
         self.stabilization_button.setText(t["stabilization"])
+        self.falc_window.apply_texts(self.language)
         self.relock_window.setWindowTitle(f"{t['window_title']} - {t['relock']}")
         self.stabilization_window.setWindowTitle(f"{t['window_title']} - {t['stabilization']}")
         self.relock_window.title_label.setText(t["relock"])
@@ -532,6 +547,7 @@ class MainWindow(QMainWindow):
             if index >= 0:
                 self.scan_output_combo.setCurrentIndex(index)
         self.scan_output_combo.blockSignals(False)
+        self._fit_combo_popup_width(self.scan_output_combo)
 
     def _populate_sc_shape_options(self) -> None:
         current = self.scan_shape_combo.currentData()
@@ -544,6 +560,7 @@ class MainWindow(QMainWindow):
             if index >= 0:
                 self.scan_shape_combo.setCurrentIndex(index)
         self.scan_shape_combo.blockSignals(False)
+        self._fit_combo_popup_width(self.scan_shape_combo)
 
     def _populate_lock_input_signal_options(self) -> None:
         current = self.lock_input_signal_combo.currentData()
@@ -556,6 +573,7 @@ class MainWindow(QMainWindow):
             if index >= 0:
                 self.lock_input_signal_combo.setCurrentIndex(index)
         self.lock_input_signal_combo.blockSignals(False)
+        self._fit_combo_popup_width(self.lock_input_signal_combo)
 
     def _populate_lock_type_options(self) -> None:
         current = self.lock_type_combo.currentData()
@@ -568,6 +586,7 @@ class MainWindow(QMainWindow):
             if index >= 0:
                 self.lock_type_combo.setCurrentIndex(index)
         self.lock_type_combo.blockSignals(False)
+        self._fit_combo_popup_width(self.lock_type_combo)
 
     def _populate_lock_pid_selection_options(self) -> None:
         current = self.lock_pid_selection_combo.currentData()
@@ -580,6 +599,7 @@ class MainWindow(QMainWindow):
             if index >= 0:
                 self.lock_pid_selection_combo.setCurrentIndex(index)
         self.lock_pid_selection_combo.blockSignals(False)
+        self._fit_combo_popup_width(self.lock_pid_selection_combo)
 
     def _populate_signal_combo(self, combo: QComboBox) -> None:
         current = combo.currentData()
@@ -592,6 +612,35 @@ class MainWindow(QMainWindow):
             if index >= 0:
                 combo.setCurrentIndex(index)
         combo.blockSignals(False)
+        self._fit_combo_popup_width(combo)
+
+    def _configure_combo_boxes(self) -> None:
+        combos = (
+            self.language_combo,
+            self.mode_combo,
+            self.serial_port_combo,
+            self.arc_signal_combo,
+            self.tc_arc_signal_combo,
+            self.pc_arc_signal_combo,
+            self.scan_output_combo,
+            self.scan_shape_combo,
+            self.lock_input_signal_combo,
+            self.lock_type_combo,
+            self.lock_pid_selection_combo,
+        )
+        for combo in combos:
+            combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+            combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self._fit_combo_popup_width(combo)
+
+    def _fit_combo_popup_width(self, combo: QComboBox) -> None:
+        metrics = combo.fontMetrics()
+        widths = [metrics.horizontalAdvance(combo.itemText(i)) for i in range(combo.count())]
+        current_width = metrics.horizontalAdvance(combo.currentText()) if combo.currentText() else 0
+        content_width = max(widths + [current_width, 120])
+        target_width = content_width + 48
+        combo.view().setMinimumWidth(target_width)
+        combo.setMinimumWidth(min(target_width, 260))
 
     def _update_toggle_button(self, button: QPushButton, enabled: bool) -> None:
         button.blockSignals(True)
@@ -616,28 +665,36 @@ class MainWindow(QMainWindow):
         for widget in (self.connect_button, self.disconnect_button, self.refresh_button):
             widget.setEnabled(not busy)
         writable = not busy and self.service.is_connected
+        previewable = not busy
+
+        # 这些下拉/勾选项即使未连接设备也允许先切换，用于界面预览和流程确认。
         for widget in (
-            self.current_set_spin,
-            self.current_clip_spin,
-            self.feedforward_factor_spin,
             self.arc_signal_combo,
-            self.arc_factor_spin,
-            self.temp_set_spin,
             self.tc_arc_signal_combo,
-            self.tc_arc_factor_spin,
-            self.pc_voltage_set_spin,
-            self.pc_slew_rate_spin,
             self.pc_arc_signal_combo,
-            self.pc_arc_factor_spin,
-            self.scan_amplitude_spin,
-            self.scan_offset_spin,
             self.scan_output_combo,
-            self.scan_frequency_spin,
             self.scan_shape_combo,
             self.lock_input_signal_combo,
             self.lock_type_combo,
             self.lock_pid_selection_combo,
             self.lock_without_lockpoint_check,
+        ):
+            widget.setEnabled(previewable)
+        self.falc_window.set_writable(writable, previewable)
+
+        for widget in (
+            self.current_set_spin,
+            self.current_clip_spin,
+            self.feedforward_factor_spin,
+            self.arc_factor_spin,
+            self.temp_set_spin,
+            self.tc_arc_factor_spin,
+            self.pc_voltage_set_spin,
+            self.pc_slew_rate_spin,
+            self.pc_arc_factor_spin,
+            self.scan_amplitude_spin,
+            self.scan_offset_spin,
+            self.scan_frequency_spin,
             self.pressure_comp_factor_spin,
             self.cc_enable_button,
             self.feedforward_enable_button,
@@ -1065,6 +1122,118 @@ class MainWindow(QMainWindow):
             return
         self._run_task(lambda: self.service.set_lock_without_lockpoint(checked), self._on_snapshot_updated)
 
+    def _on_falc_input_gain_changed(self) -> None:
+        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
+            return
+        value = int(self.falc_window.input_gain_combo.currentData())
+        if value == self.snapshot.falc1.input_gain:
+            return
+        self._run_task(lambda: self.service.set_falc1_input_gain(value), self._on_snapshot_updated)
+
+    def _on_falc_input_offset_finished(self) -> None:
+        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
+            return
+        value = self.falc_window.input_offset_spin.value()
+        current = self.snapshot.falc1.input_offset
+        if abs(value - current) < 1e-12:
+            return
+        self._run_task(lambda: self.service.set_falc1_input_offset(value), self._on_snapshot_updated)
+
+    def _on_falc_main_enabled_toggled(self, checked: bool) -> None:
+        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
+            return
+        if checked == self.snapshot.falc1.main.enabled:
+            return
+        self._run_task(lambda: self.service.set_falc1_main_enabled(checked), self._on_snapshot_updated)
+
+    def _on_falc_main_gain_finished(self) -> None:
+        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
+            return
+        value = self.falc_window.main_gain_spin.value()
+        current = self.snapshot.falc1.main.gain_all
+        if abs(value - current) < 1e-12:
+            return
+        self._run_task(lambda: self.service.set_falc1_main_gain_all(value), self._on_snapshot_updated)
+
+    def _on_falc_filter_enabled_toggled(self, filter_name: str, checked: bool) -> None:
+        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
+            return
+        current = getattr(self.snapshot.falc1.main, f"{filter_name}_enabled")
+        if checked == current:
+            return
+        self._run_task(
+            lambda: self.service.set_falc1_main_filter_enabled(filter_name, checked),
+            self._on_snapshot_updated,
+        )
+
+    def _on_falc_filter_value_changed(self, filter_name: str) -> None:
+        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
+            return
+        value = self.falc_window.current_filter_value(filter_name)
+        if value is None:
+            QMessageBox.warning(
+                self,
+                "Warning",
+                "FALC preset must be an integer raw device value / FALC 预设值必须为设备整数原始值",
+            )
+            self.falc_window.render_snapshot(self.snapshot)
+            return
+        current = getattr(self.snapshot.falc1.main, filter_name)
+        if value == current:
+            return
+        self._run_task(
+            lambda: self.service.set_falc1_main_filter_value(filter_name, value),
+            self._on_snapshot_updated,
+        )
+
+    def _on_falc_unlim_enabled_toggled(self, checked: bool) -> None:
+        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
+            return
+        if checked == self.snapshot.falc1.unlim.enabled:
+            return
+        self._run_task(lambda: self.service.set_falc1_unlim_enabled(checked), self._on_snapshot_updated)
+
+    def _on_falc_unlim_hold_toggled(self, checked: bool) -> None:
+        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
+            return
+        if checked == self.snapshot.falc1.unlim.hold:
+            return
+        self._run_task(lambda: self.service.set_falc1_unlim_hold(checked), self._on_snapshot_updated)
+
+    def _on_falc_unlim_input_offset_finished(self) -> None:
+        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
+            return
+        value = self.falc_window.unlim_input_offset_spin.value()
+        current = self.snapshot.falc1.unlim.input_offset
+        if abs(value - current) < 1e-12:
+            return
+        self._run_task(lambda: self.service.set_falc1_unlim_input_offset(value), self._on_snapshot_updated)
+
+    def _on_falc_unlim_output_range_finished(self) -> None:
+        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
+            return
+        value = self.falc_window.unlim_output_range_spin.value()
+        current = self.snapshot.falc1.unlim.output_range
+        if abs(value - current) < 1e-12:
+            return
+        self._run_task(lambda: self.service.set_falc1_unlim_output_range(value), self._on_snapshot_updated)
+
+    def _on_falc_unlim_slew_rate_finished(self) -> None:
+        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
+            return
+        value = int(round(self.falc_window.unlim_slew_rate_spin.value()))
+        current = self.snapshot.falc1.unlim.slew_rate
+        if value == current:
+            return
+        self._run_task(lambda: self.service.set_falc1_unlim_slew_rate(value), self._on_snapshot_updated)
+
+    def _on_falc_unlim_sign_toggled(self, checked: bool) -> None:
+        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
+            return
+        if checked == self.snapshot.falc1.unlim.sign:
+            return
+        self._run_task(lambda: self.service.set_falc1_unlim_sign(checked), self._on_snapshot_updated)
+
     def _on_cc_enable_toggled(self, checked: bool) -> None:
         if not self.service.is_connected or self.cc_programmatic_update:
             return
@@ -1116,6 +1285,7 @@ class MainWindow(QMainWindow):
         self.pressure_comp_factor_spin.setValue(0.0)
         self.laser_controller.reset_readbacks()
         self.scan_lock_controller.render_snapshot(self._empty_scan_snapshot())
+        self.falc_window.reset_state(self.language)
         self.current_set_dirty = False
         self._update_toggle_button(self.cc_enable_button, False)
         self._update_toggle_button(self.feedforward_enable_button, False)
@@ -1150,6 +1320,7 @@ class MainWindow(QMainWindow):
     def _render_snapshot(self, snapshot: DeviceSnapshot) -> None:
         self.laser_controller.render_snapshot(snapshot)
         self.scan_lock_controller.render_snapshot(snapshot)
+        self.falc_window.render_snapshot(snapshot)
 
     def _empty_scan_snapshot(self):
         return type(
@@ -1187,7 +1358,15 @@ class MainWindow(QMainWindow):
         self.refresh_timer.stop()
         self.future_poll_timer.stop()
         self.current_apply_timer.stop()
-        self.laser_window.close()
+        for window in (
+            self.laser_window,
+            self.falc_window,
+            self.scan_lock_window,
+            self.relock_window,
+            self.stabilization_window,
+        ):
+            window.request_shutdown()
+            window.close()
         self._reset_after_disconnect(silent=True)
         self.executor.shutdown(wait=False, cancel_futures=True)
         super().closeEvent(event)
