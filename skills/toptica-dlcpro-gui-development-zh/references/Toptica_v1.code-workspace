@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "../../../../Desktop/Toptica_v1"
+		},
+		{
+			"path": "../../../../../../opt/homebrew/Caskroom/miniconda/base/envs/toptica-lab/lib/python3.11/site-packages/toptica"
+		}
+	],
+	"settings": {}
+}

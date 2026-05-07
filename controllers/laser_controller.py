@@ -5,7 +5,7 @@ from dataclasses import asdict
 from PySide6.QtWidgets import QTableWidgetItem
 
 from dlcpro_service import DeviceSnapshot
-from ui_text import ARC_SIGNAL_OPTIONS, PARAMETER_LABELS, SCAN_OUTPUT_OPTIONS, SCAN_SHAPE_OPTIONS, TEXT
+from ui_text import ARC_SIGNAL_OPTIONS, PARAMETER_LABELS, PID_OUTPUT_CHANNEL_OPTIONS, SCAN_OUTPUT_OPTIONS, SCAN_SHAPE_OPTIONS, TEXT
 
 
 class LaserController:
@@ -152,6 +152,26 @@ class LaserController:
             "lock_type",
             "lock_pid_selection",
             "lock_without_lockpoint",
+            "pid1_enabled",
+            "pid1_gain_all",
+            "pid1_gain_p",
+            "pid1_gain_i",
+            "pid1_gain_d",
+            "pid1_output_channel",
+            "pid1_sign",
+            "pid1_i_cutoff_enabled",
+            "pid1_i_cutoff",
+            "pid1_limit_enabled",
+            "pid1_limit_max",
+            "pid2_enabled",
+            "pid2_gain_all",
+            "pid2_gain_p",
+            "pid2_gain_i",
+            "pid2_gain_d",
+            "pid2_output_channel",
+            "pid2_sign",
+            "pid2_limit_enabled",
+            "pid2_limit_max",
             "pressure_comp_enabled",
             "pressure_comp_air_pressure",
             "pressure_comp_factor",
@@ -176,6 +196,8 @@ class LaserController:
                 value = self.scan_lock_type_name(int(value))
             elif key == "lock_pid_selection":
                 value = self.scan_lock_pid_name(int(value))
+            elif key in {"pid1_output_channel", "pid2_output_channel"}:
+                value = self.pid_output_name(int(value))
             elif isinstance(value, bool):
                 value = TEXT[owner.language]["enabled_state"] if value else TEXT[owner.language]["disabled_state"]
             elif isinstance(value, float):
@@ -198,45 +220,27 @@ class LaserController:
         owner.arc_programmatic_update = True
         owner.tc_programmatic_update = True
         owner.pc_programmatic_update = True
-        owner.current_clip_spin.blockSignals(True)
-        owner.current_clip_spin.setValue(snapshot.current_clip)
-        owner.current_clip_spin.blockSignals(False)
+        self._set_spin_if_idle(owner.current_clip_spin, snapshot.current_clip)
         owner.current_clip_spin.setMaximum(max(snapshot.effective_current_max, owner.current_clip_spin.minimum()))
 
         owner.current_act_value.setText(owner._format_value_with_unit(snapshot.current_act, 5, "mA"))
-        owner.feedforward_factor_spin.blockSignals(True)
-        owner.feedforward_factor_spin.setValue(snapshot.feedforward_factor)
-        owner.feedforward_factor_spin.blockSignals(False)
-        owner.arc_factor_spin.blockSignals(True)
-        owner.arc_factor_spin.setValue(snapshot.arc_factor)
-        owner.arc_factor_spin.blockSignals(False)
-        owner.temp_set_spin.blockSignals(True)
-        owner.temp_set_spin.setValue(snapshot.temp_set)
-        owner.temp_set_spin.blockSignals(False)
+        self._set_spin_if_idle(owner.feedforward_factor_spin, snapshot.feedforward_factor)
+        self._set_spin_if_idle(owner.arc_factor_spin, snapshot.arc_factor)
+        self._set_spin_if_idle(owner.temp_set_spin, snapshot.temp_set)
         owner.temp_act_value.setText(
             owner._format_value_with_unit(snapshot.temp_act, 3, TEXT[owner.language]["temperature_unit"])
         )
-        owner.tc_arc_factor_spin.blockSignals(True)
-        owner.tc_arc_factor_spin.setValue(snapshot.tc_arc_factor)
-        owner.tc_arc_factor_spin.blockSignals(False)
-        owner.pc_voltage_set_spin.blockSignals(True)
-        owner.pc_voltage_set_spin.setValue(snapshot.pc_voltage_set)
-        owner.pc_voltage_set_spin.blockSignals(False)
+        self._set_spin_if_idle(owner.tc_arc_factor_spin, snapshot.tc_arc_factor)
+        self._set_spin_if_idle(owner.pc_voltage_set_spin, snapshot.pc_voltage_set)
         owner.pc_voltage_act_value.setText(
             owner._format_value_with_unit(snapshot.pc_voltage_act, 6, TEXT[owner.language]["voltage_unit"])
         )
-        owner.pc_slew_rate_spin.blockSignals(True)
-        owner.pc_slew_rate_spin.setValue(snapshot.pc_slew_rate)
-        owner.pc_slew_rate_spin.blockSignals(False)
-        owner.pc_arc_factor_spin.blockSignals(True)
-        owner.pc_arc_factor_spin.setValue(snapshot.pc_arc_factor)
-        owner.pc_arc_factor_spin.blockSignals(False)
+        self._set_spin_if_idle(owner.pc_slew_rate_spin, snapshot.pc_slew_rate)
+        self._set_spin_if_idle(owner.pc_arc_factor_spin, snapshot.pc_arc_factor)
         owner.pressure_comp_air_pressure_value.setText(
             owner._format_value_with_unit(snapshot.pressure_comp_air_pressure, 3, TEXT[owner.language]["air_pressure_unit"])
         )
-        owner.pressure_comp_factor_spin.blockSignals(True)
-        owner.pressure_comp_factor_spin.setValue(snapshot.pressure_comp_factor)
-        owner.pressure_comp_factor_spin.blockSignals(False)
+        self._set_spin_if_idle(owner.pressure_comp_factor_spin, snapshot.pressure_comp_factor)
         owner.pressure_comp_voltage_value.setText(
             owner._format_value_with_unit(snapshot.pressure_comp_voltage, 3, TEXT[owner.language]["voltage_unit"])
         )
@@ -266,11 +270,21 @@ class LaserController:
         owner.tc_programmatic_update = False
         owner.pc_programmatic_update = False
     def _sync_combo(self, combo, value: int) -> None:
+        if combo.view().isVisible() or combo.hasFocus():
+            return
         index = combo.findData(value)
         if index >= 0:
             combo.blockSignals(True)
             combo.setCurrentIndex(index)
             combo.blockSignals(False)
+
+    @staticmethod
+    def _set_spin_if_idle(spinbox, value: float) -> None:
+        if spinbox.hasFocus():
+            return
+        spinbox.blockSignals(True)
+        spinbox.setValue(value)
+        spinbox.blockSignals(False)
 
     def arc_signal_name(self, value: int) -> str:
         for key, signal in ARC_SIGNAL_OPTIONS:
@@ -310,6 +324,12 @@ class LaserController:
         from ui_text import LOCK_PID_SELECTION_OPTIONS
 
         for key, option in LOCK_PID_SELECTION_OPTIONS:
+            if option == value:
+                return TEXT[self.owner.language][key]
+        return str(value)
+
+    def pid_output_name(self, value: int) -> str:
+        for key, option in PID_OUTPUT_CHANNEL_OPTIONS:
             if option == value:
                 return TEXT[self.owner.language][key]
         return str(value)

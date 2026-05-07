@@ -119,6 +119,26 @@ class DeviceSnapshot:
     lock_type: int
     lock_pid_selection: int
     lock_without_lockpoint: bool
+    pid1_enabled: bool
+    pid1_gain_all: float
+    pid1_gain_p: float
+    pid1_gain_i: float
+    pid1_gain_d: float
+    pid1_output_channel: int
+    pid1_sign: bool
+    pid1_i_cutoff_enabled: bool
+    pid1_i_cutoff: float
+    pid1_limit_enabled: bool
+    pid1_limit_max: float
+    pid2_enabled: bool
+    pid2_gain_all: float
+    pid2_gain_p: float
+    pid2_gain_i: float
+    pid2_gain_d: float
+    pid2_output_channel: int
+    pid2_sign: bool
+    pid2_limit_enabled: bool
+    pid2_limit_max: float
     pressure_comp_enabled: bool
     pressure_comp_air_pressure: float
     pressure_comp_factor: float
@@ -375,6 +395,106 @@ class DlcProService:
             lock.lock_without_lockpoint.set(bool(enabled))
             return self._read_snapshot_unlocked()
 
+    def set_pid1_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid1.enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_pid1_gain_all(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid1.gain.all.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_pid1_gain_p(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid1.gain.p.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_pid1_gain_i(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid1.gain.i.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_pid1_gain_d(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid1.gain.d.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_pid1_output_channel(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid1.output_channel.set(int(value))
+            return self._read_snapshot_unlocked()
+
+    def set_pid1_sign(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid1.sign.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_pid1_i_cutoff_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid1.gain.i_cutoff_enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_pid1_i_cutoff(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid1.gain.i_cutoff.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_pid1_limit_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid1.outputlimit.enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_pid1_limit_max(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid1.outputlimit.max.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_pid2_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid2.enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_pid2_gain_all(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid2.gain.all.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_pid2_gain_p(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid2.gain.p.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_pid2_gain_i(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid2.gain.i.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_pid2_gain_d(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid2.gain.d.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_pid2_output_channel(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid2.output_channel.set(int(value))
+            return self._read_snapshot_unlocked()
+
+    def set_pid2_sign(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid2.sign.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_pid2_limit_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid2.outputlimit.enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_pid2_limit_max(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().pid2.outputlimit.max.set(float(value))
+            return self._read_snapshot_unlocked()
+
     def set_falc1_input_gain(self, value: int) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).input.gain.set(int(value))
@@ -513,6 +633,8 @@ class DlcProService:
         pressure_comp = device.laser1.dl.pressure_compensation
         scan = device.laser1.scan
         lock = device.laser1.dl.lock
+        pid1 = lock.pid1
+        pid2 = lock.pid2
         return DeviceSnapshot(
             connection_mode=settings.mode,
             connection_target=settings.target,
@@ -567,6 +689,26 @@ class DlcProService:
             lock_type=int(lock.type.get()),
             lock_pid_selection=int(lock.pid_selection.get()),
             lock_without_lockpoint=bool(lock.lock_without_lockpoint.get()),
+            pid1_enabled=bool(pid1.enabled.get()),
+            pid1_gain_all=float(pid1.gain.all.get()),
+            pid1_gain_p=float(pid1.gain.p.get()),
+            pid1_gain_i=float(pid1.gain.i.get()),
+            pid1_gain_d=float(pid1.gain.d.get()),
+            pid1_output_channel=int(pid1.output_channel.get()),
+            pid1_sign=bool(pid1.sign.get()),
+            pid1_i_cutoff_enabled=bool(pid1.gain.i_cutoff_enabled.get()),
+            pid1_i_cutoff=float(pid1.gain.i_cutoff.get()),
+            pid1_limit_enabled=bool(pid1.outputlimit.enabled.get()),
+            pid1_limit_max=float(pid1.outputlimit.max.get()),
+            pid2_enabled=bool(pid2.enabled.get()),
+            pid2_gain_all=float(pid2.gain.all.get()),
+            pid2_gain_p=float(pid2.gain.p.get()),
+            pid2_gain_i=float(pid2.gain.i.get()),
+            pid2_gain_d=float(pid2.gain.d.get()),
+            pid2_output_channel=int(pid2.output_channel.get()),
+            pid2_sign=bool(pid2.sign.get()),
+            pid2_limit_enabled=bool(pid2.outputlimit.enabled.get()),
+            pid2_limit_max=float(pid2.outputlimit.max.get()),
             pressure_comp_enabled=bool(pressure_comp.enabled.get()),
             pressure_comp_air_pressure=float(pressure_comp.air_pressure.get()),
             pressure_comp_factor=float(pressure_comp.factor.get()),

@@ -34,6 +34,7 @@ from ui_text import (
     LOCK_INPUT_SIGNAL_OPTIONS,
     LOCK_PID_SELECTION_OPTIONS,
     LOCK_TYPE_OPTIONS,
+    PID_OUTPUT_CHANNEL_OPTIONS,
     SCAN_OUTPUT_OPTIONS,
     SCAN_SHAPE_OPTIONS,
     TEXT,
@@ -49,7 +50,6 @@ from windows import (
     build_scan_lock_page,
 )
 
-FAST_CURRENT_ADJUST_CONFIRM_THRESHOLD_MA = 10.0
 AUTO_APPLY_DEBOUNCE_MS = 150
 
 
@@ -511,6 +511,8 @@ class MainWindow(QMainWindow):
         self._populate_lock_input_signal_options()
         self._populate_lock_type_options()
         self._populate_lock_pid_selection_options()
+        self._populate_pid_output_channel_options(self.pid1_output_channel_combo)
+        self._populate_pid_output_channel_options(self.pid2_output_channel_combo)
         if self.snapshot is not None:
             self._render_snapshot(self.snapshot)
 
@@ -601,6 +603,19 @@ class MainWindow(QMainWindow):
         self.lock_pid_selection_combo.blockSignals(False)
         self._fit_combo_popup_width(self.lock_pid_selection_combo)
 
+    def _populate_pid_output_channel_options(self, combo: QComboBox) -> None:
+        current = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        for text_key, value in PID_OUTPUT_CHANNEL_OPTIONS:
+            combo.addItem(TEXT[self.language][text_key], value)
+        if current is not None:
+            index = combo.findData(current)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+        combo.blockSignals(False)
+        self._fit_combo_popup_width(combo)
+
     def _populate_signal_combo(self, combo: QComboBox) -> None:
         current = combo.currentData()
         combo.blockSignals(True)
@@ -627,6 +642,8 @@ class MainWindow(QMainWindow):
             self.lock_input_signal_combo,
             self.lock_type_combo,
             self.lock_pid_selection_combo,
+            self.pid1_output_channel_combo,
+            self.pid2_output_channel_combo,
         )
         for combo in combos:
             combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
@@ -658,14 +675,18 @@ class MainWindow(QMainWindow):
         self.serial_port_combo.setEnabled(not is_network)
         self.baudrate_spin.setEnabled(not is_network)
 
-    def _set_busy(self, busy: bool) -> None:
-        self.busy = busy
+    def _set_busy(self, busy: bool, freeze_controls: bool = True) -> None:
+        laser_scroll = self._laser_scroll_value()
+        self.busy = busy and freeze_controls
         t = TEXT[self.language]
-        self.status_label.setText(t["busy"] if busy else (t["connected"] if self.service.is_connected else t["disconnected"]))
+        if busy and freeze_controls:
+            self.status_label.setText(t["busy"])
+        else:
+            self.status_label.setText(t["connected"] if self.service.is_connected else t["disconnected"])
         for widget in (self.connect_button, self.disconnect_button, self.refresh_button):
             widget.setEnabled(not busy)
-        writable = not busy and self.service.is_connected
-        previewable = not busy
+        writable = (not busy or not freeze_controls) and self.service.is_connected
+        previewable = not busy or not freeze_controls
 
         # 这些下拉/勾选项即使未连接设备也允许先切换，用于界面预览和流程确认。
         for widget in (
@@ -677,6 +698,8 @@ class MainWindow(QMainWindow):
             self.lock_input_signal_combo,
             self.lock_type_combo,
             self.lock_pid_selection_combo,
+            self.pid1_output_channel_combo,
+            self.pid2_output_channel_combo,
             self.lock_without_lockpoint_check,
         ):
             widget.setEnabled(previewable)
@@ -708,22 +731,43 @@ class MainWindow(QMainWindow):
             self.lock_enable_button,
             self.lock_hold_button,
             self.pressure_comp_enable_button,
+            self.pid1_gain_spin,
+            self.pid1_p_spin,
+            self.pid1_i_spin,
+            self.pid1_d_spin,
+            self.pid1_sign_check,
+            self.pid1_use_i_cutoff_check,
+            self.pid1_i_cutoff_spin,
+            self.pid1_use_limit_check,
+            self.pid1_limit_spin,
+            self.pid1_enable_check,
+            self.pid2_gain_spin,
+            self.pid2_p_spin,
+            self.pid2_i_spin,
+            self.pid2_d_spin,
+            self.pid2_sign_check,
+            self.pid2_use_limit_check,
+            self.pid2_limit_spin,
+            self.pid2_enable_check,
         ):
             widget.setEnabled(writable)
         for button in (*self.precision_buttons, *self.tc_precision_buttons, *self.pc_precision_buttons, *self.sc_precision_buttons):
-            button.setEnabled(not busy)
+            button.setEnabled(not busy or not freeze_controls)
         for module_buttons in self.module_precision_target_buttons.values():
             for button in module_buttons:
-                button.setEnabled(not busy)
+                button.setEnabled(not busy or not freeze_controls)
+        self._restore_laser_scroll(laser_scroll)
 
-    def _run_task(self, fn, on_success, task_kind: str = "action") -> None:
-        if self.busy:
-            return
-        self._set_busy(True)
+    def _run_task(self, fn, on_success, task_kind: str = "action") -> bool:
+        if self.busy or self.pending_future is not None:
+            return False
+        freeze_controls = task_kind != "poll"
+        self._set_busy(True, freeze_controls=freeze_controls)
         self.pending_success_handler = on_success
         self.pending_task_kind = task_kind
         self.pending_future = self.executor.submit(fn)
         self.future_poll_timer.start()
+        return True
 
     def _poll_future(self) -> None:
         future = self.pending_future
@@ -746,7 +790,7 @@ class MainWindow(QMainWindow):
         self._handle_task_done(on_success, True, result, task_kind)
 
     def _handle_task_done(self, on_success, ok: bool, result: object, task_kind: str) -> None:
-        self._set_busy(False)
+        self._set_busy(False, freeze_controls=task_kind != "poll")
         if ok:
             self.connection_loss_notified = False
             if on_success is not None:
@@ -802,6 +846,7 @@ class MainWindow(QMainWindow):
         self.current_set_spin.setSingleStep(self.cc_precision_step)
         self.temp_set_spin.setSingleStep(self.tc_precision_step)
         self.pc_voltage_set_spin.setSingleStep(self.pc_precision_step)
+        self.scan_amplitude_spin.setSingleStep(self.sc_precision_step)
 
     def _update_precision_buttons(self, buttons: list[QPushButton], current_step: float) -> None:
         for button in buttons:
@@ -813,12 +858,27 @@ class MainWindow(QMainWindow):
         self._update_precision_buttons(self.precision_buttons, self.cc_precision_step)
         self._update_precision_buttons(self.tc_precision_buttons, self.tc_precision_step)
         self._update_precision_buttons(self.pc_precision_buttons, self.pc_precision_step)
+        self._update_precision_buttons(self.sc_precision_buttons, self.sc_precision_step)
 
     def _format_value_with_unit(self, value: float, decimals: int, unit: str) -> str:
         return f"{value:.{decimals}f} {unit}"
 
     def _unit_only_text(self, unit: str) -> str:
         return unit
+
+    def _laser_scroll_value(self) -> int | None:
+        scroll_area = getattr(self, "laser_scroll_area", None)
+        if scroll_area is None:
+            return None
+        return scroll_area.verticalScrollBar().value()
+
+    def _restore_laser_scroll(self, value: int | None) -> None:
+        if value is None:
+            return
+        scroll_area = getattr(self, "laser_scroll_area", None)
+        if scroll_area is None:
+            return
+        scroll_area.verticalScrollBar().setValue(value)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
         return super().eventFilter(watched, event)
@@ -831,34 +891,17 @@ class MainWindow(QMainWindow):
             self.current_apply_timer.start()
 
     def _apply_current_if_needed(self) -> None:
-        if not self.service.is_connected or not self.current_set_dirty or self.busy:
+        if not self.service.is_connected or not self.current_set_dirty:
+            return
+        if self.busy or self.pending_future is not None:
+            self.current_apply_timer.start()
             return
 
         value = self.current_set_spin.value()
-        current_value = self.last_device_current_set
-        if (
-            current_value is not None
-            and abs(value - current_value) >= FAST_CURRENT_ADJUST_CONFIRM_THRESHOLD_MA
-        ):
-            t = TEXT[self.language]
-            confirmed = QMessageBox.question(
-                self,
-                t["confirm_title"],
-                t["confirm_apply_current"].format(current=current_value, value=value),
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if confirmed != QMessageBox.Yes:
-                self.current_set_programmatic_update = True
-                self.current_set_spin.blockSignals(True)
-                self.current_set_spin.setValue(current_value)
-                self.current_set_spin.blockSignals(False)
-                self.current_set_programmatic_update = False
-                self.current_set_dirty = False
-                return
-
         self.current_set_dirty = False
-        self._run_task(lambda: self.service.set_current(value), self._on_snapshot_updated)
+        if not self._run_task(lambda: self.service.set_current(value), self._on_snapshot_updated):
+            self.current_set_dirty = True
+            self.current_apply_timer.start()
 
     def _confirm_and_run(self, label: str, current: str, value: str, action) -> None:
         t = TEXT[self.language]
@@ -934,12 +977,7 @@ class MainWindow(QMainWindow):
         current = self.snapshot.temp_set
         if abs(value - current) < 1e-9:
             return
-        self._confirm_and_run(
-            TEXT[self.language]["set_temperature"],
-            f"{current:.5f} {TEXT[self.language]['temperature_unit']}",
-            f"{value:.5f} {TEXT[self.language]['temperature_unit']}",
-            lambda: self.service.set_temp_set(value),
-        )
+        self._run_task(lambda: self.service.set_temp_set(value), self._on_snapshot_updated)
 
     def _on_tc_arc_enable_toggled(self, checked: bool) -> None:
         if not self.service.is_connected or self.tc_programmatic_update:
@@ -975,12 +1013,7 @@ class MainWindow(QMainWindow):
         current = self.snapshot.pc_voltage_set
         if abs(value - current) < 1e-9:
             return
-        self._confirm_and_run(
-            TEXT[self.language]["set_voltage"],
-            f"{current:.6f} {TEXT[self.language]['voltage_unit']}",
-            f"{value:.6f} {TEXT[self.language]['voltage_unit']}",
-            lambda: self.service.set_pc_voltage_set(value),
-        )
+        self._run_task(lambda: self.service.set_pc_voltage_set(value), self._on_snapshot_updated)
 
     def _on_pc_slew_rate_enable_toggled(self, checked: bool) -> None:
         if not self.service.is_connected or self.pc_programmatic_update:
@@ -1121,6 +1154,91 @@ class MainWindow(QMainWindow):
         if checked == self.snapshot.lock_without_lockpoint:
             return
         self._run_task(lambda: self.service.set_lock_without_lockpoint(checked), self._on_snapshot_updated)
+
+    def _on_pid1_gain_finished(self) -> None:
+        self._run_pid_spin_write("pid1_gain_all", self.pid1_gain_spin, self.service.set_pid1_gain_all)
+
+    def _on_pid1_p_finished(self) -> None:
+        self._run_pid_spin_write("pid1_gain_p", self.pid1_p_spin, self.service.set_pid1_gain_p)
+
+    def _on_pid1_i_finished(self) -> None:
+        self._run_pid_spin_write("pid1_gain_i", self.pid1_i_spin, self.service.set_pid1_gain_i)
+
+    def _on_pid1_d_finished(self) -> None:
+        self._run_pid_spin_write("pid1_gain_d", self.pid1_d_spin, self.service.set_pid1_gain_d)
+
+    def _on_pid1_output_channel_changed(self) -> None:
+        self._run_pid_combo_write("pid1_output_channel", self.pid1_output_channel_combo, self.service.set_pid1_output_channel)
+
+    def _on_pid1_sign_changed(self) -> None:
+        self._run_pid_check_write("pid1_sign", self.pid1_sign_check, self.service.set_pid1_sign)
+
+    def _on_pid1_i_cutoff_enabled_changed(self) -> None:
+        self._run_pid_check_write("pid1_i_cutoff_enabled", self.pid1_use_i_cutoff_check, self.service.set_pid1_i_cutoff_enabled)
+
+    def _on_pid1_i_cutoff_finished(self) -> None:
+        self._run_pid_spin_write("pid1_i_cutoff", self.pid1_i_cutoff_spin, self.service.set_pid1_i_cutoff)
+
+    def _on_pid1_limit_enabled_changed(self) -> None:
+        self._run_pid_check_write("pid1_limit_enabled", self.pid1_use_limit_check, self.service.set_pid1_limit_enabled)
+
+    def _on_pid1_limit_finished(self) -> None:
+        self._run_pid_spin_write("pid1_limit_max", self.pid1_limit_spin, self.service.set_pid1_limit_max)
+
+    def _on_pid1_enabled_changed(self) -> None:
+        self._run_pid_check_write("pid1_enabled", self.pid1_enable_check, self.service.set_pid1_enabled)
+
+    def _on_pid2_gain_finished(self) -> None:
+        self._run_pid_spin_write("pid2_gain_all", self.pid2_gain_spin, self.service.set_pid2_gain_all)
+
+    def _on_pid2_p_finished(self) -> None:
+        self._run_pid_spin_write("pid2_gain_p", self.pid2_p_spin, self.service.set_pid2_gain_p)
+
+    def _on_pid2_i_finished(self) -> None:
+        self._run_pid_spin_write("pid2_gain_i", self.pid2_i_spin, self.service.set_pid2_gain_i)
+
+    def _on_pid2_d_finished(self) -> None:
+        self._run_pid_spin_write("pid2_gain_d", self.pid2_d_spin, self.service.set_pid2_gain_d)
+
+    def _on_pid2_output_channel_changed(self) -> None:
+        self._run_pid_combo_write("pid2_output_channel", self.pid2_output_channel_combo, self.service.set_pid2_output_channel)
+
+    def _on_pid2_sign_changed(self) -> None:
+        self._run_pid_check_write("pid2_sign", self.pid2_sign_check, self.service.set_pid2_sign)
+
+    def _on_pid2_limit_enabled_changed(self) -> None:
+        self._run_pid_check_write("pid2_limit_enabled", self.pid2_use_limit_check, self.service.set_pid2_limit_enabled)
+
+    def _on_pid2_limit_finished(self) -> None:
+        self._run_pid_spin_write("pid2_limit_max", self.pid2_limit_spin, self.service.set_pid2_limit_max)
+
+    def _on_pid2_enabled_changed(self) -> None:
+        self._run_pid_check_write("pid2_enabled", self.pid2_enable_check, self.service.set_pid2_enabled)
+
+    def _run_pid_spin_write(self, snapshot_attr: str, spinbox: QDoubleSpinBox, setter) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
+            return
+        value = spinbox.value()
+        current = getattr(self.snapshot, snapshot_attr)
+        if abs(value - current) < 1e-9:
+            return
+        self._run_task(lambda: setter(value), self._on_snapshot_updated)
+
+    def _run_pid_combo_write(self, snapshot_attr: str, combo: QComboBox, setter) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
+            return
+        value = int(combo.currentData())
+        if value == getattr(self.snapshot, snapshot_attr):
+            return
+        self._run_task(lambda: setter(value), self._on_snapshot_updated)
+
+    def _run_pid_check_write(self, snapshot_attr: str, check, setter) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
+            return
+        value = check.isChecked()
+        if value == getattr(self.snapshot, snapshot_attr):
+            return
+        self._run_task(lambda: setter(value), self._on_snapshot_updated)
 
     def _on_falc_input_gain_changed(self) -> None:
         if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
@@ -1318,7 +1436,9 @@ class MainWindow(QMainWindow):
             self.refresh_timer.start()
 
     def _render_snapshot(self, snapshot: DeviceSnapshot) -> None:
+        laser_scroll = self._laser_scroll_value()
         self.laser_controller.render_snapshot(snapshot)
+        self._restore_laser_scroll(laser_scroll)
         self.scan_lock_controller.render_snapshot(snapshot)
         self.falc_window.render_snapshot(snapshot)
 
@@ -1340,6 +1460,26 @@ class MainWindow(QMainWindow):
                 "lock_type": LOCK_TYPE_OPTIONS[0][1],
                 "lock_pid_selection": LOCK_PID_SELECTION_OPTIONS[0][1],
                 "lock_without_lockpoint": False,
+                "pid1_enabled": False,
+                "pid1_gain_all": 0.0,
+                "pid1_gain_p": 0.0,
+                "pid1_gain_i": 0.0,
+                "pid1_gain_d": 0.0,
+                "pid1_output_channel": PID_OUTPUT_CHANNEL_OPTIONS[0][1],
+                "pid1_sign": False,
+                "pid1_i_cutoff_enabled": False,
+                "pid1_i_cutoff": 0.0,
+                "pid1_limit_enabled": False,
+                "pid1_limit_max": 0.0,
+                "pid2_enabled": False,
+                "pid2_gain_all": 0.0,
+                "pid2_gain_p": 0.0,
+                "pid2_gain_i": 0.0,
+                "pid2_gain_d": 0.0,
+                "pid2_output_channel": PID_OUTPUT_CHANNEL_OPTIONS[0][1],
+                "pid2_sign": False,
+                "pid2_limit_enabled": False,
+                "pid2_limit_max": 0.0,
             },
         )()
 

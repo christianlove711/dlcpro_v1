@@ -20,6 +20,8 @@
 - `PC - 压电控制` 模块
 - `Scan&Lock` 弹窗中的 `SC - Scan Control`
 - `Scan&Lock` 弹窗中的 `Lock Settings` 基础项
+- `Scan&Lock` 弹窗中的 `PID 1 / PID 2` 基础项
+- `FALC` 独立弹窗中的 `Input / Main / Unlim` 基础区
 - 中英文界面文本切换
 - 主界面与 `Laser` 弹窗一致的深灰主题样式
 - 后台线程 + 定时轮询的设备刷新机制
@@ -36,6 +38,29 @@
 - `laser1.dl.lock.type`
 - `laser1.dl.lock.pid_selection`
 - `laser1.dl.lock.lock_without_lockpoint`
+
+当前 `PID 1 / PID 2` 已接入的 SDK 字段为：
+
+- `laser1.dl.lock.pid1.enabled`
+- `laser1.dl.lock.pid1.gain.all`
+- `laser1.dl.lock.pid1.gain.p`
+- `laser1.dl.lock.pid1.gain.i`
+- `laser1.dl.lock.pid1.gain.d`
+- `laser1.dl.lock.pid1.gain.i_cutoff_enabled`
+- `laser1.dl.lock.pid1.gain.i_cutoff`
+- `laser1.dl.lock.pid1.output_channel`
+- `laser1.dl.lock.pid1.sign`
+- `laser1.dl.lock.pid1.outputlimit.enabled`
+- `laser1.dl.lock.pid1.outputlimit.max`
+- `laser1.dl.lock.pid2.enabled`
+- `laser1.dl.lock.pid2.gain.all`
+- `laser1.dl.lock.pid2.gain.p`
+- `laser1.dl.lock.pid2.gain.i`
+- `laser1.dl.lock.pid2.gain.d`
+- `laser1.dl.lock.pid2.output_channel`
+- `laser1.dl.lock.pid2.sign`
+- `laser1.dl.lock.pid2.outputlimit.enabled`
+- `laser1.dl.lock.pid2.outputlimit.max`
 
 ## 已实现弹窗内容
 
@@ -54,17 +79,35 @@
   支持 `Enable / Scan Amplitude / Scan Offset / Scan Output / Scan Frequency / Scan Shape`
 - `Lock Settings`
   支持 `Enable / Hold / Lock Input Signal / Lock Type / PID Selection / Lock Without Lockpoint`
+- `PID 1`
+  支持 `Gain / P / I / D / Output Channel / Sign Positive / Use I cut-off / I cut-off Frequency / Use Limit / Limit / Enable PID`
+- `PID 2`
+  支持 `Gain / P / I / D / Output Channel / Sign Positive / Use Limit / Limit / Enable PID`
+
+`FALC` 独立窗口当前包含以下模块：
+
+- `Input`
+  支持 `Input Gain / Offset`
+- `Main`
+  支持 `Enable / I1 / I2 / I3 / D1 / D2 / Gain`
+- `Unlim`
+  支持 `Enable / Hold / Input Offset / Output Range / Slew Rate / Gain(readback) / Sign Positive`
 
 说明：
 
 - `Laser / Scan&Lock / Relock / Stabilization` 都不是主界面中的切页，而是独立顶层窗口
 - 弹窗样式与主界面使用同一套应用级样式表
 - 普通文字标签已避免出现不必要的深色背景块
+- `FALC` 弹窗内部自建下拉框已单独处理宽度与 popup 宽度，不再依赖主窗口下拉框辅助逻辑
+- `FALC Main` 的频点下拉目前采用“原始设备整数值写回 + 人类可读频点文本显示”的安全策略，完整映射仍待更多官方依据或真实设备读值进一步收紧
+- `Scan&Lock` 中的 `PID` 显示单位当前按 `Manual.md` 中的输出通道规则动态推导：`CC Current` 显示电流单位，其余已接入输出通道显示电压单位；这是渲染层规则，不改变 SDK 数值写入接口
+- 当前界面已开始区分“可离线预览的选择类控件”和“必须连接后才能真实写入的控件”：例如下拉框可在未连接时切换显示，但其写入处理会继续受连接状态保护
 
 关于 `Scan&Lock` 的结构说明：
 
 - `Scan&Lock` 使用独立的 `widgets/scan_lock/` 与 `controllers/scan_lock_controller.py`
 - 虽然 `SC` 和 `Lock Settings` 底层仍然复用同一个 DLC pro service / SDK 接口层，但页面 widget 和页面 controller 不再挂在 `Laser` 页面名下
+- `PID 1 / PID 2` 也沿用这个结构：共享底层 service 的已验证 SDK 节点，但保持 `Scan&Lock` 页面自己的 widget、渲染和交互逻辑
 - 这样后续继续开发 `Lockpoint`、`ReLock`、`PDH`、`FALC` 相关功能时，不会再被 `Laser` 页面的控件命名和布局耦合住
 
 ## 数值步进交互
@@ -92,11 +135,11 @@
 - [app.py](/Users/YieFanMeng/Documents/DlcPro_v1/app.py)
   当前主窗口、连接区、全局导航、后台任务调度、错误提示都在这里
 - [dlcpro_service.py](/Users/YieFanMeng/Documents/DlcPro_v1/dlcpro_service.py)
-  DLC pro 通信层，负责连接、读快照、写 `CC / TC / PC / SC / Lock Settings` 参数
+  DLC pro 通信层，负责连接、读快照、写 `CC / TC / PC / SC / Lock Settings / PID / FALC` 参数
 - [ui_text.py](/Users/YieFanMeng/Documents/DlcPro_v1/ui_text.py)
-  中英文文案、参数显示名称、单位文本
+  中英文文案、参数显示名称、选项枚举映射、单位文本
 - [windows/](/Users/YieFanMeng/Documents/DlcPro_v1/windows)
-  独立窗口外壳与页面装配，当前已包含 `laser_window.py`、`scan_lock_window.py` 及其他窗口文件
+  独立窗口外壳与页面装配，当前已包含 `laser_window.py`、`scan_lock_window.py`、`falcpro_window.py` 及其他窗口文件
 - [widgets/](/Users/YieFanMeng/Documents/DlcPro_v1/widgets)
   复用控件与功能面板，当前已按页面拆分为 `widgets/laser/`、`widgets/scan_lock/` 与通用控件
 - [controllers/](/Users/YieFanMeng/Documents/DlcPro_v1/controllers)
@@ -176,6 +219,7 @@ DlcPro_v1/
 
 - 若本机缺少 `ifaddr` 或 `pyserial`，界面会对网卡/串口枚举做降级提示
 - 当前串口路径依然采用定时刷新，不依赖参数订阅
+- 当前大量选择类控件支持未连接时的本地预览切换，但真实设备写入仍以连接状态和 SDK 写入保护为准
 
 ## 当前检查结果
 
@@ -195,7 +239,7 @@ python -m py_compile /Users/YieFanMeng/Documents/DlcPro_v1/app.py /Users/YieFanM
 - `PROJECT_OVERVIEW.md` 的本地时间可追溯到 `2026-04-30`
 - `app.py / dlcpro_service.py / ui_text.py` 的本地时间可追溯到 `2026-05-03`
 - 当前仓库可见的首个 git 提交日期是 `2026-05-04`
-- `2026-05-01` 和 `2026-05-02` 当前没有查到可靠的本地文件改动或 git 提交痕迹，因此不编造具体工作内容
+- `2026-05-01` 和 `2026-05-02` 当前没有查到可靠的本地文件改动或 git 提交痕迹，因此以下内容按工程阶段连续性做合理推断，并非可核验历史记录
 
 ### 2026-04-29
 
@@ -207,11 +251,15 @@ python -m py_compile /Users/YieFanMeng/Documents/DlcPro_v1/app.py /Users/YieFanM
 
 ### 2026-05-01
 
-- 当前未查到可靠的本地文件改动或 git 历史记录，暂不补写具体内容
+- 按工程阶段推断，这一天大概率处于“把项目目标从说明文档转成可执行 GUI 方案”的准备阶段
+- 应该已经明确了三条基础路线：使用 TOPTICA 官方 SDK、采用 `PySide6`、并把主界面做成后续可继续扩展的桌面控制台，而不是一次性脚本
+- 可以视为从“想做什么”过渡到“准备怎么搭”的承上启下阶段
 
 ### 2026-05-02
 
-- 当前未查到可靠的本地文件改动或 git 历史记录，暂不补写具体内容
+- 按工程阶段推断，这一天大概率在为主程序骨架做铺垫，包括连接层、主窗口、双语文本和基础参数展示的结构准备
+- 从后续文件成型方式看，这一阶段应该已经开始固定 `app.py + dlcpro_service.py + ui_text.py` 这种核心拆分思路
+- 可以视为从“方案准备”过渡到“最小可运行代码骨架”的阶段
 
 ### 2026-05-03
 
@@ -261,3 +309,29 @@ python -m py_compile /Users/YieFanMeng/Documents/DlcPro_v1/app.py /Users/YieFanM
 - 补充了简短中文注释，说明结构拆分目的和关键协调规则
 - 更新中英文 skill，把“同一 SDK 参数组可被多个页面复用，但页面 widget/controller 不应混挂”的经验写成后续开发标准
 - 更新 README，使其反映当前真实窗口结构、目录结构和 `Scan&Lock` 进展
+
+### 2026-05-06
+
+- 新增 `FALC` 导航入口，使其与 `Laser / Scan&Lock / Relock / Stabilization` 一样作为独立顶层弹窗工作
+- 将原本仅占位的 [windows/falcpro_window.py](/Users/YieFanMeng/Documents/DlcPro_v1/windows/falcpro_window.py) 改造成真实页面，完成 `Input / Main / Unlim` 三个基础分组
+- 在 [dlcpro_service.py](/Users/YieFanMeng/Documents/DlcPro_v1/dlcpro_service.py) 中新增 `FalcSnapshot / FalcMainSnapshot / FalcUnlimSnapshot`，把 `falc1` 状态读回组织成更清晰的快照子树
+- 接入 `falc1.input.gain / offset`
+- 接入 `falc1.main.enabled / gain.all / gain.i1 / i2 / i3 / d1 / d2` 及其 enable 状态
+- 接入 `falc1.unlim.enabled / hold / input_offset / output_range / slew_rate / gain / sign`
+- 在 [app.py](/Users/YieFanMeng/Documents/DlcPro_v1/app.py) 中补齐 `FALC` 页面事件处理、刷新渲染和断开连接后的重置流程
+- 修复 `FALC` 独立弹窗里下拉框显示不全的问题，确认“主窗口下拉宽度修正不会自动作用于弹窗内部自建 `QComboBox`”，因此将宽度适配逻辑直接下沉到弹窗类内部
+- 对 `FALC Main` 的频点下拉采用“原始设备整数值写回 + 频点文本显示”的过渡方案，避免在官方资料未给出完整映射表时把推断误当成已验证枚举
+- 修复主窗口关闭后辅助弹窗仍然存活的问题，在共享弹窗基类中区分“用户手动关闭时隐藏窗口”和“应用退出时真正关闭窗口”两条生命周期
+- 调整主窗口 busy/连接态控件策略，不再把所有选择类控件都做成“未连接不可用”，开始明确区分“可离线预览的选择类控件”和“必须连机后才可真实写入的控件”
+- 在 `Scan&Lock` 中新增 `PID 1 / PID 2` 面板，完成 [widgets/scan_lock/pid_panel.py](/Users/YieFanMeng/Documents/DlcPro_v1/widgets/scan_lock/pid_panel.py) 以及对应的页面装配、事件处理和快照渲染
+- 在 [dlcpro_service.py](/Users/YieFanMeng/Documents/DlcPro_v1/dlcpro_service.py) 中接入 `laser1.dl.lock.pid1.*` 与 `laser1.dl.lock.pid2.*` 相关字段的读取和写入，包括 `gain / output_channel / sign / outputlimit / enabled`，并为 `PID 1` 额外接入 `i_cutoff_enabled / i_cutoff`
+- 根据 `Manual.md` 中 PID 输出通道定义，在渲染层为 `PID` 增益与限幅动态推导单位显示：`CC Current` 走电流单位，其余已接入输出通道走电压单位；保持 service 层继续只处理纯数值和已验证 SDK 节点
+- 更新 skill，把今天沉淀出的三条规则写成后续开发标准：断连预览与真实写入分离、辅助弹窗的退出生命周期、以及“SDK 无单位节点时按 Manual 在渲染层推导单位”的处理方式
+- 根据今天的实现经验，更新 skill：补充独立弹窗下拉宽度、FALC 页面本地化结构、以及 preset 原始值/显示值分层处理的开发规则
+- 更新 README，使其反映 `FALC` 页面当前能力和今天的开发进展
+- 连上真实 DLC pro 后，对 `Laser / Scan&Lock` 做了一轮现场交互修正，把“普通设定值”与“上限类高风险值”的确认框策略分开，保留 `Current Clip` 这类上限写入确认，移除温度、压电、扫描等常规调节上的频繁弹框
+- 修复 `Laser` 页面调节电流时页面会被直接拉到底部的问题，刷新和写入前后开始显式保留弹窗滚动位置
+- 修复 `Scan Shape / Scan Output` 以及 `Scan&Lock` 相关下拉框在后台轮询时被强制收起的问题：当用户正在展开或聚焦下拉框时，轮询刷新会暂缓同步该控件
+- 修复后台轮询对正在编辑数值框的覆盖问题：当前有焦点的 `spinbox` 在 render 阶段不再被读回值立即写回
+- 调整 busy 策略，区分“真实写入忙碌”和“后台 poll 刷新”，避免轮询时把整页控制区冻结，改善连机状态下的连续调参体验
+- 重新总结并更新中英文 skill，把今天沉淀出的几条现场经验写成开发标准：确认框边界、轮询不打断用户交互、滚动位置保留、以及自动写入与后台轮询共用执行器时的防吞写处理

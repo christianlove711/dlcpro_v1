@@ -30,6 +30,7 @@ def build_laser_page(owner) -> QWidget:
     layout.setSpacing(0)
 
     scroll_area = QScrollArea()
+    owner.laser_scroll_area = scroll_area
     scroll_area.setWidgetResizable(True)
     scroll_area.setFrameShape(QFrame.NoFrame)
     scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)

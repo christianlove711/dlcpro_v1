@@ -1,0 +1,4 @@
+interface:
+  display_name: "TOPTICA DLC pro GUI"
+  short_description: "Build a custom DLC pro GUI from SDK and manual"
+  default_prompt: "Use $toptica-dlcpro-gui-development-en to build or review a PySide6-based custom control application for TOPTICA DLC pro."

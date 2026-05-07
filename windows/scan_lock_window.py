@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QGroupBox, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from widgets.scan_lock.lock_panel import LockSettingsPanel
+from widgets.scan_lock.pid_panel import PidPanel
 from widgets.scan_lock.sc_panel import ScanControlPanel
 from windows.base_window import AuxiliaryWindow
 
@@ -11,7 +12,7 @@ from windows.base_window import AuxiliaryWindow
 class ScanLockWindow(AuxiliaryWindow):
     def __init__(self, page: QWidget) -> None:
         super().__init__()
-        self.resize(860, 620)
+        self.resize(980, 1180)
         self.setCentralWidget(page)
 
 
@@ -47,6 +48,14 @@ def build_scan_lock_page(owner) -> QWidget:
     owner.lock_settings_panel = LockSettingsPanel(owner)
     owner.lock_settings_panel.bind_to(owner)
     group_layout.addWidget(owner.lock_settings_panel)
+
+    owner.pid1_panel = PidPanel(owner, "pid1", "pid1_section")
+    owner.pid1_panel.bind_to(owner)
+    group_layout.addWidget(owner.pid1_panel)
+
+    owner.pid2_panel = PidPanel(owner, "pid2", "pid2_section")
+    owner.pid2_panel.bind_to(owner)
+    group_layout.addWidget(owner.pid2_panel)
     group_layout.addStretch(1)
 
     content_layout.addWidget(owner.scan_lock_group)

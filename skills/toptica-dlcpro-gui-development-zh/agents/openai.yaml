@@ -1,0 +1,4 @@
+interface:
+  display_name: "TOPTICA DLC pro 中文"
+  short_description: "基于 SDK 和手册开发 DLC pro 自定义界面"
+  default_prompt: "使用 $toptica-dlcpro-gui-development-zh 来开发或审查基于 PySide6 的 TOPTICA DLC pro 自定义控制软件。"
