@@ -4,7 +4,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFormLayout,
     QFrame,
     QGridLayout,
@@ -18,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from dlcpro_service import DeviceSnapshot, FalcSnapshot
 from ui_text import TEXT
+from widgets.common_controls import SafeComboBox, SafeDoubleSpinBox
 from windows.base_window import AuxiliaryWindow
 
 
@@ -55,7 +55,7 @@ class FalcProWindow(AuxiliaryWindow):
         input_layout.setSpacing(10)
 
         self.input_gain_label = QLabel()
-        self.input_gain_combo = QComboBox()
+        self.input_gain_combo = SafeComboBox()
         self.input_gain_combo.addItem("x1", 1)
         self.input_gain_combo.addItem("x5", 5)
         self.input_gain_combo.currentIndexChanged.connect(owner._on_falc_input_gain_changed)
@@ -63,11 +63,12 @@ class FalcProWindow(AuxiliaryWindow):
         input_layout.addRow(self.input_gain_label, self.input_gain_combo)
 
         self.input_offset_label = QLabel()
-        self.input_offset_spin = QDoubleSpinBox()
+        self.input_offset_spin = SafeDoubleSpinBox()
         self.input_offset_spin.setDecimals(5)
         self.input_offset_spin.setRange(-1_000_000_000.0, 1_000_000_000.0)
         self.input_offset_spin.setSingleStep(0.0001)
-        self.input_offset_spin.editingFinished.connect(owner._on_falc_input_offset_finished)
+        self.input_offset_spin.connect_live_apply(owner._on_falc_input_offset_finished)
+        self.input_offset_spin.set_button_only_mode()
         input_layout.addRow(self.input_offset_label, self.input_offset_spin)
         root.addWidget(self.input_group)
 
@@ -95,7 +96,7 @@ class FalcProWindow(AuxiliaryWindow):
         self.filter_grid.setVerticalSpacing(10)
 
         self.filter_labels: dict[str, QLabel] = {}
-        self.filter_combos: dict[str, QComboBox] = {}
+        self.filter_combos: dict[str, SafeComboBox] = {}
         self.filter_checks: dict[str, QCheckBox] = {}
         for row, name in enumerate(self.FILTER_NAMES):
             label = QLabel(name.upper())
@@ -112,11 +113,12 @@ class FalcProWindow(AuxiliaryWindow):
 
         gain_row = QHBoxLayout()
         self.main_gain_label = QLabel()
-        self.main_gain_spin = QDoubleSpinBox()
+        self.main_gain_spin = SafeDoubleSpinBox()
         self.main_gain_spin.setDecimals(2)
         self.main_gain_spin.setRange(-1_000_000_000.0, 1_000_000_000.0)
         self.main_gain_spin.setSingleStep(0.1)
-        self.main_gain_spin.editingFinished.connect(owner._on_falc_main_gain_finished)
+        self.main_gain_spin.connect_live_apply(owner._on_falc_main_gain_finished)
+        self.main_gain_spin.set_button_only_mode()
         gain_row.addWidget(self.main_gain_label)
         gain_row.addStretch(1)
         gain_row.addWidget(self.main_gain_spin)
@@ -160,27 +162,29 @@ class FalcProWindow(AuxiliaryWindow):
         unlim_form.setVerticalSpacing(10)
 
         self.unlim_input_offset_label = QLabel()
-        self.unlim_input_offset_spin = QDoubleSpinBox()
+        self.unlim_input_offset_spin = SafeDoubleSpinBox()
         self.unlim_input_offset_spin.setDecimals(2)
         self.unlim_input_offset_spin.setRange(-1_000_000_000.0, 1_000_000_000.0)
         self.unlim_input_offset_spin.setSingleStep(0.01)
-        self.unlim_input_offset_spin.editingFinished.connect(owner._on_falc_unlim_input_offset_finished)
+        self.unlim_input_offset_spin.connect_live_apply(owner._on_falc_unlim_input_offset_finished)
+        self.unlim_input_offset_spin.set_button_only_mode()
         unlim_form.addRow(self.unlim_input_offset_label, self.unlim_input_offset_spin)
 
         self.unlim_output_range_label = QLabel()
-        self.unlim_output_range_spin = QDoubleSpinBox()
+        self.unlim_output_range_spin = SafeDoubleSpinBox()
         self.unlim_output_range_spin.setDecimals(2)
         self.unlim_output_range_spin.setRange(0.0, 1_000_000_000.0)
         self.unlim_output_range_spin.setSingleStep(0.01)
-        self.unlim_output_range_spin.editingFinished.connect(owner._on_falc_unlim_output_range_finished)
+        self.unlim_output_range_spin.connect_live_apply(owner._on_falc_unlim_output_range_finished)
         unlim_form.addRow(self.unlim_output_range_label, self.unlim_output_range_spin)
 
         self.unlim_slew_rate_label = QLabel()
-        self.unlim_slew_rate_spin = QDoubleSpinBox()
+        self.unlim_slew_rate_spin = SafeDoubleSpinBox()
         self.unlim_slew_rate_spin.setDecimals(0)
         self.unlim_slew_rate_spin.setRange(1.0, 12.0)
         self.unlim_slew_rate_spin.setSingleStep(1.0)
-        self.unlim_slew_rate_spin.editingFinished.connect(owner._on_falc_unlim_slew_rate_finished)
+        self.unlim_slew_rate_spin.connect_live_apply(owner._on_falc_unlim_slew_rate_finished)
+        self.unlim_slew_rate_spin.set_button_only_mode()
         unlim_form.addRow(self.unlim_slew_rate_label, self.unlim_slew_rate_spin)
 
         self.unlim_gain_label = QLabel()
@@ -209,10 +213,10 @@ class FalcProWindow(AuxiliaryWindow):
         self._set_unlim_enable_indicator(False)
         self._set_unlim_hold_indicator(False)
 
-    def _create_preset_combo(self, filter_name: str) -> QComboBox:
-        combo = QComboBox()
+    def _create_preset_combo(self, filter_name: str) -> SafeComboBox:
+        combo = SafeComboBox()
         combo.setEditable(True)
-        combo.setInsertPolicy(QComboBox.NoInsert)
+        combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         combo.lineEdit().setAlignment(Qt.AlignLeft)
         self._configure_combo(combo, minimum=170, maximum=220)
         combo.lineEdit().editingFinished.connect(
@@ -263,14 +267,10 @@ class FalcProWindow(AuxiliaryWindow):
         self.status_hint.setText(f"{t['latest_message']}: {falc.status_txt or t['not_available']}")
 
         self._sync_combo_data(self.input_gain_combo, falc.input_gain, f"x{falc.input_gain}")
-        self.input_offset_spin.blockSignals(True)
-        self.input_offset_spin.setValue(falc.input_offset)
-        self.input_offset_spin.blockSignals(False)
+        self._set_spin_if_idle(self.input_offset_spin, falc.input_offset)
 
         self._update_main_enabled(falc.main.enabled)
-        self.main_gain_spin.blockSignals(True)
-        self.main_gain_spin.setValue(falc.main.gain_all)
-        self.main_gain_spin.blockSignals(False)
+        self._set_spin_if_idle(self.main_gain_spin, falc.main.gain_all)
 
         for name in self.FILTER_NAMES:
             combo = self.filter_combos[name]
@@ -284,15 +284,9 @@ class FalcProWindow(AuxiliaryWindow):
 
         self._update_unlim_enabled(falc.unlim.enabled)
         self._update_unlim_hold(falc.unlim.hold)
-        self.unlim_input_offset_spin.blockSignals(True)
-        self.unlim_input_offset_spin.setValue(falc.unlim.input_offset)
-        self.unlim_input_offset_spin.blockSignals(False)
-        self.unlim_output_range_spin.blockSignals(True)
-        self.unlim_output_range_spin.setValue(falc.unlim.output_range)
-        self.unlim_output_range_spin.blockSignals(False)
-        self.unlim_slew_rate_spin.blockSignals(True)
-        self.unlim_slew_rate_spin.setValue(float(falc.unlim.slew_rate))
-        self.unlim_slew_rate_spin.blockSignals(False)
+        self._set_spin_if_idle(self.unlim_input_offset_spin, falc.unlim.input_offset)
+        self._set_spin_if_idle(self.unlim_output_range_spin, falc.unlim.output_range)
+        self._set_spin_if_idle(self.unlim_slew_rate_spin, float(falc.unlim.slew_rate))
         self.unlim_gain_value.setText(self._format_value_with_unit(falc.unlim.gain, 2, t["falc_unlim_gain_unit"]))
         self.unlim_sign_positive_check.blockSignals(True)
         self.unlim_sign_positive_check.setChecked(falc.unlim.sign)
@@ -350,6 +344,18 @@ class FalcProWindow(AuxiliaryWindow):
         ):
             widget.setEnabled(writable)
 
+    @staticmethod
+    def _set_spin_if_idle(spinbox, value: float) -> None:
+        sync_from_device = getattr(spinbox, "sync_from_device", None)
+        if callable(sync_from_device):
+            sync_from_device(value)
+            return
+        if spinbox.hasFocus():
+            return
+        spinbox.blockSignals(True)
+        spinbox.setValue(value)
+        spinbox.blockSignals(False)
+
     def current_filter_value(self, filter_name: str) -> int | None:
         combo = self.filter_combos[filter_name]
         data = combo.currentData()
@@ -402,7 +408,7 @@ class FalcProWindow(AuxiliaryWindow):
             f"border-radius: 8px; background: {color}; border: 1px solid {border};"
         )
 
-    def _sync_combo_data(self, combo: QComboBox, value: int, label: str) -> None:
+    def _sync_combo_data(self, combo: SafeComboBox, value: int, label: str) -> None:
         index = combo.findData(value)
         if index < 0:
             combo.addItem(label, value)
@@ -415,13 +421,13 @@ class FalcProWindow(AuxiliaryWindow):
         combo.blockSignals(False)
         self._fit_combo_popup_width(combo)
 
-    def _configure_combo(self, combo: QComboBox, minimum: int, maximum: int) -> None:
-        combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+    def _configure_combo(self, combo: SafeComboBox, minimum: int, maximum: int) -> None:
+        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         combo.setMinimumWidth(minimum)
         combo.setMaximumWidth(maximum)
         self._fit_combo_popup_width(combo)
 
-    def _fit_combo_popup_width(self, combo: QComboBox) -> None:
+    def _fit_combo_popup_width(self, combo: SafeComboBox) -> None:
         metrics = combo.fontMetrics()
         widths = [metrics.horizontalAdvance(combo.itemText(i)) for i in range(combo.count())]
         current_width = metrics.horizontalAdvance(combo.currentText()) if combo.currentText() else 0

@@ -16,6 +16,8 @@
 - 升级说明：`python-lasersdk/_sources/upgrade_to_v3.rst.txt`
 - 已安装 SDK 路径：与当前 Python 环境有关，需要时可这样查询：
 
+- æœ¬æœºå·²å®‰è£… SDK è·¯å¾„ï¼š`C:\Users\68310396\miniconda3\envs\dlcpro\Lib\site-packages\toptica\lasersdk`
+
 ```bash
 python -c "import toptica, pathlib; print(pathlib.Path(toptica.__file__).resolve().parent)"
 ```

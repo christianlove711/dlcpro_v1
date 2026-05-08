@@ -14,6 +14,7 @@ Use this file to quickly locate the authoritative sources, dependencies, and pro
 - Asynchronous high-level API: `python-lasersdk/_sources/asynchronous_high_level_api.rst.txt`
 - Official examples: `python-lasersdk/_sources/examples.rst.txt`
 - Upgrade notes: `python-lasersdk/_sources/upgrade_to_v3.rst.txt`
+- Installed SDK path on this machine: `C:\Users\68310396\miniconda3\envs\dlcpro\Lib\site-packages\toptica\lasersdk`
 - Installed SDK path: environment-specific. Query the active interpreter when needed, for example:
 
 ```bash

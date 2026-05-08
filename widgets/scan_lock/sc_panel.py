@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QVBoxLayout
+from PySide6.QtWidgets import QFormLayout, QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
 from ui_text import TEXT
-from widgets.common_controls import create_toggle_button
+from widgets.common_controls import PrecisionButtonRow, SafeComboBox, SafeDoubleSpinBox, create_toggle_button
 
 
 class ScanControlPanel(QFrame):
     EXPORTED_ATTRS = (
         "sc_label",
         "sc_enable_button",
+        "sc_precision_label",
         "scan_amplitude_label",
         "scan_amplitude_spin",
         "scan_offset_label",
@@ -40,6 +41,10 @@ class ScanControlPanel(QFrame):
         header.addWidget(self.sc_enable_button)
         layout.addLayout(header)
 
+        self.sc_precision_label = QLabel()
+        self.sc_precision_row = PrecisionButtonRow(owner.PRECISION_OPTIONS, owner._set_sc_precision)
+        self.sc_precision_buttons = self.sc_precision_row.buttons
+
         top_form = QFormLayout()
         top_form.setLabelAlignment(Qt.AlignLeft)
         top_form.setFormAlignment(Qt.AlignTop)
@@ -47,23 +52,26 @@ class ScanControlPanel(QFrame):
         top_form.setVerticalSpacing(14)
 
         self.scan_amplitude_label = QLabel()
-        self.scan_amplitude_spin = QDoubleSpinBox()
+        self.scan_amplitude_spin = SafeDoubleSpinBox()
         self.scan_amplitude_spin.setRange(-1000000.0, 1000000.0)
         self.scan_amplitude_spin.setDecimals(6)
         self.scan_amplitude_spin.setSuffix(f" {TEXT[owner.language]['scan_amplitude_unit']}")
         self.scan_amplitude_spin.setKeyboardTracking(False)
-        self.scan_amplitude_spin.editingFinished.connect(owner._on_sc_amplitude_finished)
+        self.scan_amplitude_spin.connect_live_apply(owner._on_sc_amplitude_finished)
+        self.scan_amplitude_spin.set_button_only_mode()
 
         self.scan_offset_label = QLabel()
-        self.scan_offset_spin = QDoubleSpinBox()
+        self.scan_offset_spin = SafeDoubleSpinBox()
         self.scan_offset_spin.setRange(-1000000.0, 1000000.0)
         self.scan_offset_spin.setDecimals(6)
         self.scan_offset_spin.setSuffix(f" {TEXT[owner.language]['voltage_unit']}")
         self.scan_offset_spin.setKeyboardTracking(False)
-        self.scan_offset_spin.editingFinished.connect(owner._on_sc_offset_finished)
+        self.scan_offset_spin.connect_live_apply(owner._on_sc_offset_finished)
+        self.scan_offset_spin.set_button_only_mode()
 
-        top_form.addRow(self.scan_amplitude_label, self.scan_amplitude_spin)
-        top_form.addRow(self.scan_offset_label, self.scan_offset_spin)
+        top_form.addRow(self.sc_precision_label, self.sc_precision_row)
+        top_form.addRow(self.scan_amplitude_label, owner._create_target_row("sc", self.scan_amplitude_spin))
+        top_form.addRow(self.scan_offset_label, owner._create_target_row("sc", self.scan_offset_spin))
         layout.addLayout(top_form)
 
         divider = QFrame()
@@ -78,28 +86,28 @@ class ScanControlPanel(QFrame):
         bottom_form.setVerticalSpacing(14)
 
         self.scan_output_label = QLabel()
-        self.scan_output_combo = QComboBox()
+        self.scan_output_combo = SafeComboBox()
         self.scan_output_combo.currentIndexChanged.connect(owner._on_sc_output_changed)
 
         self.scan_frequency_label = QLabel()
-        self.scan_frequency_spin = QDoubleSpinBox()
+        self.scan_frequency_spin = SafeDoubleSpinBox()
         self.scan_frequency_spin.setRange(0.0, 1000000.0)
         self.scan_frequency_spin.setDecimals(2)
         self.scan_frequency_spin.setSuffix(" Hz")
         self.scan_frequency_spin.setKeyboardTracking(False)
-        self.scan_frequency_spin.editingFinished.connect(owner._on_sc_frequency_finished)
+        self.scan_frequency_spin.connect_live_apply(owner._on_sc_frequency_finished)
+        self.scan_frequency_spin.set_button_only_mode()
 
         self.scan_shape_label = QLabel()
-        self.scan_shape_combo = QComboBox()
+        self.scan_shape_combo = SafeComboBox()
         self.scan_shape_combo.currentIndexChanged.connect(owner._on_sc_shape_changed)
 
         bottom_form.addRow(self.scan_output_label, self.scan_output_combo)
-        bottom_form.addRow(self.scan_frequency_label, self.scan_frequency_spin)
+        bottom_form.addRow(self.scan_frequency_label, owner._create_target_row("sc", self.scan_frequency_spin))
         bottom_form.addRow(self.scan_shape_label, self.scan_shape_combo)
         layout.addLayout(bottom_form)
 
         # Scan&Lock 的 SC 页面按官方界面单独布局，不复用 Laser 页面的步进按钮区。
-        self.sc_precision_buttons: list = []
 
     def bind_to(self, owner) -> None:
         for name in self.EXPORTED_ATTRS:

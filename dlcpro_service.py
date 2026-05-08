@@ -65,6 +65,27 @@ class FalcSnapshot:
 
 
 @dataclass(slots=True)
+class StabilizationSnapshot:
+    enabled: bool
+    input_channel: int
+    setpoint: float
+    actual_level: float
+    hold_output_on_unlock: bool
+    output_channel: int
+    gain_all: float
+    gain_p: float
+    gain_i: float
+    gain_d: float
+    pd_ext_input_channel: int
+    pd_ext_photodiode: float
+    pd_ext_cal_factor: float
+    pd_ext_cal_offset: float
+    window_enabled: bool
+    window_level_low: float
+    window_level_hysteresis: float
+
+
+@dataclass(slots=True)
 class DeviceSnapshot:
     connection_mode: str
     connection_target: str
@@ -84,6 +105,7 @@ class DeviceSnapshot:
     current_clip: float
     current_clip_tuning: float
     current_clip_limit: float
+    current_clip_writable_limit: float
     effective_current_max: float
     use_current_clip_tuning: bool
     cc_status_txt: str
@@ -139,10 +161,22 @@ class DeviceSnapshot:
     pid2_sign: bool
     pid2_limit_enabled: bool
     pid2_limit_max: float
+    relock_detection_enabled: bool
+    relock_input_channel: int
+    relock_level_high: float
+    relock_level_low: float
+    relock_level_hysteresis: float
+    relock_delay: float
+    relock_reset_enabled: bool
+    relock_enabled: bool
+    relock_amplitude: float
+    relock_frequency: float
+    relock_output_channel: int
     pressure_comp_enabled: bool
     pressure_comp_air_pressure: float
     pressure_comp_factor: float
     pressure_comp_voltage: float
+    stabilization: StabilizationSnapshot | None
     falc1: FalcSnapshot | None
 
 
@@ -495,6 +529,61 @@ class DlcProService:
             self._lock_control().pid2.outputlimit.max.set(float(value))
             return self._read_snapshot_unlocked()
 
+    def set_relock_detection_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().window.enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_relock_input_channel(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().window.input_channel.set(int(value))
+            return self._read_snapshot_unlocked()
+
+    def set_relock_level_high(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().window.level_high.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_relock_level_low(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().window.level_low.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_relock_level_hysteresis(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().window.level_hysteresis.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_relock_delay(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().relock.delay.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_relock_reset_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().reset.enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_relock_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().relock.enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_relock_amplitude(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().relock.amplitude.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_relock_frequency(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().relock.frequency.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_relock_output_channel(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().relock.output_channel.set(int(value))
+            return self._read_snapshot_unlocked()
+
     def set_falc1_input_gain(self, value: int) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).input.gain.set(int(value))
@@ -555,6 +644,71 @@ class DlcProService:
     def set_falc1_unlim_sign(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).unlim.sign.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_stabilization_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._power_stabilization().enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_stabilization_setpoint(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._power_stabilization().setpoint.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_stabilization_hold_output_on_unlock(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._power_stabilization().hold_output_on_unlock.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_stabilization_gain_all(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._power_stabilization().gain.all.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_stabilization_gain_p(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._power_stabilization().gain.p.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_stabilization_gain_i(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._power_stabilization().gain.i.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_stabilization_gain_d(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._power_stabilization().gain.d.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_stabilization_pd_ext_input_channel(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            self._device_required().laser1.pd_ext.input_channel.set(int(value))
+            return self._read_snapshot_unlocked()
+
+    def set_stabilization_pd_ext_cal_factor(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._device_required().laser1.pd_ext.cal_factor.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_stabilization_pd_ext_cal_offset(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._device_required().laser1.pd_ext.cal_offset.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_stabilization_window_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._power_stabilization().window.enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_stabilization_window_level_low(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._power_stabilization().window.level_low.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_stabilization_window_level_hysteresis(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._power_stabilization().window.level_hysteresis.set(float(value))
             return self._read_snapshot_unlocked()
 
     def list_serial_ports(self) -> list[str]:
@@ -619,6 +773,9 @@ class DlcProService:
     def _falc(self, board_index: int):
         return getattr(self._device_required(), f"falc{board_index}")
 
+    def _power_stabilization(self):
+        return self._device_required().laser1.power_stabilization
+
     def _read_snapshot_unlocked(self) -> DeviceSnapshot:
         device = self._device_required()
         settings = self._settings
@@ -635,6 +792,9 @@ class DlcProService:
         lock = device.laser1.dl.lock
         pid1 = lock.pid1
         pid2 = lock.pid2
+        relock = lock.relock
+        relock_window = lock.window
+        relock_reset = lock.reset
         return DeviceSnapshot(
             connection_mode=settings.mode,
             connection_target=settings.target,
@@ -654,6 +814,7 @@ class DlcProService:
             current_clip=float(cc.current_clip.get()),
             current_clip_tuning=float(cc.current_clip_tuning.get()),
             current_clip_limit=float(cc.current_clip_limit.get()),
+            current_clip_writable_limit=self._compute_current_clip_writable_limit(cc),
             effective_current_max=self._compute_effective_current_max(cc),
             use_current_clip_tuning=bool(cc.use_current_clip_tuning.get()),
             cc_status_txt=cc.status_txt.get(),
@@ -709,10 +870,22 @@ class DlcProService:
             pid2_sign=bool(pid2.sign.get()),
             pid2_limit_enabled=bool(pid2.outputlimit.enabled.get()),
             pid2_limit_max=float(pid2.outputlimit.max.get()),
+            relock_detection_enabled=bool(relock_window.enabled.get()),
+            relock_input_channel=int(relock_window.input_channel.get()),
+            relock_level_high=float(relock_window.level_high.get()),
+            relock_level_low=float(relock_window.level_low.get()),
+            relock_level_hysteresis=float(relock_window.level_hysteresis.get()),
+            relock_delay=float(relock.delay.get()),
+            relock_reset_enabled=bool(relock_reset.enabled.get()),
+            relock_enabled=bool(relock.enabled.get()),
+            relock_amplitude=float(relock.amplitude.get()),
+            relock_frequency=float(relock.frequency.get()),
+            relock_output_channel=int(relock.output_channel.get()),
             pressure_comp_enabled=bool(pressure_comp.enabled.get()),
             pressure_comp_air_pressure=float(pressure_comp.air_pressure.get()),
             pressure_comp_factor=float(pressure_comp.factor.get()),
             pressure_comp_voltage=float(pressure_comp.compensation_voltage.get()),
+            stabilization=self._read_stabilization_snapshot(device),
             falc1=self._read_falc_snapshot(device, 1),
         )
 
@@ -725,6 +898,15 @@ class DlcProService:
             current_clip_tuning = float(cc.current_clip_tuning.get())
             return min(current_clip, current_clip_tuning, current_clip_limit)
         return min(current_clip, current_clip_limit)
+
+    @staticmethod
+    def _compute_current_clip_writable_limit(cc) -> float:
+        current_clip_limit = float(cc.current_clip_limit.get())
+        use_tuning_clip = bool(cc.use_current_clip_tuning.get())
+        if use_tuning_clip:
+            current_clip_tuning = float(cc.current_clip_tuning.get())
+            return min(current_clip_tuning, current_clip_limit)
+        return current_clip_limit
 
     @staticmethod
     def _read_falc_snapshot(device: DLCpro, board_index: int) -> FalcSnapshot | None:
@@ -762,6 +944,33 @@ class DlcProService:
                     output_range=float(unlim.output_range.get()),
                     input_offset=float(unlim.input_offset.get()),
                 ),
+            )
+        except DecopError:
+            return None
+
+    @staticmethod
+    def _read_stabilization_snapshot(device: DLCpro) -> StabilizationSnapshot | None:
+        try:
+            stabilization = device.laser1.power_stabilization
+            pd_ext = device.laser1.pd_ext
+            return StabilizationSnapshot(
+                enabled=bool(stabilization.enabled.get()),
+                input_channel=int(stabilization.input_channel.get()),
+                setpoint=float(stabilization.setpoint.get()),
+                actual_level=float(stabilization.input_channel_value_act.get()),
+                hold_output_on_unlock=bool(stabilization.hold_output_on_unlock.get()),
+                output_channel=int(stabilization.output_channel.get()),
+                gain_all=float(stabilization.gain.all.get()),
+                gain_p=float(stabilization.gain.p.get()),
+                gain_i=float(stabilization.gain.i.get()),
+                gain_d=float(stabilization.gain.d.get()),
+                pd_ext_input_channel=int(pd_ext.input_channel.get()),
+                pd_ext_photodiode=float(pd_ext.photodiode.get()),
+                pd_ext_cal_factor=float(pd_ext.cal_factor.get()),
+                pd_ext_cal_offset=float(pd_ext.cal_offset.get()),
+                window_enabled=bool(stabilization.window.enabled.get()),
+                window_level_low=float(stabilization.window.level_low.get()),
+                window_level_hysteresis=float(stabilization.window.level_hysteresis.get()),
             )
         except DecopError:
             return None

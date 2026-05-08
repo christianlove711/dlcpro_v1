@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QVBoxLayout
+from PySide6.QtWidgets import QFormLayout, QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
 from ui_text import TEXT
-from widgets.common_controls import PrecisionButtonRow, create_toggle_button
+from widgets.common_controls import PrecisionButtonRow, SafeComboBox, SafeDoubleSpinBox, create_toggle_button
 
 
 class PcPanel(QFrame):
@@ -61,12 +61,13 @@ class PcPanel(QFrame):
         pc_form.setVerticalSpacing(14)
 
         self.pc_voltage_set_label = QLabel()
-        self.pc_voltage_set_spin = QDoubleSpinBox()
+        self.pc_voltage_set_spin = SafeDoubleSpinBox()
         self.pc_voltage_set_spin.setRange(-1000000.0, 1000000.0)
         self.pc_voltage_set_spin.setDecimals(6)
         self.pc_voltage_set_spin.setSuffix(f" {TEXT[owner.language]['voltage_unit']}")
         self.pc_voltage_set_spin.setKeyboardTracking(False)
-        self.pc_voltage_set_spin.editingFinished.connect(owner._on_pc_voltage_set_finished)
+        self.pc_voltage_set_spin.connect_live_apply(owner._on_pc_voltage_set_finished)
+        self.pc_voltage_set_spin.set_button_only_mode()
 
         self.pc_voltage_act_label = QLabel()
         self.pc_voltage_act_value = QLabel()
@@ -95,12 +96,13 @@ class PcPanel(QFrame):
         self.pc_slew_rate_enable_label = QLabel()
         self.pc_slew_rate_enable_button = create_toggle_button(owner._on_pc_slew_rate_enable_toggled)
         self.pc_slew_rate_label = QLabel()
-        self.pc_slew_rate_spin = QDoubleSpinBox()
+        self.pc_slew_rate_spin = SafeDoubleSpinBox()
         self.pc_slew_rate_spin.setRange(-1000000.0, 1000000.0)
         self.pc_slew_rate_spin.setDecimals(5)
         self.pc_slew_rate_spin.setSuffix(f" {TEXT[owner.language]['slew_rate_unit']}")
         self.pc_slew_rate_spin.setKeyboardTracking(False)
-        self.pc_slew_rate_spin.editingFinished.connect(owner._on_pc_slew_rate_finished)
+        self.pc_slew_rate_spin.connect_live_apply(owner._on_pc_slew_rate_finished)
+        self.pc_slew_rate_spin.set_button_only_mode()
         pc_slew_form.addRow(self.pc_slew_rate_enable_label, self.pc_slew_rate_enable_button)
         pc_slew_form.addRow(self.pc_slew_rate_label, owner._create_target_row("pc", self.pc_slew_rate_spin))
         layout.addLayout(pc_slew_form)
@@ -120,15 +122,16 @@ class PcPanel(QFrame):
 
         pc_arc_form = QFormLayout()
         self.pc_arc_signal_label = QLabel()
-        self.pc_arc_signal_combo = QComboBox()
+        self.pc_arc_signal_combo = SafeComboBox()
         self.pc_arc_signal_combo.currentIndexChanged.connect(owner._on_pc_arc_signal_changed)
         self.pc_arc_factor_label = QLabel()
-        self.pc_arc_factor_spin = QDoubleSpinBox()
+        self.pc_arc_factor_spin = SafeDoubleSpinBox()
         self.pc_arc_factor_spin.setRange(-1000000.0, 1000000.0)
         self.pc_arc_factor_spin.setDecimals(4)
         self.pc_arc_factor_spin.setSuffix(f" {TEXT[owner.language]['pc_arc_factor_unit']}")
         self.pc_arc_factor_spin.setKeyboardTracking(False)
-        self.pc_arc_factor_spin.editingFinished.connect(owner._on_pc_arc_factor_finished)
+        self.pc_arc_factor_spin.connect_live_apply(owner._on_pc_arc_factor_finished)
+        self.pc_arc_factor_spin.set_button_only_mode()
         pc_arc_form.addRow(self.pc_arc_signal_label, self.pc_arc_signal_combo)
         pc_arc_form.addRow(self.pc_arc_factor_label, owner._create_target_row("pc", self.pc_arc_factor_spin))
         layout.addLayout(pc_arc_form)
@@ -154,12 +157,13 @@ class PcPanel(QFrame):
         self.pressure_comp_air_pressure_value = QLabel()
         self.pressure_comp_air_pressure_value.setObjectName("ReadValue")
         self.pressure_comp_factor_label = QLabel()
-        self.pressure_comp_factor_spin = QDoubleSpinBox()
+        self.pressure_comp_factor_spin = SafeDoubleSpinBox()
         self.pressure_comp_factor_spin.setRange(-1000000.0, 1000000.0)
         self.pressure_comp_factor_spin.setDecimals(3)
         self.pressure_comp_factor_spin.setSuffix(f" {TEXT[owner.language]['pressure_comp_factor_unit']}")
         self.pressure_comp_factor_spin.setKeyboardTracking(False)
-        self.pressure_comp_factor_spin.editingFinished.connect(owner._on_pressure_comp_factor_finished)
+        self.pressure_comp_factor_spin.connect_live_apply(owner._on_pressure_comp_factor_finished)
+        self.pressure_comp_factor_spin.set_button_only_mode()
         self.pressure_comp_voltage_label = QLabel()
         self.pressure_comp_voltage_value = QLabel()
         self.pressure_comp_voltage_value.setObjectName("ReadValue")

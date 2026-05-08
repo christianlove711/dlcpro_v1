@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QComboBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QVBoxLayout
+from PySide6.QtWidgets import QCheckBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
-from widgets.common_controls import create_toggle_button
+from widgets.common_controls import SafeComboBox, create_toggle_button
 
 
 class LockSettingsPanel(QFrame):
@@ -46,15 +46,15 @@ class LockSettingsPanel(QFrame):
         form.setVerticalSpacing(14)
 
         self.lock_input_signal_label = QLabel()
-        self.lock_input_signal_combo = QComboBox()
+        self.lock_input_signal_combo = SafeComboBox()
         self.lock_input_signal_combo.currentIndexChanged.connect(owner._on_lock_input_signal_changed)
 
         self.lock_type_label = QLabel()
-        self.lock_type_combo = QComboBox()
+        self.lock_type_combo = SafeComboBox()
         self.lock_type_combo.currentIndexChanged.connect(owner._on_lock_type_changed)
 
         self.lock_pid_selection_label = QLabel()
-        self.lock_pid_selection_combo = QComboBox()
+        self.lock_pid_selection_combo = SafeComboBox()
         self.lock_pid_selection_combo.currentIndexChanged.connect(owner._on_lock_pid_selection_changed)
 
         self.lock_without_lockpoint_label = QLabel()

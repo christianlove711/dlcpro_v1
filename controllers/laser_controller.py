@@ -206,14 +206,17 @@ class LaserController:
             owner.parameter_table.setItem(row, 1, QTableWidgetItem(str(value)))
 
         owner.last_device_current_set = snapshot.current_set
-        if not owner.current_set_dirty and not owner.current_set_spin.hasFocus():
+        sync_current = getattr(owner.current_set_spin, "sync_from_device", None)
+        if abs(owner.current_set_spin.value() - snapshot.current_set) < 0.000005:
+            owner.current_set_dirty = False
+            if callable(sync_current):
+                sync_current(snapshot.current_set)
+        elif not owner.current_set_dirty and not owner.current_set_spin.hasFocus():
             owner.current_set_programmatic_update = True
             owner.current_set_spin.blockSignals(True)
             owner.current_set_spin.setValue(snapshot.current_set)
             owner.current_set_spin.blockSignals(False)
             owner.current_set_programmatic_update = False
-        elif abs(owner.current_set_spin.value() - snapshot.current_set) < 0.000005:
-            owner.current_set_dirty = False
 
         owner.cc_programmatic_update = True
         owner.feedforward_programmatic_update = True
@@ -221,7 +224,7 @@ class LaserController:
         owner.tc_programmatic_update = True
         owner.pc_programmatic_update = True
         self._set_spin_if_idle(owner.current_clip_spin, snapshot.current_clip)
-        owner.current_clip_spin.setMaximum(max(snapshot.effective_current_max, owner.current_clip_spin.minimum()))
+        owner.current_clip_spin.setMaximum(max(snapshot.current_clip_writable_limit, owner.current_clip_spin.minimum()))
 
         owner.current_act_value.setText(owner._format_value_with_unit(snapshot.current_act, 5, "mA"))
         self._set_spin_if_idle(owner.feedforward_factor_spin, snapshot.feedforward_factor)
@@ -280,6 +283,10 @@ class LaserController:
 
     @staticmethod
     def _set_spin_if_idle(spinbox, value: float) -> None:
+        sync_from_device = getattr(spinbox, "sync_from_device", None)
+        if callable(sync_from_device):
+            sync_from_device(value)
+            return
         if spinbox.hasFocus():
             return
         spinbox.blockSignals(True)

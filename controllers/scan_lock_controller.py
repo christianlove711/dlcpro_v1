@@ -16,6 +16,7 @@ class ScanLockController:
         owner.scan_lock_window.setWindowTitle(f"{t['window_title']} - {t['scan_lock']}")
 
         owner.sc_label.setText(t["scan_control"])
+        owner.sc_precision_label.setText(t["step_precision"])
         owner.scan_amplitude_label.setText(t["scan_amplitude"])
         owner.scan_offset_label.setText(t["scan_offset"])
         owner.scan_output_label.setText(t["scan_output"])
@@ -34,6 +35,16 @@ class ScanLockController:
         self._populate_combo(owner.pid2_output_channel_combo, PID_OUTPUT_CHANNEL_OPTIONS)
         owner.pid1_title_label.setText(t["pid1_section"])
         owner.pid2_title_label.setText(t["pid2_section"])
+        for button in owner.sc_precision_buttons:
+            button.setText(t[button._text_key])
+        if hasattr(owner, "pid_precision_label"):
+            owner.pid_precision_label.setText(t["step_precision"])
+        if hasattr(owner, "pid_precision_buttons"):
+            for button in owner.pid_precision_buttons:
+                button.setText(t[button._text_key])
+        for module in ("sc", "pid"):
+            for button in owner.module_precision_target_buttons.get(module, []):
+                button.setText(t["precision_target"])
         self._apply_pid_texts("pid1")
         self._apply_pid_texts("pid2")
 
@@ -122,21 +133,11 @@ class ScanLockController:
         owner = self.owner
         unit_kind = self._pid_unit_kind(getattr(snapshot, f"{pid_name}_output_channel"))
 
-        getattr(owner, f"{pid_name}_gain_spin").blockSignals(True)
-        getattr(owner, f"{pid_name}_gain_spin").setValue(getattr(snapshot, f"{pid_name}_gain_all"))
-        getattr(owner, f"{pid_name}_gain_spin").blockSignals(False)
-        getattr(owner, f"{pid_name}_p_spin").blockSignals(True)
-        getattr(owner, f"{pid_name}_p_spin").setValue(getattr(snapshot, f"{pid_name}_gain_p"))
-        getattr(owner, f"{pid_name}_p_spin").blockSignals(False)
-        getattr(owner, f"{pid_name}_i_spin").blockSignals(True)
-        getattr(owner, f"{pid_name}_i_spin").setValue(getattr(snapshot, f"{pid_name}_gain_i"))
-        getattr(owner, f"{pid_name}_i_spin").blockSignals(False)
-        getattr(owner, f"{pid_name}_d_spin").blockSignals(True)
-        getattr(owner, f"{pid_name}_d_spin").setValue(getattr(snapshot, f"{pid_name}_gain_d"))
-        getattr(owner, f"{pid_name}_d_spin").blockSignals(False)
-        getattr(owner, f"{pid_name}_limit_spin").blockSignals(True)
-        getattr(owner, f"{pid_name}_limit_spin").setValue(getattr(snapshot, f"{pid_name}_limit_max"))
-        getattr(owner, f"{pid_name}_limit_spin").blockSignals(False)
+        self._set_spin_if_idle(getattr(owner, f"{pid_name}_gain_spin"), getattr(snapshot, f"{pid_name}_gain_all"))
+        self._set_spin_if_idle(getattr(owner, f"{pid_name}_p_spin"), getattr(snapshot, f"{pid_name}_gain_p"))
+        self._set_spin_if_idle(getattr(owner, f"{pid_name}_i_spin"), getattr(snapshot, f"{pid_name}_gain_i"))
+        self._set_spin_if_idle(getattr(owner, f"{pid_name}_d_spin"), getattr(snapshot, f"{pid_name}_gain_d"))
+        self._set_spin_if_idle(getattr(owner, f"{pid_name}_limit_spin"), getattr(snapshot, f"{pid_name}_limit_max"))
         self._sync_combo(getattr(owner, f"{pid_name}_output_channel_combo"), getattr(snapshot, f"{pid_name}_output_channel"))
         getattr(owner, f"{pid_name}_sign_check").blockSignals(True)
         getattr(owner, f"{pid_name}_sign_check").setChecked(getattr(snapshot, f"{pid_name}_sign"))
@@ -152,9 +153,7 @@ class ScanLockController:
             owner.pid1_use_i_cutoff_check.blockSignals(True)
             owner.pid1_use_i_cutoff_check.setChecked(snapshot.pid1_i_cutoff_enabled)
             owner.pid1_use_i_cutoff_check.blockSignals(False)
-            owner.pid1_i_cutoff_spin.blockSignals(True)
-            owner.pid1_i_cutoff_spin.setValue(snapshot.pid1_i_cutoff)
-            owner.pid1_i_cutoff_spin.blockSignals(False)
+            self._set_spin_if_idle(owner.pid1_i_cutoff_spin, snapshot.pid1_i_cutoff)
 
         getattr(owner, f"{pid_name}_gain_spin").setSuffix(f" {TEXT[owner.language]['pid_gain_unit_none']}")
         getattr(owner, f"{pid_name}_p_spin").setSuffix(f" {TEXT[owner.language][f'pid_p_unit_{unit_kind}']}")
@@ -196,6 +195,10 @@ class ScanLockController:
 
     @staticmethod
     def _set_spin_if_idle(spinbox, value: float) -> None:
+        sync_from_device = getattr(spinbox, "sync_from_device", None)
+        if callable(sync_from_device):
+            sync_from_device(value)
+            return
         if spinbox.hasFocus():
             return
         spinbox.blockSignals(True)

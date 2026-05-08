@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QVBoxLayout
+from PySide6.QtWidgets import QFormLayout, QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
 from ui_text import TEXT
-from widgets.common_controls import PrecisionButtonRow, create_toggle_button
+from widgets.common_controls import PrecisionButtonRow, SafeComboBox, SafeDoubleSpinBox, create_toggle_button
 
 
 class CcPanel(QFrame):
@@ -60,25 +60,28 @@ class CcPanel(QFrame):
         self.precision_buttons = self.precision_row.buttons
 
         self.current_set_label = QLabel()
-        self.current_set_spin = QDoubleSpinBox()
+        self.current_set_spin = SafeDoubleSpinBox()
         self.current_set_spin.setRange(-1000000.0, 1000000.0)
         self.current_set_spin.setDecimals(5)
         self.current_set_spin.setSingleStep(0.1)
         self.current_set_spin.setSuffix(" mA")
         self.current_set_spin.setKeyboardTracking(False)
         self.current_set_spin.valueChanged.connect(owner._on_current_set_changed)
+        self.current_set_spin.stepApplied.connect(owner._on_current_set_step_applied)
+        self.current_set_spin.set_button_only_mode()
 
         self.current_act_label = QLabel()
         self.current_act_value = QLabel()
         self.current_act_value.setObjectName("ReadValue")
 
         self.current_clip_label = QLabel()
-        self.current_clip_spin = QDoubleSpinBox()
+        self.current_clip_spin = SafeDoubleSpinBox()
         self.current_clip_spin.setRange(-1000000.0, 1000000.0)
         self.current_clip_spin.setDecimals(5)
         self.current_clip_spin.setSuffix(" mA")
         self.current_clip_spin.setKeyboardTracking(False)
-        self.current_clip_spin.editingFinished.connect(owner._on_current_clip_finished)
+        self.current_clip_spin.connect_live_apply(owner._on_current_clip_finished)
+        self.current_clip_spin.set_button_only_mode(False)
 
         top_form.addRow(self.precision_label, self.precision_row)
         top_form.addRow(self.current_set_label, owner._create_target_row("cc", self.current_set_spin))
@@ -105,12 +108,13 @@ class CcPanel(QFrame):
 
         ff_form = QFormLayout()
         self.feedforward_factor_label = QLabel()
-        self.feedforward_factor_spin = QDoubleSpinBox()
+        self.feedforward_factor_spin = SafeDoubleSpinBox()
         self.feedforward_factor_spin.setRange(-1000000.0, 1000000.0)
         self.feedforward_factor_spin.setDecimals(5)
         self.feedforward_factor_spin.setSuffix(f" {TEXT[owner.language]['feedforward_factor_unit']}")
         self.feedforward_factor_spin.setKeyboardTracking(False)
-        self.feedforward_factor_spin.editingFinished.connect(owner._on_feedforward_factor_finished)
+        self.feedforward_factor_spin.connect_live_apply(owner._on_feedforward_factor_finished)
+        self.feedforward_factor_spin.set_button_only_mode()
         ff_form.addRow(self.feedforward_factor_label, owner._create_target_row("cc", self.feedforward_factor_spin))
         layout.addLayout(ff_form)
 
@@ -129,15 +133,16 @@ class CcPanel(QFrame):
 
         arc_form = QFormLayout()
         self.arc_signal_label = QLabel()
-        self.arc_signal_combo = QComboBox()
+        self.arc_signal_combo = SafeComboBox()
         self.arc_signal_combo.currentIndexChanged.connect(owner._on_arc_signal_changed)
         self.arc_factor_label = QLabel()
-        self.arc_factor_spin = QDoubleSpinBox()
+        self.arc_factor_spin = SafeDoubleSpinBox()
         self.arc_factor_spin.setRange(-1000000.0, 1000000.0)
         self.arc_factor_spin.setDecimals(4)
         self.arc_factor_spin.setSuffix(f" {TEXT[owner.language]['arc_factor_unit']}")
         self.arc_factor_spin.setKeyboardTracking(False)
-        self.arc_factor_spin.editingFinished.connect(owner._on_arc_factor_finished)
+        self.arc_factor_spin.connect_live_apply(owner._on_arc_factor_finished)
+        self.arc_factor_spin.set_button_only_mode()
         arc_form.addRow(self.arc_signal_label, self.arc_signal_combo)
         arc_form.addRow(self.arc_factor_label, owner._create_target_row("cc", self.arc_factor_spin))
         layout.addLayout(arc_form)

@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
-    QSpinBox,
     QStackedWidget,
     QTableWidget,
     QTextEdit,
@@ -40,6 +39,7 @@ from ui_text import (
     TEXT,
 )
 from controllers import LaserController, ScanLockController
+from widgets.common_controls import SafeComboBox, SafeSpinBox
 from windows import (
     FalcProWindow,
     LaserWindow,
@@ -90,6 +90,7 @@ class MainWindow(QMainWindow):
         self.tc_precision_step = 0.001
         self.pc_precision_step = 0.000001
         self.sc_precision_step = 0.01
+        self.pid_precision_step = 0.01
         self.module_precision_defaults: dict[str, QDoubleSpinBox] = {}
         self.module_precision_selected: dict[str, QDoubleSpinBox] = {}
         self.module_precision_target_buttons: dict[str, list[QPushButton]] = {
@@ -97,13 +98,15 @@ class MainWindow(QMainWindow):
             "tc": [],
             "pc": [],
             "sc": [],
+            "pid": [],
         }
+        self.pending_followup_task: tuple[object, object, str] | None = None
         self.connection_loss_notified = False
         self.laser_controller = LaserController(self)
         self.scan_lock_controller = ScanLockController(self)
 
         self.refresh_timer = QTimer(self)
-        self.refresh_timer.setInterval(2000)
+        self.refresh_timer.setInterval(500)
         self.refresh_timer.timeout.connect(self.refresh_snapshot)
 
         self.future_poll_timer = QTimer(self)
@@ -134,7 +137,7 @@ class MainWindow(QMainWindow):
 
         header_layout = QHBoxLayout()
         self.language_label = QLabel()
-        self.language_combo = QComboBox()
+        self.language_combo = SafeComboBox()
         self.language_combo.addItem("中文", "zh")
         self.language_combo.addItem("English", "en")
         self.language_combo.currentIndexChanged.connect(self._on_language_changed)
@@ -190,15 +193,15 @@ class MainWindow(QMainWindow):
         self.falc_window = FalcProWindow(self)
         self.scan_lock_page = self._build_scan_lock_page()
         self.scan_lock_window = ScanLockWindow(self.scan_lock_page)
-        self.relock_window = RelockWindow()
-        self.stabilization_window = StabilizationWindow()
+        self.relock_window = RelockWindow(self)
+        self.stabilization_window = StabilizationWindow(self)
 
     def _build_connection_group(self) -> QGroupBox:
         box = QGroupBox()
         layout = QGridLayout(box)
 
         self.mode_label = QLabel()
-        self.mode_combo = QComboBox()
+        self.mode_combo = SafeComboBox()
         self.mode_combo.addItem("", "network")
         self.mode_combo.addItem("", "serial")
         self.mode_combo.currentIndexChanged.connect(
@@ -206,15 +209,15 @@ class MainWindow(QMainWindow):
         )
 
         self.host_label = QLabel()
-        self.host_edit = QLineEdit("169.254.215.1")
+        self.host_edit = QLineEdit("169.254.5.11")
         self.serial_port_label = QLabel()
-        self.serial_port_combo = QComboBox()
+        self.serial_port_combo = SafeComboBox()
         self.baudrate_label = QLabel()
-        self.baudrate_spin = QSpinBox()
+        self.baudrate_spin = SafeSpinBox()
         self.baudrate_spin.setRange(1200, 10000000)
         self.baudrate_spin.setValue(115200)
         self.timeout_label = QLabel()
-        self.timeout_spin = QSpinBox()
+        self.timeout_spin = SafeSpinBox()
         self.timeout_spin.setRange(1, 60)
         self.timeout_spin.setValue(5)
 
@@ -370,11 +373,18 @@ class MainWindow(QMainWindow):
                 left: 12px;
                 padding: 0 4px 0 4px;
             }
-            QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox, QTextEdit, QTableWidget {
+            QLineEdit, QComboBox, QTextEdit, QTableWidget {
                 background: #4a4a4a;
                 border: 1px solid #666;
                 border-radius: 6px;
                 padding: 6px 8px;
+                color: #f6f6f6;
+            }
+            QSpinBox, QDoubleSpinBox {
+                background: #4a4a4a;
+                border: 1px solid #666;
+                border-radius: 6px;
+                padding: 2px 22px 2px 8px;
                 color: #f6f6f6;
             }
             QScrollArea, QScrollArea > QWidget > QWidget {
@@ -492,12 +502,11 @@ class MainWindow(QMainWindow):
         self.relock_button.setText(t["relock"])
         self.stabilization_button.setText(t["stabilization"])
         self.falc_window.apply_texts(self.language)
-        self.relock_window.setWindowTitle(f"{t['window_title']} - {t['relock']}")
-        self.stabilization_window.setWindowTitle(f"{t['window_title']} - {t['stabilization']}")
-        self.relock_window.title_label.setText(t["relock"])
-        self.stabilization_window.title_label.setText(t["stabilization"])
-        self.relock_window.body_label.setText(t["placeholder_body"])
-        self.stabilization_window.body_label.setText(t["placeholder_body"])
+        self.relock_window.apply_texts(self.language)
+        self.stabilization_window.apply_texts(self.language)
+        if self.snapshot is None:
+            self.relock_window.reset_state(self.language)
+            self.stabilization_window.reset_state(self.language)
 
         self.cc_status_label = t["cc_status"]
         self.laser_controller.apply_texts()
@@ -513,6 +522,7 @@ class MainWindow(QMainWindow):
         self._populate_lock_pid_selection_options()
         self._populate_pid_output_channel_options(self.pid1_output_channel_combo)
         self._populate_pid_output_channel_options(self.pid2_output_channel_combo)
+        self._populate_environment_hints()
         if self.snapshot is not None:
             self._render_snapshot(self.snapshot)
 
@@ -527,7 +537,9 @@ class MainWindow(QMainWindow):
         self.network_info.setPlainText("\n".join(network_lines))
         self.serial_ports_info.setPlainText("\n".join(serial_lines))
         self.serial_port_combo.clear()
-        self.serial_port_combo.addItems(serial_ports)
+        self.serial_port_combo.addItem(t["select_serial_port"], "")
+        for port in serial_ports:
+            self.serial_port_combo.addItem(port, port)
 
     def _populate_arc_signal_options(self) -> None:
         self._populate_signal_combo(self.arc_signal_combo)
@@ -646,7 +658,7 @@ class MainWindow(QMainWindow):
             self.pid2_output_channel_combo,
         )
         for combo in combos:
-            combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
             combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             self._fit_combo_popup_width(combo)
 
@@ -677,6 +689,7 @@ class MainWindow(QMainWindow):
 
     def _set_busy(self, busy: bool, freeze_controls: bool = True) -> None:
         laser_scroll = self._laser_scroll_value()
+        scan_lock_scroll = self._scan_lock_scroll_value()
         self.busy = busy and freeze_controls
         t = TEXT[self.language]
         if busy and freeze_controls:
@@ -704,6 +717,8 @@ class MainWindow(QMainWindow):
         ):
             widget.setEnabled(previewable)
         self.falc_window.set_writable(writable, previewable)
+        self.relock_window.set_writable(writable, previewable)
+        self.stabilization_window.set_writable(writable, previewable)
 
         for widget in (
             self.current_set_spin,
@@ -751,15 +766,22 @@ class MainWindow(QMainWindow):
             self.pid2_enable_check,
         ):
             widget.setEnabled(writable)
-        for button in (*self.precision_buttons, *self.tc_precision_buttons, *self.pc_precision_buttons, *self.sc_precision_buttons):
+        extra_pid_buttons = getattr(self, "pid_precision_buttons", [])
+        for button in (*self.precision_buttons, *self.tc_precision_buttons, *self.pc_precision_buttons, *self.sc_precision_buttons, *extra_pid_buttons):
             button.setEnabled(not busy or not freeze_controls)
         for module_buttons in self.module_precision_target_buttons.values():
             for button in module_buttons:
                 button.setEnabled(not busy or not freeze_controls)
         self._restore_laser_scroll(laser_scroll)
+        self._restore_scan_lock_scroll(scan_lock_scroll)
 
     def _run_task(self, fn, on_success, task_kind: str = "action") -> bool:
-        if self.busy or self.pending_future is not None:
+        if self.busy:
+            return False
+        if self.pending_future is not None:
+            if task_kind != "poll" and self.pending_task_kind == "poll":
+                self.pending_followup_task = (fn, on_success, task_kind)
+                return True
             return False
         freeze_controls = task_kind != "poll"
         self._set_busy(True, freeze_controls=freeze_controls)
@@ -795,11 +817,19 @@ class MainWindow(QMainWindow):
             self.connection_loss_notified = False
             if on_success is not None:
                 on_success(result)
+            self._run_followup_task_if_needed()
             return
         if isinstance(result, Exception) and self._handle_connection_failure(result, task_kind):
             return
         message = self.service.format_error(result) if isinstance(result, Exception) else str(result)
         QMessageBox.critical(self, "Error", message)
+
+    def _run_followup_task_if_needed(self) -> None:
+        if self.pending_future is not None or self.pending_followup_task is None:
+            return
+        fn, on_success, task_kind = self.pending_followup_task
+        self.pending_followup_task = None
+        self._run_task(fn, on_success, task_kind)
 
     def _handle_connection_failure(self, exc: Exception, task_kind: str) -> bool:
         if task_kind != "poll":
@@ -836,6 +866,11 @@ class MainWindow(QMainWindow):
         self._apply_step(self._active_precision_target("sc"), step)
         self._update_precision_buttons(self.sc_precision_buttons, step)
 
+    def _set_pid_precision(self, step: float) -> None:
+        self.pid_precision_step = step
+        self._apply_step(self._active_precision_target("pid"), step)
+        self._update_precision_buttons(self.pid_precision_buttons, step)
+
     def _active_precision_target(self, module: str) -> QDoubleSpinBox:
         return self.module_precision_selected.get(module, self.module_precision_defaults[module])
 
@@ -847,6 +882,8 @@ class MainWindow(QMainWindow):
         self.temp_set_spin.setSingleStep(self.tc_precision_step)
         self.pc_voltage_set_spin.setSingleStep(self.pc_precision_step)
         self.scan_amplitude_spin.setSingleStep(self.sc_precision_step)
+        if "pid" in self.module_precision_defaults:
+            self._apply_step(self._active_precision_target("pid"), self.pid_precision_step)
 
     def _update_precision_buttons(self, buttons: list[QPushButton], current_step: float) -> None:
         for button in buttons:
@@ -859,6 +896,8 @@ class MainWindow(QMainWindow):
         self._update_precision_buttons(self.tc_precision_buttons, self.tc_precision_step)
         self._update_precision_buttons(self.pc_precision_buttons, self.pc_precision_step)
         self._update_precision_buttons(self.sc_precision_buttons, self.sc_precision_step)
+        if hasattr(self, "pid_precision_buttons"):
+            self._update_precision_buttons(self.pid_precision_buttons, self.pid_precision_step)
 
     def _format_value_with_unit(self, value: float, decimals: int, unit: str) -> str:
         return f"{value:.{decimals}f} {unit}"
@@ -880,6 +919,20 @@ class MainWindow(QMainWindow):
             return
         scroll_area.verticalScrollBar().setValue(value)
 
+    def _scan_lock_scroll_value(self) -> int | None:
+        scroll_area = getattr(self, "scan_lock_scroll_area", None)
+        if scroll_area is None:
+            return None
+        return scroll_area.verticalScrollBar().value()
+
+    def _restore_scan_lock_scroll(self, value: int | None) -> None:
+        if value is None:
+            return
+        scroll_area = getattr(self, "scan_lock_scroll_area", None)
+        if scroll_area is None:
+            return
+        scroll_area.verticalScrollBar().setValue(value)
+
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
         return super().eventFilter(watched, event)
 
@@ -890,11 +943,23 @@ class MainWindow(QMainWindow):
         if self.service.is_connected:
             self.current_apply_timer.start()
 
+    def _on_current_set_step_applied(self) -> None:
+        if self.current_set_programmatic_update:
+            return
+        self.current_set_dirty = True
+        self.current_apply_timer.stop()
+        if not self.service.is_connected:
+            return
+        if self.busy or self.pending_future is not None:
+            self.current_apply_timer.start(20)
+            return
+        self._apply_current_if_needed()
+
     def _apply_current_if_needed(self) -> None:
         if not self.service.is_connected or not self.current_set_dirty:
             return
         if self.busy or self.pending_future is not None:
-            self.current_apply_timer.start()
+            self.current_apply_timer.start(20)
             return
 
         value = self.current_set_spin.value()
@@ -1155,6 +1220,185 @@ class MainWindow(QMainWindow):
             return
         self._run_task(lambda: self.service.set_lock_without_lockpoint(checked), self._on_snapshot_updated)
 
+    def _on_relock_detection_enabled_toggled(self, checked: bool) -> None:
+        if not self.service.is_connected or self.snapshot is None:
+            return
+        if checked == self.snapshot.relock_detection_enabled:
+            return
+        self._run_task(lambda: self.service.set_relock_detection_enabled(checked), self._on_snapshot_updated)
+
+    def _on_relock_input_signal_changed(self) -> None:
+        if not self.service.is_connected or self.snapshot is None:
+            return
+        value = int(self.relock_window.lock_detection_panel.input_signal_combo.currentData())
+        if value == self.snapshot.relock_input_channel:
+            return
+        self._run_task(lambda: self.service.set_relock_input_channel(value), self._on_snapshot_updated)
+
+    def _on_relock_level_high_finished(self) -> None:
+        if not self.relock_window.validate_window_levels():
+            return
+        self._run_relock_spin_write(
+            "relock_level_high",
+            self.relock_window.lock_detection_panel.level_high_spin,
+            self.service.set_relock_level_high,
+        )
+
+    def _on_relock_level_low_finished(self) -> None:
+        if not self.relock_window.validate_window_levels():
+            return
+        self._run_relock_spin_write(
+            "relock_level_low",
+            self.relock_window.lock_detection_panel.level_low_spin,
+            self.service.set_relock_level_low,
+        )
+
+    def _on_relock_hysteresis_finished(self) -> None:
+        if not self.relock_window.validate_window_levels():
+            return
+        self._run_relock_spin_write(
+            "relock_level_hysteresis",
+            self.relock_window.lock_detection_panel.hysteresis_spin,
+            self.service.set_relock_level_hysteresis,
+        )
+
+    def _on_relock_delay_finished(self) -> None:
+        self._run_relock_spin_write(
+            "relock_delay",
+            self.relock_window.lock_detection_panel.delay_spin,
+            self.service.set_relock_delay,
+        )
+
+    def _on_relock_reset_enabled_changed(self) -> None:
+        if not self.service.is_connected or self.snapshot is None:
+            return
+        checked = self.relock_window.lock_detection_panel.enable_reset_check.isChecked()
+        if checked == self.snapshot.relock_reset_enabled:
+            return
+        self._run_task(lambda: self.service.set_relock_reset_enabled(checked), self._on_snapshot_updated)
+
+    def _on_relock_enabled_toggled(self, checked: bool) -> None:
+        if not self.service.is_connected or self.snapshot is None:
+            return
+        if checked == self.snapshot.relock_enabled:
+            return
+        self._run_task(lambda: self.service.set_relock_enabled(checked), self._on_snapshot_updated)
+
+    def _on_relock_amplitude_finished(self) -> None:
+        self._run_relock_spin_write(
+            "relock_amplitude",
+            self.relock_window.relock_panel.amplitude_spin,
+            self.service.set_relock_amplitude,
+        )
+
+    def _on_relock_frequency_finished(self) -> None:
+        self._run_relock_spin_write(
+            "relock_frequency",
+            self.relock_window.relock_panel.frequency_spin,
+            self.service.set_relock_frequency,
+        )
+
+    def _on_relock_output_channel_changed(self) -> None:
+        if not self.service.is_connected or self.snapshot is None:
+            return
+        value = int(self.relock_window.relock_panel.output_channel_combo.currentData())
+        if value == self.snapshot.relock_output_channel:
+            return
+        self._run_task(lambda: self.service.set_relock_output_channel(value), self._on_snapshot_updated)
+
+    def _on_stabilization_enabled_toggled(self, checked: bool) -> None:
+        snapshot = self._stabilization_snapshot()
+        if snapshot is None or checked == snapshot.enabled:
+            return
+        self._run_task(lambda: self.service.set_stabilization_enabled(checked), self._on_snapshot_updated)
+
+    def _on_stabilization_pd_ext_input_channel_changed(self) -> None:
+        snapshot = self._stabilization_snapshot()
+        if snapshot is None:
+            return
+        value = int(self.stabilization_window.power_panel.external_physical_channel_combo.currentData())
+        if value == snapshot.pd_ext_input_channel:
+            return
+        self._run_task(lambda: self.service.set_stabilization_pd_ext_input_channel(value), self._on_snapshot_updated)
+
+    def _on_stabilization_cal_factor_finished(self) -> None:
+        self._run_stabilization_spin_write(
+            "pd_ext_cal_factor",
+            self.stabilization_window.power_panel.cal_factor_spin,
+            self.service.set_stabilization_pd_ext_cal_factor,
+        )
+
+    def _on_stabilization_cal_offset_finished(self) -> None:
+        self._run_stabilization_spin_write(
+            "pd_ext_cal_offset",
+            self.stabilization_window.power_panel.cal_offset_spin,
+            self.service.set_stabilization_pd_ext_cal_offset,
+        )
+
+    def _on_stabilization_set_level_finished(self) -> None:
+        self._run_stabilization_spin_write(
+            "setpoint",
+            self.stabilization_window.power_panel.set_level_spin,
+            self.service.set_stabilization_setpoint,
+        )
+
+    def _on_stabilization_gain_all_finished(self) -> None:
+        self._run_stabilization_spin_write(
+            "gain_all",
+            self.stabilization_window.power_panel.gain_all_spin,
+            self.service.set_stabilization_gain_all,
+        )
+
+    def _on_stabilization_gain_p_finished(self) -> None:
+        self._run_stabilization_spin_write(
+            "gain_p",
+            self.stabilization_window.power_panel.gain_p_spin,
+            self.service.set_stabilization_gain_p,
+        )
+
+    def _on_stabilization_gain_i_finished(self) -> None:
+        self._run_stabilization_spin_write(
+            "gain_i",
+            self.stabilization_window.power_panel.gain_i_spin,
+            self.service.set_stabilization_gain_i,
+        )
+
+    def _on_stabilization_gain_d_finished(self) -> None:
+        self._run_stabilization_spin_write(
+            "gain_d",
+            self.stabilization_window.power_panel.gain_d_spin,
+            self.service.set_stabilization_gain_d,
+        )
+
+    def _on_stabilization_hold_output_on_unlock_changed(self) -> None:
+        snapshot = self._stabilization_snapshot()
+        if snapshot is None:
+            return
+        checked = self.stabilization_window.power_panel.hold_output_check.isChecked()
+        if checked == snapshot.hold_output_on_unlock:
+            return
+        self._run_task(lambda: self.service.set_stabilization_hold_output_on_unlock(checked), self._on_snapshot_updated)
+
+    def _on_stabilization_window_enabled_toggled(self, checked: bool) -> None:
+        snapshot = self._stabilization_snapshot()
+        if snapshot is None or checked == snapshot.window_enabled:
+            return
+        self._run_task(lambda: self.service.set_stabilization_window_enabled(checked), self._on_snapshot_updated)
+
+    def _on_stabilization_window_level_finished(self) -> None:
+        self._run_stabilization_spin_write(
+            "window_level_low",
+            self.stabilization_window.detection_panel.level_spin,
+            self.service.set_stabilization_window_level_low,
+        )
+
+    def _on_stabilization_window_hysteresis_finished(self) -> None:
+        self._run_stabilization_spin_write(
+            "window_level_hysteresis",
+            self.stabilization_window.detection_panel.hysteresis_spin,
+            self.service.set_stabilization_window_level_hysteresis,
+        )
+
     def _on_pid1_gain_finished(self) -> None:
         self._run_pid_spin_write("pid1_gain_all", self.pid1_gain_spin, self.service.set_pid1_gain_all)
 
@@ -1239,6 +1483,30 @@ class MainWindow(QMainWindow):
         if value == getattr(self.snapshot, snapshot_attr):
             return
         self._run_task(lambda: setter(value), self._on_snapshot_updated)
+
+    def _run_relock_spin_write(self, snapshot_attr: str, spinbox: QDoubleSpinBox, setter) -> None:
+        if not self.service.is_connected or self.snapshot is None:
+            return
+        value = spinbox.value()
+        current = getattr(self.snapshot, snapshot_attr)
+        if abs(value - current) < 1e-9:
+            return
+        self._run_task(lambda: setter(value), self._on_snapshot_updated)
+
+    def _run_stabilization_spin_write(self, snapshot_attr: str, spinbox: QDoubleSpinBox, setter) -> None:
+        snapshot = self._stabilization_snapshot()
+        if snapshot is None:
+            return
+        value = spinbox.value()
+        current = getattr(snapshot, snapshot_attr)
+        if abs(value - current) < 1e-9:
+            return
+        self._run_task(lambda: setter(value), self._on_snapshot_updated)
+
+    def _stabilization_snapshot(self):
+        if not self.service.is_connected or self.snapshot is None:
+            return None
+        return self.snapshot.stabilization
 
     def _on_falc_input_gain_changed(self) -> None:
         if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
@@ -1359,7 +1627,10 @@ class MainWindow(QMainWindow):
 
     def connect_device(self) -> None:
         mode = self.mode_combo.currentData()
-        target = self.host_edit.text().strip() if mode == "network" else self.serial_port_combo.currentText().strip()
+        if mode == "network":
+            target = self.host_edit.text().strip()
+        else:
+            target = str(self.serial_port_combo.currentData() or "").strip()
         if not target:
             QMessageBox.warning(self, "Warning", "Please enter a connection target / 请输入连接目标")
             return
@@ -1374,6 +1645,7 @@ class MainWindow(QMainWindow):
     def _reset_after_disconnect(self, silent: bool = False) -> None:
         self.refresh_timer.stop()
         self.current_apply_timer.stop()
+        self.pending_followup_task = None
         try:
             self.service.disconnect()
         except Exception as exc:  # noqa: BLE001
@@ -1404,6 +1676,8 @@ class MainWindow(QMainWindow):
         self.laser_controller.reset_readbacks()
         self.scan_lock_controller.render_snapshot(self._empty_scan_snapshot())
         self.falc_window.reset_state(self.language)
+        self.relock_window.reset_state(self.language)
+        self.stabilization_window.reset_state(self.language)
         self.current_set_dirty = False
         self._update_toggle_button(self.cc_enable_button, False)
         self._update_toggle_button(self.feedforward_enable_button, False)
@@ -1437,10 +1711,14 @@ class MainWindow(QMainWindow):
 
     def _render_snapshot(self, snapshot: DeviceSnapshot) -> None:
         laser_scroll = self._laser_scroll_value()
+        scan_lock_scroll = self._scan_lock_scroll_value()
         self.laser_controller.render_snapshot(snapshot)
         self._restore_laser_scroll(laser_scroll)
         self.scan_lock_controller.render_snapshot(snapshot)
+        self._restore_scan_lock_scroll(scan_lock_scroll)
         self.falc_window.render_snapshot(snapshot)
+        self.relock_window.render_snapshot(snapshot)
+        self.stabilization_window.render_snapshot(snapshot)
 
     def _empty_scan_snapshot(self):
         return type(
