@@ -38,9 +38,10 @@ from ui_text import (
     SCAN_SHAPE_OPTIONS,
     TEXT,
 )
-from controllers import LaserController, ScanLockController
+from controllers import AutoLockController, LaserController, ScanLockController
 from widgets.common_controls import SafeComboBox, SafeSpinBox
 from windows import (
+    AutoLockWindow,
     FalcProWindow,
     LaserWindow,
     RelockWindow,
@@ -102,6 +103,7 @@ class MainWindow(QMainWindow):
         }
         self.pending_followup_task: tuple[object, object, str] | None = None
         self.connection_loss_notified = False
+        self.auto_lock_controller = AutoLockController(self)
         self.laser_controller = LaserController(self)
         self.scan_lock_controller = ScanLockController(self)
 
@@ -164,6 +166,7 @@ class MainWindow(QMainWindow):
         self.laser_button = self._create_nav_button(self._open_laser_window)
         self.falc_button = self._create_nav_button(self._open_falc_window)
         self.scan_lock_button = self._create_nav_button(self._open_scan_lock_window)
+        self.auto_lock_button = self._create_nav_button(self._open_auto_lock_window)
         self.relock_button = self._create_nav_button(self._open_relock_window)
         self.stabilization_button = self._create_nav_button(self._open_stabilization_window)
         for button in (
@@ -171,6 +174,7 @@ class MainWindow(QMainWindow):
             self.laser_button,
             self.falc_button,
             self.scan_lock_button,
+            self.auto_lock_button,
             self.relock_button,
             self.stabilization_button,
         ):
@@ -193,6 +197,8 @@ class MainWindow(QMainWindow):
         self.falc_window = FalcProWindow(self)
         self.scan_lock_page = self._build_scan_lock_page()
         self.scan_lock_window = ScanLockWindow(self.scan_lock_page)
+        self.auto_lock_window = AutoLockWindow(self, self.auto_lock_controller)
+        self.auto_lock_controller.bind_window(self.auto_lock_window)
         self.relock_window = RelockWindow(self)
         self.stabilization_window = StabilizationWindow(self)
 
@@ -335,6 +341,14 @@ class MainWindow(QMainWindow):
         self.scan_lock_window.raise_()
         self.scan_lock_window.activateWindow()
 
+    def _open_auto_lock_window(self) -> None:
+        if self.auto_lock_window.isHidden():
+            self.auto_lock_window.move(self.x() + 80, self.y() + 80)
+        self.auto_lock_window.showNormal()
+        self.auto_lock_window.show()
+        self.auto_lock_window.raise_()
+        self.auto_lock_window.activateWindow()
+
     def _open_relock_window(self) -> None:
         if self.relock_window.isHidden():
             self.relock_window.move(self.x() + 80, self.y() + 80)
@@ -404,6 +418,20 @@ class MainWindow(QMainWindow):
             }
             QPushButton:pressed {
                 background: #4a4a4a;
+            }
+            QPushButton#ScopeModeButton {
+                min-width: 76px;
+                padding: 6px 12px;
+                border-radius: 8px;
+            }
+            QPushButton#ScopeModeButton:checked {
+                background: #455b79;
+                border: 1px solid #7292c0;
+                color: #f4f8ff;
+                font-weight: 700;
+            }
+            QPushButton#ScopeOpenButton {
+                min-width: 164px;
             }
             QPushButton#PrecisionButton {
                 min-width: 72px;
@@ -499,8 +527,10 @@ class MainWindow(QMainWindow):
         self.laser_button.setText(t["laser"])
         self.falc_button.setText(t["falc"])
         self.scan_lock_button.setText(t["scan_lock"])
+        self.auto_lock_button.setText(t["auto_lock"])
         self.relock_button.setText(t["relock"])
         self.stabilization_button.setText(t["stabilization"])
+        self.auto_lock_controller.apply_texts()
         self.falc_window.apply_texts(self.language)
         self.relock_window.apply_texts(self.language)
         self.stabilization_window.apply_texts(self.language)
@@ -696,10 +726,12 @@ class MainWindow(QMainWindow):
             self.status_label.setText(t["busy"])
         else:
             self.status_label.setText(t["connected"] if self.service.is_connected else t["disconnected"])
-        for widget in (self.connect_button, self.disconnect_button, self.refresh_button):
-            widget.setEnabled(not busy)
-        writable = (not busy or not freeze_controls) and self.service.is_connected
-        previewable = not busy or not freeze_controls
+        auto_lock_running = self.auto_lock_controller.is_running
+        self.connect_button.setEnabled(not busy and not auto_lock_running)
+        self.disconnect_button.setEnabled(not busy)
+        self.refresh_button.setEnabled(not busy and not auto_lock_running)
+        writable = (not busy or not freeze_controls) and self.service.is_connected and not auto_lock_running
+        previewable = (not busy or not freeze_controls) and not auto_lock_running
 
         # 这些下拉/勾选项即使未连接设备也允许先切换，用于界面预览和流程确认。
         for widget in (
@@ -717,6 +749,7 @@ class MainWindow(QMainWindow):
         ):
             widget.setEnabled(previewable)
         self.falc_window.set_writable(writable, previewable)
+        self.auto_lock_window.set_writable(writable, previewable, auto_lock_running)
         self.relock_window.set_writable(writable, previewable)
         self.stabilization_window.set_writable(writable, previewable)
 
@@ -821,6 +854,8 @@ class MainWindow(QMainWindow):
             return
         if isinstance(result, Exception) and self._handle_connection_failure(result, task_kind):
             return
+        if self.auto_lock_controller.is_running:
+            self.auto_lock_controller.handle_task_failure(result)
         message = self.service.format_error(result) if isinstance(result, Exception) else str(result)
         QMessageBox.critical(self, "Error", message)
 
@@ -1652,6 +1687,7 @@ class MainWindow(QMainWindow):
             if not silent:
                 QMessageBox.critical(self, "Error", self.service.format_error(exc))
             return
+        self.auto_lock_controller.handle_disconnect()
         self.snapshot = None
         self.last_device_current_set = None
         self.parameter_table.setRowCount(0)
@@ -1675,6 +1711,7 @@ class MainWindow(QMainWindow):
         self.pressure_comp_factor_spin.setValue(0.0)
         self.laser_controller.reset_readbacks()
         self.scan_lock_controller.render_snapshot(self._empty_scan_snapshot())
+        self.auto_lock_window.reset_state(self.language)
         self.falc_window.reset_state(self.language)
         self.relock_window.reset_state(self.language)
         self.stabilization_window.reset_state(self.language)
@@ -1706,7 +1743,7 @@ class MainWindow(QMainWindow):
     def _on_snapshot_updated(self, snapshot: DeviceSnapshot) -> None:
         self.snapshot = snapshot
         self._render_snapshot(snapshot)
-        if not self.refresh_timer.isActive():
+        if not self.auto_lock_controller.is_running and not self.refresh_timer.isActive():
             self.refresh_timer.start()
 
     def _render_snapshot(self, snapshot: DeviceSnapshot) -> None:
@@ -1716,6 +1753,7 @@ class MainWindow(QMainWindow):
         self._restore_laser_scroll(laser_scroll)
         self.scan_lock_controller.render_snapshot(snapshot)
         self._restore_scan_lock_scroll(scan_lock_scroll)
+        self.auto_lock_window.render_snapshot(snapshot)
         self.falc_window.render_snapshot(snapshot)
         self.relock_window.render_snapshot(snapshot)
         self.stabilization_window.render_snapshot(snapshot)
@@ -1780,6 +1818,7 @@ class MainWindow(QMainWindow):
             self.laser_window,
             self.falc_window,
             self.scan_lock_window,
+            self.auto_lock_window,
             self.relock_window,
             self.stabilization_window,
         ):

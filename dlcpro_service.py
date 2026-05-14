@@ -86,6 +86,46 @@ class StabilizationSnapshot:
 
 
 @dataclass(slots=True)
+class LockPointSnapshot:
+    x: float
+    y: float
+
+
+@dataclass(slots=True)
+class AutoLockTelemetry:
+    sc_enabled: bool
+    sc_offset: float
+    sc_unit: str
+    lock_enabled: bool
+    lock_without_lockpoint: bool
+    lock_state: int | None
+    candidates: tuple[LockPointSnapshot, ...]
+    selected: LockPointSnapshot | None
+    tracking: LockPointSnapshot | None
+    scope: "AutoLockScopeSnapshot | None"
+    scope_error: str | None
+
+
+@dataclass(slots=True)
+class AutoLockScopeSnapshot:
+    variant: int
+    update_rate: int
+    channel1_signal: int
+    channel2_signal: int
+    x_name: str
+    x_unit: str
+    y_name: str
+    y_unit: str
+    y2_name: str
+    y2_unit: str
+    x_values: tuple[float, ...]
+    y_values: tuple[float, ...]
+    y2_values: tuple[float, ...]
+    background_x: tuple[float, ...]
+    background_y: tuple[float, ...]
+
+
+@dataclass(slots=True)
 class DeviceSnapshot:
     connection_mode: str
     connection_target: str
@@ -224,6 +264,33 @@ class DlcProService:
     def read_snapshot(self) -> DeviceSnapshot:
         with self._lock:
             return self._read_snapshot_unlocked()
+
+    def read_auto_lock_telemetry(self) -> AutoLockTelemetry:
+        with self._lock:
+            device = self._device_required()
+            scan = device.laser1.scan
+            lock = device.laser1.dl.lock
+            raw_candidates = lock.candidates.get()
+            points, lock_state = self._parse_lock_candidates(raw_candidates)
+            scope = None
+            scope_error = None
+            try:
+                scope = self._read_auto_lock_scope_snapshot(device, lock_state)
+            except Exception as exc:  # noqa: BLE001
+                scope_error = self.format_error(exc)
+            return AutoLockTelemetry(
+                sc_enabled=bool(scan.enabled.get()),
+                sc_offset=float(scan.offset.get()),
+                sc_unit=scan.unit.get(),
+                lock_enabled=bool(lock.lock_enabled.get()),
+                lock_without_lockpoint=bool(lock.lock_without_lockpoint.get()),
+                lock_state=lock_state,
+                candidates=points.get("c", ()),
+                selected=points.get("l"),
+                tracking=points.get("t"),
+                scope=scope,
+                scope_error=scope_error,
+            )
 
     def set_current(self, value_ma: float) -> DeviceSnapshot:
         with self._lock:
@@ -427,6 +494,26 @@ class DlcProService:
         with self._lock:
             lock = self._lock_control()
             lock.lock_without_lockpoint.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_scope_variant(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            self._device_required().laser1.scope.variant.set(int(value))
+            return self._read_snapshot_unlocked()
+
+    def set_scope_update_rate(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            self._device_required().laser1.scope.update_rate.set(int(value))
+            return self._read_snapshot_unlocked()
+
+    def set_scope_channel1_signal(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            self._device_required().laser1.scope.channel1.signal.set(int(value))
+            return self._read_snapshot_unlocked()
+
+    def set_scope_channel2_signal(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            self._device_required().laser1.scope.channel2.signal.set(int(value))
             return self._read_snapshot_unlocked()
 
     def set_pid1_enabled(self, enabled: bool) -> DeviceSnapshot:
@@ -887,6 +974,72 @@ class DlcProService:
             pressure_comp_voltage=float(pressure_comp.compensation_voltage.get()),
             stabilization=self._read_stabilization_snapshot(device),
             falc1=self._read_falc_snapshot(device, 1),
+        )
+
+    @staticmethod
+    def _parse_lock_candidates(raw_candidates) -> tuple[dict[str, object], int | None]:
+        try:
+            from toptica.lasersdk.utils.dlcpro import extract_lock_points, extract_lock_state
+        except ImportError as exc:  # noqa: BLE001
+            raise RuntimeError(
+                "Auto Lock requires the official SDK utilities module "
+                "`toptica.lasersdk.utils.dlcpro`."
+            ) from exc
+
+        parsed = extract_lock_points("clt", raw_candidates)
+        result: dict[str, object] = {}
+        for key in ("c", "l", "t"):
+            point_group = parsed.get(key)
+            if not point_group:
+                continue
+            xs = point_group.get("x", [])
+            ys = point_group.get("y", [])
+            pairs = tuple(
+                LockPointSnapshot(x=float(x), y=float(y))
+                for x, y in zip(xs, ys, strict=False)
+            )
+            if key == "c":
+                result[key] = pairs
+            elif pairs:
+                result[key] = pairs[0]
+        state = extract_lock_state(raw_candidates)
+        return result, None if state is None else int(state)
+
+    @staticmethod
+    def _read_auto_lock_scope_snapshot(
+        device: DLCpro,
+        lock_state: int | None,
+    ) -> AutoLockScopeSnapshot:
+        try:
+            from toptica.lasersdk.utils.dlcpro import extract_float_arrays
+        except ImportError as exc:  # noqa: BLE001
+            raise RuntimeError(
+                "Auto Lock scope view requires the official SDK utilities module "
+                "`toptica.lasersdk.utils.dlcpro`."
+            ) from exc
+
+        scope = device.laser1.scope
+        trace = extract_float_arrays("xyY", scope.data.get())
+        background = {"x": (), "y": ()}
+        if lock_state == 5:
+            background = extract_float_arrays("xy", device.laser1.dl.lock.background_trace.get())
+
+        return AutoLockScopeSnapshot(
+            variant=int(scope.variant.get()),
+            update_rate=int(scope.update_rate.get()),
+            channel1_signal=int(scope.channel1.signal.get()),
+            channel2_signal=int(scope.channel2.signal.get()),
+            x_name=scope.channelx.name.get(),
+            x_unit=scope.channelx.unit.get(),
+            y_name=scope.channel1.name.get(),
+            y_unit=scope.channel1.unit.get(),
+            y2_name=scope.channel2.name.get(),
+            y2_unit=scope.channel2.unit.get(),
+            x_values=tuple(float(value) for value in trace.get("x", ())),
+            y_values=tuple(float(value) for value in trace.get("y", ())),
+            y2_values=tuple(float(value) for value in trace.get("Y", ())),
+            background_x=tuple(float(value) for value in background.get("x", ())),
+            background_y=tuple(float(value) for value in background.get("y", ())),
         )
 
     @staticmethod
