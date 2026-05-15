@@ -233,6 +233,11 @@ python -m py_compile /Users/YieFanMeng/Documents/DlcPro_v1/app.py /Users/YieFanM
 
 ## 工作日志
 
+更完整的独立工作日志见：
+
+- [WORK_LOG.md](/Users/YieFanMeng/Documents/DlcPro_v1/WORK_LOG.md)
+- [DEV_HANDOFF_2026-05-15.md](/Users/YieFanMeng/Documents/DlcPro_v1/DEV_HANDOFF_2026-05-15.md)
+
 说明：
 
 - 本地目录创建时间可追溯到 `2026-04-29`

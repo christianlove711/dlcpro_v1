@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from ui_text import LOCK_INPUT_SIGNAL_OPTIONS, LOCK_PID_SELECTION_OPTIONS, LOCK_TYPE_OPTIONS, PID_OUTPUT_CHANNEL_OPTIONS, TEXT
+from ui_text import (
+    LOCK_ERROR_SIGNAL_OPTIONS,
+    LOCK_FALC_SELECTION_OPTIONS,
+    LOCK_INPUT_SIGNAL_OPTIONS,
+    LOCK_PID_SELECTION_OPTIONS,
+    LOCK_TYPE_OPTIONS,
+    PID_OUTPUT_CHANNEL_OPTIONS,
+    TEXT,
+)
 
 
 class ScanLockController:
@@ -24,13 +32,27 @@ class ScanLockController:
         owner.scan_shape_label.setText(t["scan_shape"])
         owner.lock_settings_label.setText(t["lock_settings"])
         owner.lock_input_signal_label.setText(t["lock_input_signal"])
+        owner.lock_error_signal_label.setText(t["lock_error_input_signal"])
         owner.lock_type_label.setText(t["lock_type"])
         owner.lock_pid_selection_label.setText(t["pid_selection"])
+        owner.lock_falc_selection_label.setText(t["lock_falc_selection"])
         owner.lock_without_lockpoint_label.setText(t["lock_without_lockpoint"])
+        owner.lock_status_label.setText(t["lock_status"])
+        owner.lock_candidate_filter_group.setTitle(t["lock_candidate_filter"])
+        owner.lock_candidate_top_check.setText(t["lock_candidate_top"])
+        owner.lock_candidate_bottom_check.setText(t["lock_candidate_bottom"])
+        owner.lock_candidate_positive_edge_check.setText(t["lock_candidate_positive_edge"])
+        owner.lock_candidate_negative_edge_check.setText(t["lock_candidate_negative_edge"])
+        owner.lock_candidate_edge_level_label.setText(t["lock_candidate_edge_level"])
+        owner.lock_candidate_peak_noise_tolerance_label.setText(t["lock_candidate_peak_noise_tolerance"])
+        owner.lock_candidate_edge_min_distance_label.setText(t["lock_candidate_edge_min_distance"])
+        owner.lock_candidate_top_of_fringe_low_pass_label.setText(t["lock_candidate_top_of_fringe_low_pass"])
         self._apply_scan_unit_suffixes(t["voltage_unit"])
         self._populate_combo(owner.lock_input_signal_combo, LOCK_INPUT_SIGNAL_OPTIONS)
+        self._populate_combo(owner.lock_error_signal_combo, LOCK_ERROR_SIGNAL_OPTIONS)
         self._populate_combo(owner.lock_type_combo, LOCK_TYPE_OPTIONS)
         self._populate_combo(owner.lock_pid_selection_combo, LOCK_PID_SELECTION_OPTIONS)
+        self._populate_combo(owner.lock_falc_selection_combo, LOCK_FALC_SELECTION_OPTIONS)
         self._populate_combo(owner.pid1_output_channel_combo, PID_OUTPUT_CHANNEL_OPTIONS)
         self._populate_combo(owner.pid2_output_channel_combo, PID_OUTPUT_CHANNEL_OPTIONS)
         owner.pid1_title_label.setText(t["pid1_section"])
@@ -55,6 +77,8 @@ class ScanLockController:
             owner.lock_without_lockpoint_check.blockSignals(True)
             owner.lock_without_lockpoint_check.setChecked(False)
             owner.lock_without_lockpoint_check.blockSignals(False)
+            owner.lock_status_value.setText(t["not_available"])
+            self._reset_lock_candidate_controls()
             self._reset_pid_controls()
 
     def render_snapshot(self, snapshot) -> None:
@@ -71,13 +95,17 @@ class ScanLockController:
         self._sync_combo(owner.scan_shape_combo, snapshot.sc_signal_type)
         owner._update_toggle_button(owner.sc_enable_button, snapshot.sc_enabled)
         self._sync_combo(owner.lock_input_signal_combo, snapshot.lock_input_channel)
+        self._sync_combo(owner.lock_error_signal_combo, snapshot.lock_error_channel)
         self._sync_combo(owner.lock_type_combo, snapshot.lock_type)
         self._sync_combo(owner.lock_pid_selection_combo, snapshot.lock_pid_selection)
+        self._sync_combo(owner.lock_falc_selection_combo, snapshot.lock_falc_selection)
         owner._update_toggle_button(owner.lock_enable_button, snapshot.lock_enabled)
         owner._update_toggle_button(owner.lock_hold_button, snapshot.lock_hold)
         owner.lock_without_lockpoint_check.blockSignals(True)
         owner.lock_without_lockpoint_check.setChecked(snapshot.lock_without_lockpoint)
         owner.lock_without_lockpoint_check.blockSignals(False)
+        owner.lock_status_value.setText(snapshot.lock_state_txt or TEXT[owner.language]["not_available"])
+        self._render_lock_candidate_controls(snapshot)
         self._render_pid("pid1", snapshot)
         self._render_pid("pid2", snapshot)
 
@@ -186,6 +214,51 @@ class ScanLockController:
         owner.pid1_i_cutoff_spin.blockSignals(True)
         owner.pid1_i_cutoff_spin.setValue(0.0)
         owner.pid1_i_cutoff_spin.blockSignals(False)
+
+    def _render_lock_candidate_controls(self, snapshot) -> None:
+        owner = self.owner
+        for widget_name, value in (
+            ("lock_candidate_top_check", snapshot.lock_candidate_top_enabled),
+            ("lock_candidate_bottom_check", snapshot.lock_candidate_bottom_enabled),
+            ("lock_candidate_positive_edge_check", snapshot.lock_candidate_positive_edge_enabled),
+            ("lock_candidate_negative_edge_check", snapshot.lock_candidate_negative_edge_enabled),
+            ("lock_candidate_top_of_fringe_low_pass_check", snapshot.lock_candidate_top_of_fringe_low_pass),
+        ):
+            widget = getattr(owner, widget_name)
+            widget.blockSignals(True)
+            widget.setChecked(value)
+            widget.blockSignals(False)
+        self._set_spin_if_idle(owner.lock_candidate_edge_level_spin, snapshot.lock_candidate_edge_level)
+        self._set_spin_if_idle(
+            owner.lock_candidate_peak_noise_tolerance_spin,
+            snapshot.lock_candidate_peak_noise_tolerance,
+        )
+        self._set_spin_if_idle(owner.lock_candidate_edge_min_distance_spin, snapshot.lock_candidate_edge_min_distance)
+        owner.lock_candidate_edge_level_spin.setSuffix(f" {TEXT[owner.language]['voltage_unit']}")
+        owner.lock_candidate_peak_noise_tolerance_spin.setSuffix(f" {TEXT[owner.language]['voltage_unit']}")
+
+    def _reset_lock_candidate_controls(self) -> None:
+        owner = self.owner
+        for widget_name in (
+            "lock_candidate_top_check",
+            "lock_candidate_bottom_check",
+            "lock_candidate_positive_edge_check",
+            "lock_candidate_negative_edge_check",
+            "lock_candidate_top_of_fringe_low_pass_check",
+        ):
+            widget = getattr(owner, widget_name)
+            widget.blockSignals(True)
+            widget.setChecked(False)
+            widget.blockSignals(False)
+        owner.lock_candidate_edge_level_spin.blockSignals(True)
+        owner.lock_candidate_edge_level_spin.setValue(0.0)
+        owner.lock_candidate_edge_level_spin.blockSignals(False)
+        owner.lock_candidate_peak_noise_tolerance_spin.blockSignals(True)
+        owner.lock_candidate_peak_noise_tolerance_spin.setValue(0.0)
+        owner.lock_candidate_peak_noise_tolerance_spin.blockSignals(False)
+        owner.lock_candidate_edge_min_distance_spin.blockSignals(True)
+        owner.lock_candidate_edge_min_distance_spin.setValue(0)
+        owner.lock_candidate_edge_min_distance_spin.blockSignals(False)
 
     @staticmethod
     def _pid_unit_kind(output_channel: int) -> str:

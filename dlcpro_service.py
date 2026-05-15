@@ -28,7 +28,9 @@ class ConnectionSettings:
 @dataclass(slots=True)
 class FalcMainSnapshot:
     enabled: bool
+    lock_state: bool
     gain_all: float
+    use_external_input: bool
     i1_enabled: bool
     i1: int
     i2_enabled: bool
@@ -50,6 +52,9 @@ class FalcUnlimSnapshot:
     gain: float
     output_range: float
     input_offset: float
+    lock_state: bool
+    hold_state: bool
+    regulating_state: bool
 
 
 @dataclass(slots=True)
@@ -60,6 +65,9 @@ class FalcSnapshot:
     status_txt: str
     input_gain: int
     input_offset: float
+    path_selection: int
+    hold_state: bool
+    mon_config: int
     main: FalcMainSnapshot
     unlim: FalcUnlimSnapshot
 
@@ -175,12 +183,33 @@ class DeviceSnapshot:
     sc_frequency: float
     sc_signal_type: int
     sc_unit: str
+    lock_state: int
+    lock_state_txt: str
     lock_enabled: bool
     lock_hold: bool
     lock_input_channel: int
+    lock_error_channel: int
     lock_type: int
     lock_pid_selection: int
+    lock_falc_selection: int
     lock_without_lockpoint: bool
+    lock_candidate_top_enabled: bool
+    lock_candidate_bottom_enabled: bool
+    lock_candidate_positive_edge_enabled: bool
+    lock_candidate_negative_edge_enabled: bool
+    lock_candidate_edge_level: float
+    lock_candidate_peak_noise_tolerance: float
+    lock_candidate_edge_min_distance: int
+    lock_candidate_top_of_fringe_low_pass: bool
+    lockin_modulation_enabled: bool
+    lockin_input_channel: int
+    lockin_modulation_output_channel: int
+    lockin_frequency: float
+    lockin_amplitude: float
+    lockin_phase_shift: float
+    lockin_lock_level: float
+    lockin_auto_lir_state: int
+    lockin_auto_lir_progress: int
     pid1_enabled: bool
     pid1_gain_all: float
     pid1_gain_p: float
@@ -478,6 +507,12 @@ class DlcProService:
             lock.spectrum_input_channel.set(int(value))
             return self._read_snapshot_unlocked()
 
+    def set_lock_error_channel(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            lock = self._lock_control()
+            lock.error_channel.set(int(value))
+            return self._read_snapshot_unlocked()
+
     def set_lock_type(self, value: int) -> DeviceSnapshot:
         with self._lock:
             lock = self._lock_control()
@@ -490,10 +525,108 @@ class DlcProService:
             lock.pid_selection.set(int(value))
             return self._read_snapshot_unlocked()
 
+    def set_lock_falc_selection(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            lock = self._lock_control()
+            lock.falc_selection.set(int(value))
+            return self._read_snapshot_unlocked()
+
     def set_lock_without_lockpoint(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             lock = self._lock_control()
             lock.lock_without_lockpoint.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_lock_candidate_top_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().candidate_filter.top.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_lock_candidate_bottom_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().candidate_filter.bottom.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_lock_candidate_positive_edge_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().candidate_filter.positive_edge.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_lock_candidate_negative_edge_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().candidate_filter.negative_edge.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_lock_candidate_edge_level(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().candidate_filter.edge_level.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_lock_candidate_peak_noise_tolerance(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().candidate_filter.peak_noise_tolerance.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_lock_candidate_edge_min_distance(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().candidate_filter.edge_min_distance.set(int(value))
+            return self._read_snapshot_unlocked()
+
+    def set_lock_candidate_top_of_fringe_low_pass(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().candidate_filter.top_of_fringe_low_pass.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def apply_auto_lock_preset(self, payload: dict[str, object]) -> DeviceSnapshot:
+        with self._lock:
+            lock = self._lock_control()
+            candidate_filter = lock.candidate_filter
+            lock.error_channel.set(int(payload["error_signal"]))
+            lock.falc_selection.set(int(payload["falc_selection"]))
+            self._falc(1).path_selection.set(int(payload["falc_path"]))
+            candidate_filter.top.set(bool(payload["candidate_top"]))
+            candidate_filter.bottom.set(bool(payload["candidate_bottom"]))
+            candidate_filter.positive_edge.set(bool(payload["candidate_positive_edge"]))
+            candidate_filter.negative_edge.set(bool(payload["candidate_negative_edge"]))
+            candidate_filter.edge_level.set(float(payload["candidate_edge_level"]))
+            candidate_filter.peak_noise_tolerance.set(float(payload["candidate_peak_noise_tolerance"]))
+            candidate_filter.edge_min_distance.set(int(payload["candidate_edge_min_distance"]))
+            candidate_filter.top_of_fringe_low_pass.set(bool(payload["candidate_top_of_fringe_low_pass"]))
+            return self._read_snapshot_unlocked()
+
+    def set_lockin_modulation_enabled(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().lockin.modulation_enabled.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_lockin_input_channel(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().lockin.input_channel.set(int(value))
+            return self._read_snapshot_unlocked()
+
+    def set_lockin_modulation_output_channel(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().lockin.modulation_output_channel.set(int(value))
+            return self._read_snapshot_unlocked()
+
+    def set_lockin_frequency(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().lockin.frequency.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_lockin_amplitude(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().lockin.amplitude.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_lockin_phase_shift(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().lockin.phase_shift.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_lockin_lock_level(self, value: float) -> DeviceSnapshot:
+        with self._lock:
+            self._lock_control().lockin.lock_level.set(float(value))
             return self._read_snapshot_unlocked()
 
     def set_scope_variant(self, value: int) -> DeviceSnapshot:
@@ -681,6 +814,11 @@ class DlcProService:
             self._falc(1).input.offset.set(float(value))
             return self._read_snapshot_unlocked()
 
+    def set_falc1_path_selection(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            self._falc(1).path_selection.set(int(value))
+            return self._read_snapshot_unlocked()
+
     def set_falc1_main_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).main.enabled.set(bool(enabled))
@@ -689,6 +827,11 @@ class DlcProService:
     def set_falc1_main_gain_all(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).main.gain.all.set(float(value))
+            return self._read_snapshot_unlocked()
+
+    def set_falc1_main_use_external_input(self, enabled: bool) -> DeviceSnapshot:
+        with self._lock:
+            self._falc(1).main.gain.use_external_input.set(bool(enabled))
             return self._read_snapshot_unlocked()
 
     def set_falc1_main_filter_enabled(self, filter_name: str, enabled: bool) -> DeviceSnapshot:
@@ -731,6 +874,11 @@ class DlcProService:
     def set_falc1_unlim_sign(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).unlim.sign.set(bool(enabled))
+            return self._read_snapshot_unlocked()
+
+    def set_falc1_mon_config(self, value: int) -> DeviceSnapshot:
+        with self._lock:
+            self._falc(1).mon.config.set(int(value))
             return self._read_snapshot_unlocked()
 
     def set_stabilization_enabled(self, enabled: bool) -> DeviceSnapshot:
@@ -877,6 +1025,8 @@ class DlcProService:
         pressure_comp = device.laser1.dl.pressure_compensation
         scan = device.laser1.scan
         lock = device.laser1.dl.lock
+        candidate_filter = lock.candidate_filter
+        lockin = lock.lockin
         pid1 = lock.pid1
         pid2 = lock.pid2
         relock = lock.relock
@@ -931,12 +1081,33 @@ class DlcProService:
             sc_frequency=float(scan.frequency.get()),
             sc_signal_type=int(scan.signal_type.get()),
             sc_unit=scan.unit.get(),
+            lock_state=int(lock.state.get()),
+            lock_state_txt=lock.state_txt.get(),
             lock_enabled=bool(lock.lock_enabled.get()),
             lock_hold=bool(lock.hold.get()),
             lock_input_channel=int(lock.spectrum_input_channel.get()),
+            lock_error_channel=int(lock.error_channel.get()),
             lock_type=int(lock.type.get()),
             lock_pid_selection=int(lock.pid_selection.get()),
+            lock_falc_selection=int(lock.falc_selection.get()),
             lock_without_lockpoint=bool(lock.lock_without_lockpoint.get()),
+            lock_candidate_top_enabled=bool(candidate_filter.top.get()),
+            lock_candidate_bottom_enabled=bool(candidate_filter.bottom.get()),
+            lock_candidate_positive_edge_enabled=bool(candidate_filter.positive_edge.get()),
+            lock_candidate_negative_edge_enabled=bool(candidate_filter.negative_edge.get()),
+            lock_candidate_edge_level=float(candidate_filter.edge_level.get()),
+            lock_candidate_peak_noise_tolerance=float(candidate_filter.peak_noise_tolerance.get()),
+            lock_candidate_edge_min_distance=int(candidate_filter.edge_min_distance.get()),
+            lock_candidate_top_of_fringe_low_pass=bool(candidate_filter.top_of_fringe_low_pass.get()),
+            lockin_modulation_enabled=bool(lockin.modulation_enabled.get()),
+            lockin_input_channel=int(lockin.input_channel.get()),
+            lockin_modulation_output_channel=int(lockin.modulation_output_channel.get()),
+            lockin_frequency=float(lockin.frequency.get()),
+            lockin_amplitude=float(lockin.amplitude.get()),
+            lockin_phase_shift=float(lockin.phase_shift.get()),
+            lockin_lock_level=float(lockin.lock_level.get()),
+            lockin_auto_lir_state=int(lockin.auto_lir.state.get()),
+            lockin_auto_lir_progress=int(lockin.auto_lir.progress.get()),
             pid1_enabled=bool(pid1.enabled.get()),
             pid1_gain_all=float(pid1.gain.all.get()),
             pid1_gain_p=float(pid1.gain.p.get()),
@@ -1074,9 +1245,14 @@ class DlcProService:
                 status_txt=board.status_txt.get(),
                 input_gain=int(board.input.gain.get()),
                 input_offset=float(board.input.offset.get()),
+                path_selection=int(board.path_selection.get()),
+                hold_state=bool(board.hold_state.get()),
+                mon_config=int(board.mon.config.get()),
                 main=FalcMainSnapshot(
                     enabled=bool(board.main.enabled.get()),
+                    lock_state=bool(board.main.lock_state.get()),
                     gain_all=float(main_gain.all.get()),
+                    use_external_input=bool(main_gain.use_external_input.get()),
                     i1_enabled=bool(main_gain.i1_enabled.get()),
                     i1=int(main_gain.i1.get()),
                     i2_enabled=bool(main_gain.i2_enabled.get()),
@@ -1096,6 +1272,9 @@ class DlcProService:
                     gain=float(unlim.gain.get()),
                     output_range=float(unlim.output_range.get()),
                     input_offset=float(unlim.input_offset.get()),
+                    lock_state=bool(unlim.lock_state.get()),
+                    hold_state=bool(unlim.hold_state.get()),
+                    regulating_state=bool(unlim.regulating_state.get()),
                 ),
             )
         except DecopError:

@@ -741,8 +741,10 @@ class MainWindow(QMainWindow):
             self.scan_output_combo,
             self.scan_shape_combo,
             self.lock_input_signal_combo,
+            self.lock_error_signal_combo,
             self.lock_type_combo,
             self.lock_pid_selection_combo,
+            self.lock_falc_selection_combo,
             self.pid1_output_channel_combo,
             self.pid2_output_channel_combo,
             self.lock_without_lockpoint_check,
@@ -778,6 +780,14 @@ class MainWindow(QMainWindow):
             self.sc_enable_button,
             self.lock_enable_button,
             self.lock_hold_button,
+            self.lock_candidate_top_check,
+            self.lock_candidate_bottom_check,
+            self.lock_candidate_positive_edge_check,
+            self.lock_candidate_negative_edge_check,
+            self.lock_candidate_edge_level_spin,
+            self.lock_candidate_peak_noise_tolerance_spin,
+            self.lock_candidate_edge_min_distance_spin,
+            self.lock_candidate_top_of_fringe_low_pass_check,
             self.pressure_comp_enable_button,
             self.pid1_gain_spin,
             self.pid1_p_spin,
@@ -1231,6 +1241,14 @@ class MainWindow(QMainWindow):
             return
         self._run_task(lambda: self.service.set_lock_input_channel(value), self._on_snapshot_updated)
 
+    def _on_lock_error_signal_changed(self) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
+            return
+        value = int(self.lock_error_signal_combo.currentData())
+        if value == self.snapshot.lock_error_channel:
+            return
+        self._run_task(lambda: self.service.set_lock_error_channel(value), self._on_snapshot_updated)
+
     def _on_lock_type_changed(self) -> None:
         if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
             return
@@ -1247,6 +1265,14 @@ class MainWindow(QMainWindow):
             return
         self._run_task(lambda: self.service.set_lock_pid_selection(value), self._on_snapshot_updated)
 
+    def _on_lock_falc_selection_changed(self) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
+            return
+        value = int(self.lock_falc_selection_combo.currentData())
+        if value == self.snapshot.lock_falc_selection:
+            return
+        self._run_task(lambda: self.service.set_lock_falc_selection(value), self._on_snapshot_updated)
+
     def _on_lock_without_lockpoint_changed(self) -> None:
         if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
             return
@@ -1254,6 +1280,154 @@ class MainWindow(QMainWindow):
         if checked == self.snapshot.lock_without_lockpoint:
             return
         self._run_task(lambda: self.service.set_lock_without_lockpoint(checked), self._on_snapshot_updated)
+
+    def _on_lock_candidate_top_changed(self, checked: bool) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
+            return
+        if checked == self.snapshot.lock_candidate_top_enabled:
+            return
+        self._run_task(lambda: self.service.set_lock_candidate_top_enabled(checked), self._on_snapshot_updated)
+
+    def _on_lock_candidate_bottom_changed(self, checked: bool) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
+            return
+        if checked == self.snapshot.lock_candidate_bottom_enabled:
+            return
+        self._run_task(lambda: self.service.set_lock_candidate_bottom_enabled(checked), self._on_snapshot_updated)
+
+    def _on_lock_candidate_positive_edge_changed(self, checked: bool) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
+            return
+        if checked == self.snapshot.lock_candidate_positive_edge_enabled:
+            return
+        self._run_task(lambda: self.service.set_lock_candidate_positive_edge_enabled(checked), self._on_snapshot_updated)
+
+    def _on_lock_candidate_negative_edge_changed(self, checked: bool) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
+            return
+        if checked == self.snapshot.lock_candidate_negative_edge_enabled:
+            return
+        self._run_task(lambda: self.service.set_lock_candidate_negative_edge_enabled(checked), self._on_snapshot_updated)
+
+    def _on_lock_candidate_edge_level_finished(self) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
+            return
+        value = self.lock_candidate_edge_level_spin.value()
+        if abs(value - self.snapshot.lock_candidate_edge_level) < 1e-12:
+            return
+        self._run_task(lambda: self.service.set_lock_candidate_edge_level(value), self._on_snapshot_updated)
+
+    def _on_lock_candidate_peak_noise_tolerance_finished(self) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
+            return
+        value = self.lock_candidate_peak_noise_tolerance_spin.value()
+        if abs(value - self.snapshot.lock_candidate_peak_noise_tolerance) < 1e-12:
+            return
+        self._run_task(lambda: self.service.set_lock_candidate_peak_noise_tolerance(value), self._on_snapshot_updated)
+
+    def _on_lock_candidate_edge_min_distance_finished(self) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
+            return
+        value = int(self.lock_candidate_edge_min_distance_spin.value())
+        if value == self.snapshot.lock_candidate_edge_min_distance:
+            return
+        self._run_task(lambda: self.service.set_lock_candidate_edge_min_distance(value), self._on_snapshot_updated)
+
+    def _on_lock_candidate_top_of_fringe_low_pass_changed(self, checked: bool) -> None:
+        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
+            return
+        if checked == self.snapshot.lock_candidate_top_of_fringe_low_pass:
+            return
+        self._run_task(
+            lambda: self.service.set_lock_candidate_top_of_fringe_low_pass(checked),
+            self._on_snapshot_updated,
+        )
+
+    def _on_auto_lock_error_signal_changed(self) -> None:
+        if not self.service.is_connected or self.snapshot is None:
+            return
+        value = int(self.auto_lock_window.config_panel.error_signal_combo.currentData())
+        if value == self.snapshot.lock_error_channel:
+            return
+        self._run_task(lambda: self.service.set_lock_error_channel(value), self._on_snapshot_updated)
+
+    def _on_auto_lock_falc_selection_changed(self) -> None:
+        if not self.service.is_connected or self.snapshot is None:
+            return
+        value = int(self.auto_lock_window.config_panel.falc_selection_combo.currentData())
+        if value == self.snapshot.lock_falc_selection:
+            return
+        self._run_task(lambda: self.service.set_lock_falc_selection(value), self._on_snapshot_updated)
+
+    def _on_auto_lock_falc_path_selection_changed(self) -> None:
+        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
+            return
+        value = int(self.auto_lock_window.config_panel.falc_path_combo.currentData())
+        if value == self.snapshot.falc1.path_selection:
+            return
+        self._run_task(lambda: self.service.set_falc1_path_selection(value), self._on_snapshot_updated)
+
+    def _on_auto_lock_candidate_top_changed(self, checked: bool) -> None:
+        if not self.service.is_connected or self.snapshot is None:
+            return
+        if checked == self.snapshot.lock_candidate_top_enabled:
+            return
+        self._run_task(lambda: self.service.set_lock_candidate_top_enabled(checked), self._on_snapshot_updated)
+
+    def _on_auto_lock_candidate_bottom_changed(self, checked: bool) -> None:
+        if not self.service.is_connected or self.snapshot is None:
+            return
+        if checked == self.snapshot.lock_candidate_bottom_enabled:
+            return
+        self._run_task(lambda: self.service.set_lock_candidate_bottom_enabled(checked), self._on_snapshot_updated)
+
+    def _on_auto_lock_candidate_positive_edge_changed(self, checked: bool) -> None:
+        if not self.service.is_connected or self.snapshot is None:
+            return
+        if checked == self.snapshot.lock_candidate_positive_edge_enabled:
+            return
+        self._run_task(lambda: self.service.set_lock_candidate_positive_edge_enabled(checked), self._on_snapshot_updated)
+
+    def _on_auto_lock_candidate_negative_edge_changed(self, checked: bool) -> None:
+        if not self.service.is_connected or self.snapshot is None:
+            return
+        if checked == self.snapshot.lock_candidate_negative_edge_enabled:
+            return
+        self._run_task(lambda: self.service.set_lock_candidate_negative_edge_enabled(checked), self._on_snapshot_updated)
+
+    def _on_auto_lock_candidate_edge_level_finished(self) -> None:
+        if not self.service.is_connected or self.snapshot is None:
+            return
+        value = self.auto_lock_window.config_panel.candidate_edge_level_spin.value()
+        if abs(value - self.snapshot.lock_candidate_edge_level) < 1e-12:
+            return
+        self._run_task(lambda: self.service.set_lock_candidate_edge_level(value), self._on_snapshot_updated)
+
+    def _on_auto_lock_candidate_peak_noise_tolerance_finished(self) -> None:
+        if not self.service.is_connected or self.snapshot is None:
+            return
+        value = self.auto_lock_window.config_panel.candidate_peak_noise_tolerance_spin.value()
+        if abs(value - self.snapshot.lock_candidate_peak_noise_tolerance) < 1e-12:
+            return
+        self._run_task(lambda: self.service.set_lock_candidate_peak_noise_tolerance(value), self._on_snapshot_updated)
+
+    def _on_auto_lock_candidate_edge_min_distance_finished(self) -> None:
+        if not self.service.is_connected or self.snapshot is None:
+            return
+        value = int(self.auto_lock_window.config_panel.candidate_edge_min_distance_spin.value())
+        if value == self.snapshot.lock_candidate_edge_min_distance:
+            return
+        self._run_task(lambda: self.service.set_lock_candidate_edge_min_distance(value), self._on_snapshot_updated)
+
+    def _on_auto_lock_candidate_top_of_fringe_low_pass_changed(self, checked: bool) -> None:
+        if not self.service.is_connected or self.snapshot is None:
+            return
+        if checked == self.snapshot.lock_candidate_top_of_fringe_low_pass:
+            return
+        self._run_task(
+            lambda: self.service.set_lock_candidate_top_of_fringe_low_pass(checked),
+            self._on_snapshot_updated,
+        )
 
     def _on_relock_detection_enabled_toggled(self, checked: bool) -> None:
         if not self.service.is_connected or self.snapshot is None:
@@ -1560,6 +1734,22 @@ class MainWindow(QMainWindow):
             return
         self._run_task(lambda: self.service.set_falc1_input_offset(value), self._on_snapshot_updated)
 
+    def _on_falc_path_selection_changed(self) -> None:
+        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
+            return
+        value = int(self.falc_window.path_selection_combo.currentData())
+        if value == self.snapshot.falc1.path_selection:
+            return
+        self._run_task(lambda: self.service.set_falc1_path_selection(value), self._on_snapshot_updated)
+
+    def _on_falc_mon_config_changed(self) -> None:
+        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
+            return
+        value = int(self.falc_window.mon_config_combo.currentData())
+        if value == self.snapshot.falc1.mon_config:
+            return
+        self._run_task(lambda: self.service.set_falc1_mon_config(value), self._on_snapshot_updated)
+
     def _on_falc_main_enabled_toggled(self, checked: bool) -> None:
         if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
             return
@@ -1575,6 +1765,13 @@ class MainWindow(QMainWindow):
         if abs(value - current) < 1e-12:
             return
         self._run_task(lambda: self.service.set_falc1_main_gain_all(value), self._on_snapshot_updated)
+
+    def _on_falc_main_use_external_input_toggled(self, checked: bool) -> None:
+        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
+            return
+        if checked == self.snapshot.falc1.main.use_external_input:
+            return
+        self._run_task(lambda: self.service.set_falc1_main_use_external_input(checked), self._on_snapshot_updated)
 
     def _on_falc_filter_enabled_toggled(self, filter_name: str, checked: bool) -> None:
         if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:

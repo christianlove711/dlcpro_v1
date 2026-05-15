@@ -11,11 +11,14 @@ from ui_text import TEXT
 
 class AutoLockController:
     LOCKED_STATE = 5
+    TEMPLATE_SCALE_FACTORS = (1.0, 0.7, 0.45)
+    NO_CANDIDATE_ADVANCE_THRESHOLD = 5
 
     def __init__(self, owner) -> None:
         self.owner = owner
         self.window = None
         self._running = False
+        self._mode = "idle"
         self._window_visible = False
         self._scope_window_visible = False
         self._phase_key = "auto_lock_phase_idle"
@@ -28,6 +31,12 @@ class AutoLockController:
         self._lock_deadline = 0.0
         self._last_search_signature: tuple[int, bool] | None = None
         self._last_wait_state: int | None = None
+        self._pre_scan_initial_amplitude = 0.0
+        self._pre_scan_target_amplitude = 0.0
+        self._template_index = 0
+        self._templates: tuple[dict[str, float], ...] = ()
+        self._no_candidate_rounds = 0
+        self._template_reacquire_pending = False
         self._scope_timer = QTimer(owner)
         self._scope_timer.setInterval(900)
         self._scope_timer.timeout.connect(self.request_scope_refresh)
@@ -44,43 +53,99 @@ class AutoLockController:
             return
         self.window.apply_texts(self.owner.language)
         self.window.set_phase(self.owner.language, self._phase_key)
+        self.window.set_template_progress(
+            self._template_index + 1 if self._templates else None,
+            len(self._templates),
+            self.owner.language,
+        )
         self._refresh_status_message()
         self.window.set_target_point(self.target_for_display(), self.owner.language)
 
     def start(self, *_args) -> None:
         if self.window is None:
             return
-        if self._running:
+        if not self._prepare_run():
             return
-        if not self.owner.service.is_connected:
+
+        base_amplitude = self._current_scan_amplitude()
+        if abs(base_amplitude) < 1e-12:
             QMessageBox.warning(
                 self.owner,
                 "Warning",
-                TEXT[self.owner.language]["auto_lock_warning_not_connected"],
-            )
-            return
-        if self.owner.pending_future is not None:
-            QMessageBox.warning(
-                self.owner,
-                "Warning",
-                TEXT[self.owner.language]["auto_lock_warning_busy"],
+                TEXT[self.owner.language]["auto_lock_warning_scan_amplitude_zero"],
             )
             return
 
         self._running = True
+        self._mode = "auto_lock"
         self._target = None
         self._latest_telemetry = None
         self._lock_deadline = 0.0
         self._last_search_signature = None
         self._last_wait_state = None
+        self._template_index = 0
+        self._templates = self._build_templates(base_amplitude)
+        self._no_candidate_rounds = 0
+        self._template_reacquire_pending = False
         self.window.mark_live_telemetry_stopped()
         self.owner.refresh_timer.stop()
         self._sync_scope_timer()
-        self._set_phase("auto_lock_phase_searching")
         self._set_status_message("auto_lock_log_started")
         self.window.append_log(TEXT[self.owner.language]["auto_lock_log_started"])
         self.owner._set_busy(False)
-        self._poll_candidates()
+        self._start_current_template()
+
+    def start_pre_scan_sequence(self, *_args) -> None:
+        if self.window is None:
+            return
+        if not self._prepare_run():
+            return
+
+        initial_amplitude = self._current_scan_amplitude()
+        if abs(initial_amplitude) < 1e-12:
+            QMessageBox.warning(
+                self.owner,
+                "Warning",
+                TEXT[self.owner.language]["auto_lock_warning_scan_amplitude_zero"],
+            )
+            return
+
+        shrink_ratio = self.window.config_panel.pre_scan_shrink_percent_spin.value() / 100.0
+        duration_ms = self.window.config_panel.pre_scan_duration_spin.value()
+
+        self._running = True
+        self._mode = "pre_scan"
+        self._target = None
+        self._latest_telemetry = None
+        self._lock_deadline = 0.0
+        self._last_search_signature = None
+        self._last_wait_state = None
+        self._pre_scan_initial_amplitude = float(initial_amplitude)
+        self._pre_scan_target_amplitude = float(initial_amplitude * shrink_ratio)
+        self.window.mark_live_telemetry_stopped()
+        self.owner.refresh_timer.stop()
+        self._sync_scope_timer()
+        self._set_phase("auto_lock_phase_pre_scan")
+        self._set_status_message(
+            "auto_lock_log_pre_scan_started",
+            duration_ms=duration_ms,
+            amplitude=initial_amplitude,
+        )
+        self.window.append_log(
+            TEXT[self.owner.language]["auto_lock_log_pre_scan_started"].format(
+                duration_ms=duration_ms,
+                amplitude=initial_amplitude,
+            )
+        )
+        self.owner._set_busy(False)
+
+        if self.owner.snapshot is not None and self.owner.snapshot.sc_enabled:
+            self._after_pre_scan_scan_enabled(self.owner.snapshot)
+            return
+        self._submit_snapshot(
+            lambda: self.owner.service.set_sc_enabled(True),
+            self._after_pre_scan_scan_enabled,
+        )
 
     def stop(self, *_args, silent: bool = False) -> None:
         if self.window is None:
@@ -89,10 +154,15 @@ class AutoLockController:
             if not silent:
                 self.window.set_status_message(TEXT[self.owner.language]["auto_lock_window_stopped"])
             return
+        was_pre_scan = self._mode == "pre_scan"
         self._deactivate()
         if not silent:
-            self.window.append_log(TEXT[self.owner.language]["auto_lock_log_stopped"])
-            self._set_status_message("auto_lock_window_stopped")
+            if was_pre_scan:
+                self.window.append_log(TEXT[self.owner.language]["auto_lock_log_pre_scan_stopped"])
+                self._set_status_message("auto_lock_log_pre_scan_stopped")
+            else:
+                self.window.append_log(TEXT[self.owner.language]["auto_lock_log_stopped"])
+                self._set_status_message("auto_lock_window_stopped")
 
     def handle_disconnect(self) -> None:
         if self.window is None:
@@ -118,9 +188,17 @@ class AutoLockController:
 
     def _deactivate(self) -> None:
         self._running = False
+        self._mode = "idle"
         self._lock_deadline = 0.0
         self._last_wait_state = None
+        self._pre_scan_initial_amplitude = 0.0
+        self._pre_scan_target_amplitude = 0.0
+        self._template_index = 0
+        self._templates = ()
+        self._no_candidate_rounds = 0
+        self._template_reacquire_pending = False
         self._set_phase("auto_lock_phase_idle")
+        self.window.set_template_progress(None, 0, self.owner.language)
         self.window.mark_live_telemetry_stopped()
         self.owner._set_busy(False)
         self._sync_scope_timer()
@@ -253,10 +331,17 @@ class AutoLockController:
                 self.window.append_log(TEXT[self.owner.language]["auto_lock_log_no_candidate"])
                 self._set_status_message("auto_lock_log_no_candidate")
                 self._last_search_signature = signature
+            self._no_candidate_rounds += 1
+            if self._no_candidate_rounds >= self.NO_CANDIDATE_ADVANCE_THRESHOLD:
+                self.window.append_log(TEXT[self.owner.language]["auto_lock_log_no_candidate_advance"])
+                self._set_status_message("auto_lock_log_no_candidate_advance")
+                self._advance_to_next_template()
+                return
             self._schedule(self.window.config_panel.search_interval_spin.value(), self._poll_candidates)
             return
 
         self._last_search_signature = None
+        self._no_candidate_rounds = 0
         self._target = target
         self.window.set_target_point(target, self.owner.language)
         self.window.append_log(
@@ -264,12 +349,7 @@ class AutoLockController:
         )
         self._set_status_message("auto_lock_log_select_target", x=target.x, y=target.y)
 
-        self.window.append_log(TEXT[self.owner.language]["auto_lock_log_enable_center_lock"])
-        self._set_status_message("auto_lock_log_enable_center_lock")
-        self._submit_snapshot(
-            lambda: self.owner.service.set_lock_without_lockpoint(True),
-            self._after_lock_without_lockpoint_enabled,
-        )
+        self._narrow_scan_on_target()
 
     def _after_disabled_for_search(self, _snapshot) -> None:
         self.window.append_log(TEXT[self.owner.language]["auto_lock_log_retry_after_disable"])
@@ -284,6 +364,42 @@ class AutoLockController:
 
     def _after_lock_without_lockpoint_enabled(self, _snapshot) -> None:
         self._center_on_target()
+
+    def _narrow_scan_on_target(self) -> None:
+        if not self._running or self._target is None:
+            return
+        template = self._current_template()
+        if template is None:
+            self.stop(silent=True)
+            return
+        self._set_phase("auto_lock_phase_pre_scan_narrowing")
+        self.window.append_log(
+            TEXT[self.owner.language]["auto_lock_log_template_narrowing"].format(
+                index=int(template["index"]),
+                initial=template["wide_amplitude"],
+                target=template["narrow_amplitude"],
+            )
+        )
+        self._set_status_message(
+            "auto_lock_log_template_narrowing",
+            index=int(template["index"]),
+            initial=template["wide_amplitude"],
+            target=template["narrow_amplitude"],
+        )
+        self._submit_snapshot(
+            lambda value=template["narrow_amplitude"]: self.owner.service.set_sc_amplitude(value),
+            self._after_narrow_scan_written,
+        )
+
+    def _after_narrow_scan_written(self, _snapshot) -> None:
+        if not self._running:
+            return
+        self.window.append_log(TEXT[self.owner.language]["auto_lock_log_enable_center_lock"])
+        self._set_status_message("auto_lock_log_enable_center_lock")
+        self._submit_snapshot(
+            lambda: self.owner.service.set_lock_without_lockpoint(True),
+            self._after_lock_without_lockpoint_enabled,
+        )
 
     def _center_on_target(self) -> None:
         if not self._running or self._target is None:
@@ -395,13 +511,44 @@ class AutoLockController:
         if not self._running:
             return
         self._set_phase("auto_lock_phase_reacquiring")
+        self._template_reacquire_pending = True
         if telemetry.lock_enabled:
             self._submit_snapshot(
                 lambda: self.owner.service.set_lock_enabled(False),
-                self._after_disabled_for_search,
+                self._after_disabled_for_reacquire,
             )
             return
-        self._schedule(self.window.config_panel.reacquire_delay_spin.value(), self._poll_candidates)
+        self._advance_to_next_template()
+
+    def _after_disabled_for_reacquire(self, _snapshot) -> None:
+        if not self._running:
+            return
+        self._advance_to_next_template()
+
+    def _advance_to_next_template(self) -> None:
+        if not self._running:
+            return
+        next_index = self._template_index + 1
+        if next_index >= len(self._templates):
+            self.window.append_log(TEXT[self.owner.language]["auto_lock_log_templates_exhausted"])
+            self._set_status_message("auto_lock_log_templates_exhausted")
+            self.stop(silent=True)
+            return
+        previous = self._template_index + 1
+        self._template_index = next_index
+        current = self._template_index + 1
+        self.window.append_log(
+            TEXT[self.owner.language]["auto_lock_log_retry_template"].format(
+                previous=previous,
+                current=current,
+            )
+        )
+        self._set_status_message(
+            "auto_lock_log_retry_template",
+            previous=previous,
+            current=current,
+        )
+        self._schedule(self.window.config_panel.reacquire_delay_spin.value(), self._start_current_template)
 
     def _pick_target(self, telemetry: AutoLockTelemetry) -> LockPointSnapshot | None:
         points = list(telemetry.candidates)
@@ -426,6 +573,102 @@ class AutoLockController:
         if strategy == "rightmost":
             return max(points, key=lambda point: point.x)
         return min(points, key=lambda point: abs(point.x - telemetry.sc_offset))
+
+    def _build_templates(self, base_amplitude: float) -> tuple[dict[str, float], ...]:
+        base = abs(float(base_amplitude))
+        shrink_ratio = self.window.config_panel.pre_scan_shrink_percent_spin.value() / 100.0
+        templates: list[dict[str, float]] = []
+        for index, factor in enumerate(self.TEMPLATE_SCALE_FACTORS, start=1):
+            wide = max(base * factor, 1e-6)
+            narrow = max(wide * shrink_ratio, 1e-6)
+            templates.append(
+                {
+                    "index": float(index),
+                    "wide_amplitude": wide,
+                    "narrow_amplitude": narrow,
+                }
+            )
+        return tuple(templates)
+
+    def _current_template(self) -> dict[str, float] | None:
+        if 0 <= self._template_index < len(self._templates):
+            return self._templates[self._template_index]
+        return None
+
+    def _start_current_template(self) -> None:
+        if not self._running:
+            return
+        template = self._current_template()
+        if template is None:
+            self.window.append_log(TEXT[self.owner.language]["auto_lock_log_templates_exhausted"])
+            self._set_status_message("auto_lock_log_templates_exhausted")
+            self.stop(silent=True)
+            return
+        self._target = None
+        self._last_search_signature = None
+        self._last_wait_state = None
+        self._no_candidate_rounds = 0
+        self._template_reacquire_pending = False
+        self._set_phase("auto_lock_phase_pre_scan")
+        self.window.set_template_progress(self._template_index + 1, len(self._templates), self.owner.language)
+        self.window.append_log(
+            TEXT[self.owner.language]["auto_lock_log_template_start"].format(
+                index=int(template["index"]),
+                wide=template["wide_amplitude"],
+                narrow=template["narrow_amplitude"],
+            )
+        )
+        self._set_status_message(
+            "auto_lock_log_template_start",
+            index=int(template["index"]),
+            wide=template["wide_amplitude"],
+            narrow=template["narrow_amplitude"],
+        )
+        self._submit_snapshot(
+            lambda value=template["wide_amplitude"]: self.owner.service.set_sc_amplitude(value),
+            self._after_template_wide_amplitude_written,
+        )
+
+    def _after_template_wide_amplitude_written(self, _snapshot) -> None:
+        if not self._running:
+            return
+        if self.owner.snapshot is not None and self.owner.snapshot.sc_enabled:
+            self._after_template_scan_enabled(self.owner.snapshot)
+            return
+        if self.window.config_panel.auto_enable_scan_check.isChecked():
+            self.window.append_log(TEXT[self.owner.language]["auto_lock_log_enable_scan"])
+            self._set_status_message("auto_lock_log_enable_scan")
+            self._submit_snapshot(
+                lambda: self.owner.service.set_sc_enabled(True),
+                self._after_template_scan_enabled,
+            )
+            return
+        self.window.append_log(TEXT[self.owner.language]["auto_lock_log_scan_required"])
+        self._set_status_message("auto_lock_log_scan_required")
+        self.stop(silent=True)
+
+    def _after_template_scan_enabled(self, _snapshot) -> None:
+        if not self._running:
+            return
+        template = self._current_template()
+        if template is None:
+            self.stop(silent=True)
+            return
+        duration_ms = self.window.config_panel.pre_scan_duration_spin.value()
+        self.window.append_log(
+            TEXT[self.owner.language]["auto_lock_log_template_running"].format(
+                index=int(template["index"]),
+                duration_ms=duration_ms,
+                amplitude=template["wide_amplitude"],
+            )
+        )
+        self._set_status_message(
+            "auto_lock_log_template_running",
+            index=int(template["index"]),
+            duration_ms=duration_ms,
+            amplitude=template["wide_amplitude"],
+        )
+        self._schedule(duration_ms, self._poll_candidates)
 
     def _submit(self, fn, on_success, task_kind: str) -> None:
         if not self._running:
@@ -521,6 +764,81 @@ class AutoLockController:
                 self._scope_timer.start()
             return
         self._scope_timer.stop()
+
+    def _prepare_run(self) -> bool:
+        if self._running:
+            return False
+        if not self.owner.service.is_connected:
+            QMessageBox.warning(
+                self.owner,
+                "Warning",
+                TEXT[self.owner.language]["auto_lock_warning_not_connected"],
+            )
+            return False
+        if self.owner.pending_future is not None:
+            QMessageBox.warning(
+                self.owner,
+                "Warning",
+                TEXT[self.owner.language]["auto_lock_warning_busy"],
+            )
+            return False
+        return True
+
+    def _current_scan_amplitude(self) -> float:
+        if self.owner.snapshot is not None:
+            return float(self.owner.snapshot.sc_amplitude)
+        return float(self.owner.scan_amplitude_spin.value())
+
+    def _after_pre_scan_scan_enabled(self, _snapshot) -> None:
+        if not self._running or self._mode != "pre_scan":
+            return
+        duration_ms = self.window.config_panel.pre_scan_duration_spin.value()
+        self.window.append_log(
+            TEXT[self.owner.language]["auto_lock_log_pre_scan_running"].format(
+                duration_ms=duration_ms,
+                amplitude=self._pre_scan_initial_amplitude,
+            )
+        )
+        self._set_status_message(
+            "auto_lock_log_pre_scan_running",
+            duration_ms=duration_ms,
+            amplitude=self._pre_scan_initial_amplitude,
+        )
+        self._schedule(duration_ms, self._shrink_pre_scan_range)
+
+    def _shrink_pre_scan_range(self) -> None:
+        if not self._running or self._mode != "pre_scan":
+            return
+        self._set_phase("auto_lock_phase_pre_scan_narrowing")
+        self.window.append_log(
+            TEXT[self.owner.language]["auto_lock_log_pre_scan_narrowing"].format(
+                initial=self._pre_scan_initial_amplitude,
+                target=self._pre_scan_target_amplitude,
+            )
+        )
+        self._set_status_message(
+            "auto_lock_log_pre_scan_narrowing",
+            initial=self._pre_scan_initial_amplitude,
+            target=self._pre_scan_target_amplitude,
+        )
+        self._submit_snapshot(
+            lambda: self.owner.service.set_sc_amplitude(self._pre_scan_target_amplitude),
+            self._after_pre_scan_range_shrunk,
+        )
+
+    def _after_pre_scan_range_shrunk(self, _snapshot) -> None:
+        if not self._running or self._mode != "pre_scan":
+            return
+        self.window.append_log(
+            TEXT[self.owner.language]["auto_lock_log_pre_scan_complete"].format(
+                target=self._pre_scan_target_amplitude
+            )
+        )
+        self._set_status_message(
+            "auto_lock_log_pre_scan_complete",
+            target=self._pre_scan_target_amplitude,
+        )
+        self._deactivate()
 
     def _scope_preview_requested(self) -> bool:
         return self._window_visible or self._scope_window_visible
