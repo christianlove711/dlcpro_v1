@@ -1,4 +1,5 @@
 from windows.auto_lock_window import AutoLockWindow
+from windows.auto_lock2_window import AutoLock2Window
 from windows.falcpro_window import FalcProWindow
 from windows.laser_window import LaserWindow, build_laser_page
 from windows.relock_window import RelockWindow
@@ -7,6 +8,7 @@ from windows.stabilization_window import StabilizationWindow
 
 __all__ = [
     "AutoLockWindow",
+    "AutoLock2Window",
     "FalcProWindow",
     "LaserWindow",
     "RelockWindow",

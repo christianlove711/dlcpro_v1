@@ -4,7 +4,17 @@ from collections.abc import Callable, Sequence
 
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QComboBox, QDoubleSpinBox, QHBoxLayout, QPushButton, QSpinBox, QStyle, QStyleOptionSpinBox, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDoubleSpinBox,
+    QGridLayout,
+    QHBoxLayout,
+    QPushButton,
+    QSpinBox,
+    QStyle,
+    QStyleOptionSpinBox,
+    QWidget,
+)
 
 
 class SafeComboBox(QComboBox):
@@ -250,13 +260,17 @@ class PrecisionButtonRow(QWidget):
         options: Sequence[tuple[str, float]],
         setter: Callable[[float], None],
         parent: QWidget | None = None,
+        max_columns: int | None = None,
     ) -> None:
         super().__init__(parent)
-        layout = QHBoxLayout(self)
+        if max_columns and max_columns > 0:
+            layout = QGridLayout(self)
+        else:
+            layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         self.buttons: list[QPushButton] = []
-        for text_key, step in options:
+        for index, (text_key, step) in enumerate(options):
             button = QPushButton(self)
             button.setObjectName("PrecisionButton")
             button.setCheckable(True)
@@ -264,8 +278,16 @@ class PrecisionButtonRow(QWidget):
             button._text_key = text_key
             button._precision_step = step
             self.buttons.append(button)
-            layout.addWidget(button)
-        layout.addStretch(1)
+            if max_columns and max_columns > 0:
+                row, column = divmod(index, max_columns)
+                layout.addWidget(button, row, column)
+            else:
+                layout.addWidget(button)
+        if max_columns and max_columns > 0:
+            for column in range(max_columns):
+                layout.setColumnStretch(column, 1)
+        else:
+            layout.addStretch(1)
 
 
 class StepTargetSpinBoxRow(QWidget):

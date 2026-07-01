@@ -30,6 +30,7 @@ from ui_text import (
     LOCK_FALC_SELECTION_OPTIONS,
     TEXT,
 )
+from ui_scaling import fit_window_to_screen
 from windows.auto_lock_scope_window import AutoLockScopeWindow
 from widgets.auto_lock import AutoLockConfigPanel, AutoLockStatusPanel
 from windows.base_window import AuxiliaryWindow
@@ -46,7 +47,9 @@ class AutoLockWindow(AuxiliaryWindow):
         self._last_candidates: tuple[LockPointSnapshot, ...] = ()
         self._preset_store: dict[str, dict[str, object]] = {}
         self._selected_preset_name: str | None = None
+        self._loaded_preset_name: str | None = None
         self._preset_buttons: dict[str, QPushButton] = {}
+        self._preset_button_columns = 0
         self.scope_window = AutoLockScopeWindow(owner, controller)
 
         self.resize(1120, 820)
@@ -140,7 +143,9 @@ class AutoLockWindow(AuxiliaryWindow):
         self.config_panel.pre_scan_button.clicked.connect(self._show_pre_scan_help_and_start)
         self.config_panel.stop_button.clicked.connect(controller.stop)
         self.config_panel.clear_log_button.clicked.connect(self.clear_log)
+        self.config_panel.preset_scope_button.clicked.connect(self._show_preset_scope_help)
         self.config_panel.preset_new_button.clicked.connect(self.create_new_preset)
+        self.config_panel.preset_load_button.clicked.connect(self.load_selected_preset)
         self.config_panel.preset_save_button.clicked.connect(self.save_current_preset)
         self.config_panel.preset_delete_button.clicked.connect(self.delete_selected_preset)
         self.config_panel.error_signal_combo.currentIndexChanged.connect(owner._on_auto_lock_error_signal_changed)
@@ -189,6 +194,7 @@ class AutoLockWindow(AuxiliaryWindow):
             self.scope_window.move(self.x() + 100, self.y() + 80)
         self.scope_window.showNormal()
         self.scope_window.show()
+        fit_window_to_screen(self.scope_window)
         self.scope_window.raise_()
         self.scope_window.activateWindow()
 
@@ -207,8 +213,11 @@ class AutoLockWindow(AuxiliaryWindow):
         self.config_panel.runtime_options_group.setTitle(t["auto_lock_advanced_section"])
         self.config_panel.preset_scope_hint_label.setText(t["auto_lock_preset_scope_hint"])
         self.config_panel.preset_button_list_label.setText(t["auto_lock_preset_select"])
+        self.config_panel.preset_selected_label.setText(t["auto_lock_preset_selected"])
         self.config_panel.preset_name_label.setText(t["auto_lock_preset_name"])
+        self.config_panel.preset_scope_button.setText(t["auto_lock_preset_scope_button"])
         self.config_panel.preset_new_button.setText(t["auto_lock_preset_new"])
+        self.config_panel.preset_load_button.setText(t["auto_lock_preset_load"])
         self.config_panel.preset_save_button.setText(t["auto_lock_preset_save"])
         self.config_panel.preset_delete_button.setText(t["auto_lock_preset_delete"])
         self.config_panel.preset_details_label.setText(t["auto_lock_preset_details"])
@@ -240,10 +249,13 @@ class AutoLockWindow(AuxiliaryWindow):
         self.config_panel.stop_button.setText(t["auto_lock_stop"])
         self.config_panel.clear_log_button.setText(t["auto_lock_clear_log"])
         self.config_panel.pre_scan_button.setToolTip(t["auto_lock_pre_scan_usage_hint"])
+        self.config_panel.preset_scope_button.setToolTip(t["auto_lock_preset_scope_button_hint"])
         self.config_panel.preset_save_button.setToolTip(t["auto_lock_preset_scope_hint"])
         self.config_panel.preset_new_button.setToolTip(t["auto_lock_preset_new_hint"])
+        self.config_panel.preset_load_button.setToolTip(t["auto_lock_preset_load_hint"])
         self.config_panel.preset_delete_button.setToolTip(t["auto_lock_preset_delete_hint"])
         self.config_panel.preset_details_container.setToolTip(t["auto_lock_preset_scope_hint"])
+        self._refresh_loaded_preset_display()
 
         for spin in (
             self.config_panel.search_interval_spin,
@@ -303,9 +315,11 @@ class AutoLockWindow(AuxiliaryWindow):
         self.scope_mode_value.setText(t["auto_lock_value_waiting"])
         self.scope_status_label.setText(t["auto_lock_scope_click_hint"])
         self._selected_preset_name = None
+        self._loaded_preset_name = None
         self.config_panel.preset_name_edit.clear()
         self._render_preset_detail_cards(None, self._collect_preset_payload())
         self.scope_window.reset_state(language)
+        self._refresh_loaded_preset_display()
         self.candidate_table.setRowCount(0)
 
     def render_snapshot(self, snapshot: DeviceSnapshot | None) -> None:
@@ -403,6 +417,7 @@ class AutoLockWindow(AuxiliaryWindow):
         for button in self._preset_buttons.values():
             button.setEnabled(editable)
         self.config_panel.preset_new_button.setEnabled(not running)
+        self.config_panel.preset_load_button.setEnabled(not running and self._selected_preset_name is not None)
         self.config_panel.preset_save_button.setEnabled(not running)
         self.config_panel.preset_delete_button.setEnabled(not running and self._selected_preset_name is not None)
         for widget in (
@@ -481,6 +496,8 @@ class AutoLockWindow(AuxiliaryWindow):
             return
         if old_name and old_name != name and old_name in self._preset_store:
             self._preset_store.pop(old_name, None)
+        if old_name == self._loaded_preset_name:
+            self._loaded_preset_name = name
         self._preset_store[name] = self._collect_preset_payload()
         try:
             self.PRESET_PATH.write_text(
@@ -566,6 +583,8 @@ class AutoLockWindow(AuxiliaryWindow):
             QMessageBox.warning(self, "Warning", TEXT[self.owner.language]["auto_lock_preset_save_failed"])
             return
         self._selected_preset_name = None
+        if self._loaded_preset_name == name:
+            self._loaded_preset_name = None
         self.config_panel.preset_name_edit.clear()
         self._populate_saved_presets(selected_name=None)
         self.append_log(TEXT[self.owner.language]["auto_lock_preset_deleted"].format(name=name))
@@ -584,6 +603,15 @@ class AutoLockWindow(AuxiliaryWindow):
         payload = self._preset_store.get(name)
         if not isinstance(payload, dict):
             return
+        result = QMessageBox.question(
+            self,
+            TEXT[self.owner.language]["auto_lock_preset_switch_confirm_title"],
+            TEXT[self.owner.language]["auto_lock_preset_switch_confirm_body"].format(name=name),
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if result != QMessageBox.Yes:
+            return
         self._selected_preset_name = name
         self._apply_preset_payload(payload)
         self.config_panel.preset_name_edit.setText(name)
@@ -596,6 +624,7 @@ class AutoLockWindow(AuxiliaryWindow):
                 self.append_log(TEXT[self.owner.language]["auto_lock_preset_apply_busy"].format(name=name))
                 return
         self.append_log(TEXT[self.owner.language]["auto_lock_preset_loaded"].format(name=name))
+        self._loaded_preset_name = name
         self._refresh_preset_button_states()
         self._refresh_selected_preset_details()
         QMessageBox.information(
@@ -603,6 +632,28 @@ class AutoLockWindow(AuxiliaryWindow):
             TEXT[self.owner.language]["auto_lock_preset_load_success_title"],
             TEXT[self.owner.language]["auto_lock_preset_loaded"].format(name=name),
         )
+
+    def _show_preset_scope_help(self) -> None:
+        t = TEXT[self.owner.language]
+        body = "\n".join(
+            (
+                t["auto_lock_preset_scope_hint"],
+                "",
+                t["auto_lock_preset_scope_saved_header"],
+                f"- {t['auto_lock_preset_scope_saved_item_links']}",
+                f"- {t['auto_lock_preset_scope_saved_item_workflow']}",
+                f"- {t['auto_lock_preset_scope_saved_item_candidate']}",
+                f"- {t['auto_lock_preset_scope_saved_item_runtime']}",
+                "",
+                t["auto_lock_preset_scope_not_saved_header"],
+                f"- {t['auto_lock_preset_scope_not_saved_item_runtime_status']}",
+                f"- {t['auto_lock_preset_scope_not_saved_item_scope']}",
+                f"- {t['auto_lock_preset_scope_not_saved_item_candidates']}",
+                f"- {t['auto_lock_preset_scope_not_saved_item_target']}",
+                f"- {t['auto_lock_preset_scope_not_saved_item_templates']}",
+            )
+        )
+        QMessageBox.information(self, t["auto_lock_preset_scope_title"], body)
 
     def _populate_strategy_options(self, language: str) -> None:
         combo = self.config_panel.strategy_combo
@@ -704,12 +755,14 @@ class AutoLockWindow(AuxiliaryWindow):
                 widget.deleteLater()
         self._preset_buttons.clear()
 
+        column_count = self._preset_button_column_count()
+        self._preset_button_columns = column_count
         for index, name in enumerate(sorted(self._preset_store)):
             button = QPushButton(name)
             button.setCheckable(True)
             button.clicked.connect(lambda _checked=False, preset_name=name: self._on_preset_button_clicked(preset_name))
-            row = index // 4
-            col = index % 4
+            row = index // column_count
+            col = index % column_count
             layout.addWidget(button, row, col)
             self._preset_buttons[name] = button
         self._refresh_preset_button_states()
@@ -719,20 +772,10 @@ class AutoLockWindow(AuxiliaryWindow):
         if current_name == name:
             self._refresh_preset_button_states()
             return
-        result = QMessageBox.question(
-            self,
-            TEXT[self.owner.language]["auto_lock_preset_switch_confirm_title"],
-            TEXT[self.owner.language]["auto_lock_preset_switch_confirm_body"].format(name=name),
-            QMessageBox.Yes | QMessageBox.Cancel,
-            QMessageBox.Cancel,
-        )
-        if result != QMessageBox.Yes:
-            self._refresh_preset_button_states()
-            return
         self._selected_preset_name = name
         self.config_panel.preset_name_edit.setText(name)
         self._refresh_preset_button_states()
-        self.load_selected_preset(name)
+        self._refresh_selected_preset_details()
 
     def _refresh_preset_button_states(self) -> None:
         for name, button in self._preset_buttons.items():
@@ -740,7 +783,14 @@ class AutoLockWindow(AuxiliaryWindow):
             button.blockSignals(True)
             button.setChecked(checked)
             button.blockSignals(False)
+        self.config_panel.preset_load_button.setEnabled(self._selected_preset_name is not None)
         self.config_panel.preset_delete_button.setEnabled(self._selected_preset_name is not None)
+        self._refresh_loaded_preset_display()
+
+    def _refresh_loaded_preset_display(self) -> None:
+        t = TEXT[self.owner.language]
+        name = (self._loaded_preset_name or "").strip()
+        self.config_panel.preset_selected_value.setText(name or t["auto_lock_preset_selected_none"])
 
     def _refresh_selected_preset_details(self) -> None:
         name = (self._selected_preset_name or "").strip()
@@ -769,25 +819,6 @@ class AutoLockWindow(AuxiliaryWindow):
                 title,
                 [
                     t["auto_lock_preset_scope_hint"],
-                ],
-            ),
-            (
-                t["auto_lock_preset_scope_saved_header"],
-                [
-                    t["auto_lock_preset_scope_saved_item_links"],
-                    t["auto_lock_preset_scope_saved_item_workflow"],
-                    t["auto_lock_preset_scope_saved_item_candidate"],
-                    t["auto_lock_preset_scope_saved_item_runtime"],
-                ],
-            ),
-            (
-                t["auto_lock_preset_scope_not_saved_header"],
-                [
-                    t["auto_lock_preset_scope_not_saved_item_runtime_status"],
-                    t["auto_lock_preset_scope_not_saved_item_scope"],
-                    t["auto_lock_preset_scope_not_saved_item_candidates"],
-                    t["auto_lock_preset_scope_not_saved_item_target"],
-                    t["auto_lock_preset_scope_not_saved_item_templates"],
                 ],
             ),
             (
@@ -853,12 +884,14 @@ class AutoLockWindow(AuxiliaryWindow):
 
         sections = self._build_preset_detail_sections(name, payload)
         column_count = self._preset_detail_column_count()
+        scale = self._ui_scale()
         for index, (title, lines) in enumerate(sections):
             card = QFrame()
             card.setObjectName("LaserPanel")
             card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(10, 10, 10, 10)
-            card_layout.setSpacing(6)
+            card_margin = round(10 * scale)
+            card_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
+            card_layout.setSpacing(round(6 * scale))
 
             title_label = QLabel(title)
             title_label.setObjectName("SectionTitle")
@@ -879,10 +912,14 @@ class AutoLockWindow(AuxiliaryWindow):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
+        if self._preset_buttons and self._preset_button_columns != self._preset_button_column_count():
+            self._rebuild_preset_buttons()
         self._refresh_selected_preset_details()
 
     def _preset_detail_column_count(self) -> int:
-        available_width = max(self.config_panel.preset_details_container.width(), self.width() - 220)
+        scale = self._ui_scale()
+        side_offset = round(220 * scale)
+        available_width = max(self.config_panel.preset_details_container.width(), self.width() - side_offset) / scale
         if available_width >= 1500:
             return 4
         if available_width >= 1120:
@@ -890,6 +927,23 @@ class AutoLockWindow(AuxiliaryWindow):
         if available_width >= 760:
             return 2
         return 1
+
+    def _preset_button_column_count(self) -> int:
+        scale = self._ui_scale()
+        available_width = max(self.config_panel.preset_button_container.width(), self.width() - round(220 * scale)) / scale
+        if available_width >= 900:
+            return 4
+        if available_width >= 640:
+            return 3
+        if available_width >= 420:
+            return 2
+        return 1
+
+    def _ui_scale(self) -> float:
+        manager = getattr(self.owner, "scale_manager", None)
+        if manager is None:
+            return 1.0
+        return max(float(manager.scale), 0.01)
 
     @staticmethod
     def _set_combo_by_data(combo, value) -> None:

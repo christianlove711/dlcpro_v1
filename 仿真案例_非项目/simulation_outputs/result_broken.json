@@ -1,0 +1,11 @@
+{
+  "locked": false,
+  "state": "FAILED",
+  "lock_pzt": null,
+  "pzt_center_command": null,
+  "bias_offset_command": null,
+  "error_rms": null,
+  "correction_rms": null,
+  "reason": "未找到可信透射峰",
+  "candidate": null
+}

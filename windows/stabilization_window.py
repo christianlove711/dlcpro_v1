@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSizePolicy, QVBox
 from dlcpro_service import DeviceSnapshot
 from ui_text import STABILIZATION_OUTPUT_CHANNEL_OPTIONS, STABILIZATION_PHYSICAL_CHANNEL_OPTIONS, TEXT
 from widgets.stabilization import PowerStabilizationPanel, StabilizationDetectionPanel
-from windows.base_window import AuxiliaryWindow
+from windows.base_window import AuxiliaryWindow, set_scrollable_central_widget
 
 
 class StabilizationWindow(AuxiliaryWindow):
@@ -38,7 +38,7 @@ class StabilizationWindow(AuxiliaryWindow):
         root.addLayout(detection_row)
 
         root.addStretch(1)
-        self.setCentralWidget(central)
+        self.scroll_area = set_scrollable_central_widget(self, central)
 
         self._configure_combo(self.power_panel.input_signal_combo)
         self._configure_combo(self.power_panel.external_physical_channel_combo)

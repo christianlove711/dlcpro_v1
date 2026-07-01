@@ -30,6 +30,8 @@ from PySide6.QtWidgets import (
 from dlcpro_service import ConnectionSettings, DeviceSnapshot, DlcProService
 from ui_text import (
     ARC_SIGNAL_OPTIONS,
+    LOCK_ERROR_SIGNAL_OPTIONS,
+    LOCK_FALC_SELECTION_OPTIONS,
     LOCK_INPUT_SIGNAL_OPTIONS,
     LOCK_PID_SELECTION_OPTIONS,
     LOCK_TYPE_OPTIONS,
@@ -38,10 +40,12 @@ from ui_text import (
     SCAN_SHAPE_OPTIONS,
     TEXT,
 )
-from controllers import AutoLockController, LaserController, ScanLockController
+from controllers import AutoLockController, AutoLock2Controller, LaserController, ScanLockController
 from widgets.common_controls import SafeComboBox, SafeSpinBox
+from ui_scaling import SCALE_OPTIONS, UiScaleManager, fit_window_to_screen
 from windows import (
     AutoLockWindow,
+    AutoLock2Window,
     FalcProWindow,
     LaserWindow,
     RelockWindow,
@@ -72,6 +76,7 @@ class MainWindow(QMainWindow):
         self.service = DlcProService()
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dlcpro")
         self.language = "zh"
+        self.scale_manager: UiScaleManager | None = None
         self.busy = False
         self.snapshot: DeviceSnapshot | None = None
         self.pending_future: Future | None = None
@@ -104,6 +109,7 @@ class MainWindow(QMainWindow):
         self.pending_followup_task: tuple[object, object, str] | None = None
         self.connection_loss_notified = False
         self.auto_lock_controller = AutoLockController(self)
+        self.auto_lock2_controller = AutoLock2Controller(self)
         self.laser_controller = LaserController(self)
         self.scan_lock_controller = ScanLockController(self)
 
@@ -125,6 +131,7 @@ class MainWindow(QMainWindow):
         self._apply_module_precisions()
         self._update_all_precision_buttons()
         self._apply_base_style()
+        self._configure_ui_scaling()
         self._apply_texts()
         self._populate_environment_hints()
         self._set_connection_mode("network")
@@ -145,6 +152,13 @@ class MainWindow(QMainWindow):
         self.language_combo.currentIndexChanged.connect(self._on_language_changed)
         header_layout.addWidget(self.language_label)
         header_layout.addWidget(self.language_combo)
+        self.ui_scale_label = QLabel()
+        self.ui_scale_combo = SafeComboBox()
+        for label, scale in SCALE_OPTIONS:
+            self.ui_scale_combo.addItem(label, scale)
+        self.ui_scale_combo.currentIndexChanged.connect(self._on_ui_scale_changed)
+        header_layout.addWidget(self.ui_scale_label)
+        header_layout.addWidget(self.ui_scale_combo)
         header_layout.addStretch(1)
         self.status_label = QLabel()
         self.status_label.setObjectName("StatusBadge")
@@ -167,6 +181,7 @@ class MainWindow(QMainWindow):
         self.falc_button = self._create_nav_button(self._open_falc_window)
         self.scan_lock_button = self._create_nav_button(self._open_scan_lock_window)
         self.auto_lock_button = self._create_nav_button(self._open_auto_lock_window)
+        self.auto_lock2_button = self._create_nav_button(self._open_auto_lock2_window)
         self.relock_button = self._create_nav_button(self._open_relock_window)
         self.stabilization_button = self._create_nav_button(self._open_stabilization_window)
         for button in (
@@ -175,6 +190,7 @@ class MainWindow(QMainWindow):
             self.falc_button,
             self.scan_lock_button,
             self.auto_lock_button,
+            self.auto_lock2_button,
             self.relock_button,
             self.stabilization_button,
         ):
@@ -199,6 +215,8 @@ class MainWindow(QMainWindow):
         self.scan_lock_window = ScanLockWindow(self.scan_lock_page)
         self.auto_lock_window = AutoLockWindow(self, self.auto_lock_controller)
         self.auto_lock_controller.bind_window(self.auto_lock_window)
+        self.auto_lock2_window = AutoLock2Window(self, self.auto_lock2_controller)
+        self.auto_lock2_controller.bind_window(self.auto_lock2_window)
         self.relock_window = RelockWindow(self)
         self.stabilization_window = StabilizationWindow(self)
 
@@ -322,6 +340,7 @@ class MainWindow(QMainWindow):
             self.laser_window.move(self.x() + 40, self.y() + 40)
         self.laser_window.showNormal()
         self.laser_window.show()
+        fit_window_to_screen(self.laser_window)
         self.laser_window.raise_()
         self.laser_window.activateWindow()
 
@@ -330,6 +349,7 @@ class MainWindow(QMainWindow):
             self.falc_window.move(self.x() + 60, self.y() + 60)
         self.falc_window.showNormal()
         self.falc_window.show()
+        fit_window_to_screen(self.falc_window)
         self.falc_window.raise_()
         self.falc_window.activateWindow()
 
@@ -338,6 +358,7 @@ class MainWindow(QMainWindow):
             self.scan_lock_window.move(self.x() + 60, self.y() + 60)
         self.scan_lock_window.showNormal()
         self.scan_lock_window.show()
+        fit_window_to_screen(self.scan_lock_window)
         self.scan_lock_window.raise_()
         self.scan_lock_window.activateWindow()
 
@@ -346,14 +367,25 @@ class MainWindow(QMainWindow):
             self.auto_lock_window.move(self.x() + 80, self.y() + 80)
         self.auto_lock_window.showNormal()
         self.auto_lock_window.show()
+        fit_window_to_screen(self.auto_lock_window)
         self.auto_lock_window.raise_()
         self.auto_lock_window.activateWindow()
+
+    def _open_auto_lock2_window(self) -> None:
+        if self.auto_lock2_window.isHidden():
+            self.auto_lock2_window.move(self.x() + 90, self.y() + 90)
+        self.auto_lock2_window.showNormal()
+        self.auto_lock2_window.show()
+        fit_window_to_screen(self.auto_lock2_window)
+        self.auto_lock2_window.raise_()
+        self.auto_lock2_window.activateWindow()
 
     def _open_relock_window(self) -> None:
         if self.relock_window.isHidden():
             self.relock_window.move(self.x() + 80, self.y() + 80)
         self.relock_window.showNormal()
         self.relock_window.show()
+        fit_window_to_screen(self.relock_window)
         self.relock_window.raise_()
         self.relock_window.activateWindow()
 
@@ -362,6 +394,7 @@ class MainWindow(QMainWindow):
             self.stabilization_window.move(self.x() + 100, self.y() + 100)
         self.stabilization_window.showNormal()
         self.stabilization_window.show()
+        fit_window_to_screen(self.stabilization_window)
         self.stabilization_window.raise_()
         self.stabilization_window.activateWindow()
 
@@ -458,6 +491,49 @@ class MainWindow(QMainWindow):
                 color: #fff6e5;
                 font-weight: 700;
             }
+            QPushButton#ParameterHelpButton {
+                min-width: 28px;
+                max-width: 28px;
+                padding: 6px 0;
+                border-radius: 14px;
+                background: #4a4a4a;
+                border: 1px solid #777;
+                color: #f0f0f0;
+                font-weight: 700;
+            }
+            QPushButton#ParameterHelpButton:hover {
+                background: #5a5a5a;
+                border: 1px solid #8a8a8a;
+            }
+            QLabel#ParameterRoleBadge {
+                min-width: 56px;
+                border-radius: 10px;
+                padding: 4px 8px;
+                font-weight: 700;
+                color: #f4f4f4;
+                background: #505050;
+                border: 1px solid #686868;
+            }
+            QLabel#ParameterRoleBadge[role="primary"] {
+                background: #335b46;
+                border: 1px solid #6da27f;
+                color: #f2fff7;
+            }
+            QLabel#ParameterRoleBadge[role="secondary"] {
+                background: #4d4f64;
+                border: 1px solid #7c82b0;
+                color: #f4f5ff;
+            }
+            QLabel#ParameterRoleBadge[role="guard"] {
+                background: #5d5140;
+                border: 1px solid #8f7a58;
+                color: #fff6e5;
+            }
+            QLabel#ParameterRoleBadge[role="unused"] {
+                background: #3f3f3f;
+                border: 1px solid #5d5d5d;
+                color: #aaa;
+            }
             QLabel#StatusBadge {
                 background: #1f3d2a;
                 border: 1px solid #35654a;
@@ -495,15 +571,49 @@ class MainWindow(QMainWindow):
             }
             """
         app = QApplication.instance()
-        if app is not None:
+        if app is not None and self.scale_manager is not None:
+            self.scale_manager.base_stylesheet = stylesheet
+            self.scale_manager.apply()
+        elif app is not None:
             app.setStyleSheet(stylesheet)
         else:
             self.setStyleSheet(stylesheet)
+
+    def _configure_ui_scaling(self) -> None:
+        app = QApplication.instance()
+        if app is None:
+            return
+        if self.scale_manager is None:
+            self.scale_manager = UiScaleManager(app, app.styleSheet())
+        self.scale_manager.register_windows(
+            (
+                (self, 980, 860),
+                (self.laser_window, 860, 900),
+                (self.falc_window, 760, 760),
+                (self.scan_lock_window, 980, 1180),
+                (self.auto_lock_window, 1120, 820),
+                (self.auto_lock_window.scope_window, 1120, 760),
+                (self.auto_lock2_window, 1180, 620),
+                (self.auto_lock2_window.config_window, 720, 520),
+                (self.auto_lock2_window.waveform_window, 1120, 700),
+                (self.auto_lock2_window.log_window, 920, 620),
+                (self.relock_window, 1180, 480),
+                (self.stabilization_window, 920, 860),
+            )
+        )
+        self.scale_manager.apply()
+
+    def _on_ui_scale_changed(self) -> None:
+        if self.scale_manager is None:
+            return
+        self.scale_manager.set_scale(self.ui_scale_combo.currentData())
 
     def _apply_texts(self) -> None:
         t = TEXT[self.language]
         self.setWindowTitle(t["window_title"])
         self.language_label.setText(t["language"])
+        self.ui_scale_label.setText(t["ui_scale"])
+        self.ui_scale_combo.setItemText(0, t["ui_scale_auto"])
         self.status_label.setText(t["disconnected"] if not self.service.is_connected else t["connected"])
 
         self.connection_group.setTitle(t["connection"])
@@ -528,9 +638,11 @@ class MainWindow(QMainWindow):
         self.falc_button.setText(t["falc"])
         self.scan_lock_button.setText(t["scan_lock"])
         self.auto_lock_button.setText(t["auto_lock"])
+        self.auto_lock2_button.setText(t["auto_lock2"])
         self.relock_button.setText(t["relock"])
         self.stabilization_button.setText(t["stabilization"])
         self.auto_lock_controller.apply_texts()
+        self.auto_lock2_controller.apply_texts()
         self.falc_window.apply_texts(self.language)
         self.relock_window.apply_texts(self.language)
         self.stabilization_window.apply_texts(self.language)
@@ -726,7 +838,7 @@ class MainWindow(QMainWindow):
             self.status_label.setText(t["busy"])
         else:
             self.status_label.setText(t["connected"] if self.service.is_connected else t["disconnected"])
-        auto_lock_running = self.auto_lock_controller.is_running
+        auto_lock_running = self.auto_lock_controller.is_running or self.auto_lock2_controller.is_running
         self.connect_button.setEnabled(not busy and not auto_lock_running)
         self.disconnect_button.setEnabled(not busy)
         self.refresh_button.setEnabled(not busy and not auto_lock_running)
@@ -752,6 +864,7 @@ class MainWindow(QMainWindow):
             widget.setEnabled(previewable)
         self.falc_window.set_writable(writable, previewable)
         self.auto_lock_window.set_writable(writable, previewable, auto_lock_running)
+        self.auto_lock2_window.set_writable(writable, previewable, self.auto_lock2_controller.is_running)
         self.relock_window.set_writable(writable, previewable)
         self.stabilization_window.set_writable(writable, previewable)
 
@@ -866,6 +979,8 @@ class MainWindow(QMainWindow):
             return
         if self.auto_lock_controller.is_running:
             self.auto_lock_controller.handle_task_failure(result)
+        if self.auto_lock2_controller.is_running:
+            self.auto_lock2_controller.handle_task_failure(result)
         message = self.service.format_error(result) if isinstance(result, Exception) else str(result)
         QMessageBox.critical(self, "Error", message)
 
@@ -1885,6 +2000,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Error", self.service.format_error(exc))
             return
         self.auto_lock_controller.handle_disconnect()
+        self.auto_lock2_controller.handle_disconnect()
         self.snapshot = None
         self.last_device_current_set = None
         self.parameter_table.setRowCount(0)
@@ -1909,6 +2025,7 @@ class MainWindow(QMainWindow):
         self.laser_controller.reset_readbacks()
         self.scan_lock_controller.render_snapshot(self._empty_scan_snapshot())
         self.auto_lock_window.reset_state(self.language)
+        self.auto_lock2_window.reset_state(self.language)
         self.falc_window.reset_state(self.language)
         self.relock_window.reset_state(self.language)
         self.stabilization_window.reset_state(self.language)
@@ -1940,7 +2057,11 @@ class MainWindow(QMainWindow):
     def _on_snapshot_updated(self, snapshot: DeviceSnapshot) -> None:
         self.snapshot = snapshot
         self._render_snapshot(snapshot)
-        if not self.auto_lock_controller.is_running and not self.refresh_timer.isActive():
+        if (
+            not self.auto_lock_controller.is_running
+            and not self.auto_lock2_controller.is_running
+            and not self.refresh_timer.isActive()
+        ):
             self.refresh_timer.start()
 
     def _render_snapshot(self, snapshot: DeviceSnapshot) -> None:
@@ -1951,6 +2072,7 @@ class MainWindow(QMainWindow):
         self.scan_lock_controller.render_snapshot(snapshot)
         self._restore_scan_lock_scroll(scan_lock_scroll)
         self.auto_lock_window.render_snapshot(snapshot)
+        self.auto_lock2_controller.render_snapshot(snapshot)
         self.falc_window.render_snapshot(snapshot)
         self.relock_window.render_snapshot(snapshot)
         self.stabilization_window.render_snapshot(snapshot)
@@ -1967,12 +2089,24 @@ class MainWindow(QMainWindow):
                 "sc_signal_type": SCAN_SHAPE_OPTIONS[0][1],
                 "sc_enabled": False,
                 "sc_unit": TEXT[self.language]["voltage_unit"],
+                "lock_state": 0,
+                "lock_state_txt": TEXT[self.language]["not_available"],
                 "lock_enabled": False,
                 "lock_hold": False,
                 "lock_input_channel": LOCK_INPUT_SIGNAL_OPTIONS[0][1],
+                "lock_error_channel": LOCK_ERROR_SIGNAL_OPTIONS[0][1],
                 "lock_type": LOCK_TYPE_OPTIONS[0][1],
                 "lock_pid_selection": LOCK_PID_SELECTION_OPTIONS[0][1],
+                "lock_falc_selection": LOCK_FALC_SELECTION_OPTIONS[0][1],
                 "lock_without_lockpoint": False,
+                "lock_candidate_top_enabled": False,
+                "lock_candidate_bottom_enabled": False,
+                "lock_candidate_positive_edge_enabled": False,
+                "lock_candidate_negative_edge_enabled": False,
+                "lock_candidate_edge_level": 0.0,
+                "lock_candidate_peak_noise_tolerance": 0.0,
+                "lock_candidate_edge_min_distance": 0,
+                "lock_candidate_top_of_fringe_low_pass": False,
                 "pid1_enabled": False,
                 "pid1_gain_all": 0.0,
                 "pid1_gain_p": 0.0,
@@ -2016,6 +2150,7 @@ class MainWindow(QMainWindow):
             self.falc_window,
             self.scan_lock_window,
             self.auto_lock_window,
+            self.auto_lock2_window,
             self.relock_window,
             self.stabilization_window,
         ):
@@ -2027,10 +2162,16 @@ class MainWindow(QMainWindow):
 
 
 def main() -> int:
+    try:
+        QApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+        )
+    except AttributeError:
+        pass
     app = QApplication(sys.argv)
     window = MainWindow()
-    window.resize(980, 860)
     window.show()
+    fit_window_to_screen(window)
     QMessageBox.information(
         window,
         TEXT["zh"]["safety_title"],

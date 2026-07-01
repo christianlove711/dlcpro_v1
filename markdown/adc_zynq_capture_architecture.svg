@@ -1,0 +1,175 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="920" viewBox="0 0 1500 920">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#111"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#1b5eaa"/>
+    </marker>
+    <marker id="arrow-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#666"/>
+    </marker>
+    <style>
+      .title { font-family: "SimSun", "Microsoft YaHei", Arial, sans-serif; font-size: 30px; font-weight: 700; fill: #111; }
+      .caption { font-family: "SimSun", "Microsoft YaHei", Arial, sans-serif; font-size: 24px; fill: #111; }
+      .label { font-family: "SimSun", "Microsoft YaHei", Arial, sans-serif; font-size: 22px; fill: #111; }
+      .small { font-family: "SimSun", "Microsoft YaHei", Arial, sans-serif; font-size: 18px; fill: #111; }
+      .tiny { font-family: "SimSun", "Microsoft YaHei", Arial, sans-serif; font-size: 16px; fill: #111; }
+      .blueText { font-family: "SimSun", "Microsoft YaHei", Arial, sans-serif; font-size: 17px; fill: #1b5eaa; }
+      .grayText { font-family: "SimSun", "Microsoft YaHei", Arial, sans-serif; font-size: 17px; fill: #666; }
+      .outer { fill: #dceff4; stroke: #111; stroke-width: 2; }
+      .plbox { fill: #e4f4f7; stroke: #111; stroke-width: 2; }
+      .psbox { fill: #eef4df; stroke: #111; stroke-width: 2; }
+      .module { fill: #f8e8d8; stroke: #111; stroke-width: 2; }
+      .module2 { fill: #fff3cf; stroke: #111; stroke-width: 2; }
+      .ext { fill: #eef4df; stroke: #111; stroke-width: 2; }
+      .dataLine { stroke: #111; stroke-width: 2.4; fill: none; marker-end: url(#arrow); }
+      .dataLineNoArrow { stroke: #111; stroke-width: 2.4; fill: none; }
+      .clockLine { stroke: #1b5eaa; stroke-width: 2.4; fill: none; marker-end: url(#arrow-blue); }
+      .clockLineNoArrow { stroke: #1b5eaa; stroke-width: 2.4; fill: none; }
+      .ctrlLine { stroke: #666; stroke-width: 2.2; stroke-dasharray: 8 6; fill: none; marker-end: url(#arrow-gray); }
+    </style>
+  </defs>
+
+  <rect x="245" y="45" width="975" height="760" class="outer"/>
+  <text x="265" y="86" class="title">野火 Zynq-7020 板卡</text>
+  <text x="560" y="86" class="title">AD9280 千兆网口采集系统</text>
+
+  <rect x="280" y="120" width="560" height="635" class="plbox"/>
+  <text x="302" y="158" class="title">PL / FPGA</text>
+
+  <rect x="890" y="120" width="290" height="635" class="psbox"/>
+  <text x="912" y="158" class="title">PS / ARM</text>
+
+  <rect x="60" y="250" width="145" height="80" class="ext"/>
+  <text x="102" y="283" class="label">PD</text>
+  <text x="82" y="310" class="small">探测器</text>
+
+  <rect x="60" y="375" width="145" height="110" class="ext"/>
+  <text x="82" y="410" class="small">模拟前端</text>
+  <text x="76" y="438" class="tiny">跨阻 / 增益</text>
+  <text x="76" y="464" class="tiny">偏置 / 滤波</text>
+
+  <rect x="60" y="555" width="145" height="120" class="module2"/>
+  <text x="84" y="590" class="label">AD9280</text>
+  <text x="75" y="620" class="tiny">8 bit ADC</text>
+  <text x="72" y="648" class="tiny">D[7:0] / OTR</text>
+
+  <rect x="320" y="205" width="160" height="125" class="module"/>
+  <text x="350" y="243" class="label">时钟模块</text>
+  <text x="334" y="274" class="tiny">Clocking Wizard</text>
+  <text x="348" y="302" class="tiny">MMCM / PLL</text>
+
+  <rect x="535" y="205" width="220" height="125" class="module"/>
+  <text x="582" y="243" class="label">ADC采样模块</text>
+  <text x="554" y="274" class="tiny">IOB寄存器采样</text>
+  <text x="562" y="302" class="tiny">D[7:0] / OTR</text>
+
+  <rect x="535" y="385" width="220" height="105" class="module"/>
+  <text x="584" y="425" class="label">异步 FIFO</text>
+  <text x="566" y="456" class="tiny">adc_clk → axi_clk</text>
+
+  <rect x="535" y="545" width="220" height="105" class="module"/>
+  <text x="584" y="585" class="label">数据打包模块</text>
+  <text x="566" y="616" class="tiny">4 × 8 bit → 32 bit</text>
+
+  <rect x="320" y="545" width="160" height="105" class="module"/>
+  <text x="350" y="585" class="label">测试数据</text>
+  <text x="342" y="616" class="tiny">ramp / counter</text>
+
+  <rect x="535" y="690" width="220" height="50" class="module"/>
+  <text x="574" y="723" class="label">AXI4-Stream 主接口</text>
+
+  <rect x="320" y="385" width="160" height="105" class="module"/>
+  <text x="350" y="425" class="label">控制寄存器</text>
+  <text x="348" y="456" class="tiny">AXI-Lite Regs</text>
+
+  <rect x="900" y="205" width="250" height="90" class="module"/>
+  <text x="958" y="245" class="label">AXI DMA</text>
+  <text x="955" y="273" class="tiny">S2MM 写 DDR</text>
+
+  <rect x="900" y="355" width="250" height="95" class="module2"/>
+  <text x="965" y="394" class="label">DDR缓存</text>
+  <text x="943" y="424" class="tiny">双缓冲 / 环形缓冲</text>
+
+  <rect x="900" y="515" width="250" height="105" class="module"/>
+  <text x="953" y="555" class="label">裸机程序</text>
+  <text x="934" y="586" class="tiny">DMA控制 / lwIP UDP</text>
+
+  <rect x="900" y="680" width="250" height="60" class="module2"/>
+  <text x="965" y="719" class="label">GEM 千兆网口</text>
+
+  <rect x="1280" y="610" width="155" height="110" class="ext"/>
+  <text x="1304" y="650" class="label">电脑上位机</text>
+  <text x="1302" y="680" class="tiny">UDP接收</text>
+  <text x="1302" y="706" class="tiny">峰值/误差信号</text>
+
+  <text x="28" y="138" class="label">系统时钟</text>
+  <line x1="145" y1="132" x2="320" y2="240" class="clockLine"/>
+  <text x="36" y="190" class="label">系统复位</text>
+  <line x1="145" y1="184" x2="320" y2="290" class="ctrlLine"/>
+
+  <line x1="132" y1="330" x2="132" y2="375" class="dataLine"/>
+  <line x1="132" y1="485" x2="132" y2="555" class="dataLine"/>
+
+  <path d="M 480 250 L 535 250" class="clockLine"/>
+  <text x="490" y="236" class="blueText">adc_clk</text>
+
+  <path d="M 480 300 L 505 300 L 505 615 L 205 615" class="clockLine"/>
+  <text x="252" y="603" class="blueText">ADC采样时钟</text>
+
+  <path d="M 205 615 L 535 265" class="dataLine"/>
+  <text x="244" y="545" class="small">AD数据 D[7:0]</text>
+  <text x="260" y="575" class="small">超量程 OTR</text>
+
+  <path d="M 755 265 L 800 265 L 800 438 L 755 438" class="dataLine"/>
+  <text x="764" y="352" class="small">样点</text>
+
+  <path d="M 645 330 L 645 385" class="dataLine"/>
+  <text x="656" y="363" class="blueText">adc_clk域</text>
+
+  <path d="M 645 490 L 645 545" class="dataLine"/>
+  <text x="656" y="523" class="blueText">axi_clk域</text>
+
+  <path d="M 480 598 L 535 598" class="dataLine"/>
+  <text x="335" y="678" class="tiny">无ADC时调试链路</text>
+  <path d="M 400 650 L 400 715 L 535 715" class="dataLine"/>
+
+  <path d="M 645 650 L 645 690" class="dataLine"/>
+  <path d="M 755 715 L 900 250" class="dataLine"/>
+  <text x="770" y="690" class="small">AXI-Stream</text>
+
+  <path d="M 1025 295 L 1025 355" class="dataLine"/>
+  <text x="1038" y="330" class="small">AXI HP</text>
+
+  <path d="M 1025 450 L 1025 515" class="dataLine"/>
+  <path d="M 1025 620 L 1025 680" class="dataLine"/>
+  <path d="M 1150 710 L 1280 665" class="dataLine"/>
+  <text x="1178" y="690" class="small">UDP数据流</text>
+
+  <path d="M 900 565 L 820 565 L 820 438 L 755 438" class="ctrlLine"/>
+  <text x="765" y="528" class="grayText">DMA背压/状态</text>
+
+  <path d="M 900 565 L 495 565 L 495 438 L 480 438" class="ctrlLine"/>
+  <text x="520" y="552" class="grayText">enable / test / frame_len</text>
+
+  <path d="M 900 250 L 835 250 L 835 438 L 755 438" class="ctrlLine"/>
+  <text x="773" y="238" class="grayText">tready</text>
+
+  <line x1="400" y1="330" x2="400" y2="385" class="clockLineNoArrow"/>
+  <line x1="400" y1="330" x2="1000" y2="330" class="clockLine"/>
+  <line x1="1000" y1="330" x2="1000" y2="205" class="clockLine"/>
+  <line x1="1000" y1="330" x2="1000" y2="515" class="clockLine"/>
+  <line x1="400" y1="330" x2="400" y2="545" class="clockLine"/>
+  <text x="440" y="356" class="blueText">axi_clk 100MHz</text>
+
+  <rect x="72" y="760" width="22" height="0" class="dataLineNoArrow"/>
+  <line x1="72" y1="790" x2="145" y2="790" class="dataLineNoArrow"/>
+  <text x="155" y="797" class="tiny">高速数据流</text>
+  <line x1="310" y1="790" x2="383" y2="790" class="clockLineNoArrow"/>
+  <text x="393" y="797" class="tiny">时钟走向</text>
+  <line x1="525" y1="790" x2="598" y2="790" class="ctrlLine"/>
+  <text x="608" y="797" class="tiny">控制/状态</text>
+
+  <text x="562" y="875" class="caption">图 1  AD9280-Zynq 千兆网口采集卡系统架构图</text>
+</svg>

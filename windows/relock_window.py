@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QMessageBox, QSize
 from dlcpro_service import DeviceSnapshot
 from ui_text import LOCK_INPUT_SIGNAL_OPTIONS, RELOCK_OUTPUT_CHANNEL_OPTIONS, TEXT
 from widgets.relock import LockDetectionPanel, RelockPanel
-from windows.base_window import AuxiliaryWindow
+from windows.base_window import AuxiliaryWindow, set_scrollable_central_widget
 
 
 class RelockWindow(AuxiliaryWindow):
@@ -38,7 +38,7 @@ class RelockWindow(AuxiliaryWindow):
 
         root.addLayout(panels)
         root.addStretch(1)
-        self.setCentralWidget(central)
+        self.scroll_area = set_scrollable_central_widget(self, central)
 
         self._configure_combo(self.lock_detection_panel.input_signal_combo)
         self._configure_combo(self.relock_panel.output_channel_combo)

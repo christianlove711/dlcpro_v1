@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 from dlcpro_service import DeviceSnapshot, FalcSnapshot
 from ui_text import FALC_MON_CONFIG_OPTIONS, FALC_PATH_SELECTION_OPTIONS, TEXT
 from widgets.common_controls import SafeComboBox, SafeDoubleSpinBox
-from windows.base_window import AuxiliaryWindow
+from windows.base_window import AuxiliaryWindow, set_scrollable_central_widget
 
 
 class FalcProWindow(AuxiliaryWindow):
@@ -250,7 +250,7 @@ class FalcProWindow(AuxiliaryWindow):
         root.addWidget(self.unlim_group)
 
         root.addStretch(1)
-        self.setCentralWidget(central)
+        self.scroll_area = set_scrollable_central_widget(self, central)
         self._set_main_indicator(False)
         self._set_unlim_enable_indicator(False)
         self._set_unlim_hold_indicator(False)

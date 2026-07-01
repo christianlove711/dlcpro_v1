@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QMainWindow, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QMainWindow, QScrollArea, QVBoxLayout, QWidget
 
 
 class AuxiliaryWindow(QMainWindow):
@@ -18,6 +18,16 @@ class AuxiliaryWindow(QMainWindow):
 
     def request_shutdown(self) -> None:
         self._shutdown_requested = True
+
+
+def set_scrollable_central_widget(window: QMainWindow, content: QWidget) -> QScrollArea:
+    scroll = QScrollArea(window)
+    scroll.setWidgetResizable(True)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+    scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+    scroll.setWidget(content)
+    window.setCentralWidget(scroll)
+    return scroll
 
 
 class PlaceholderWindow(AuxiliaryWindow):

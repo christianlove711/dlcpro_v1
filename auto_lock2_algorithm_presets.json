@@ -1,0 +1,53 @@
+{
+  "算法配置 1": {
+    "strategy": "transmission_primary",
+    "wide_amplitude": 1.0,
+    "min_amplitude": 0.08,
+    "shrink_factor": 0.65,
+    "offset_step": 0.05,
+    "peak_center_tolerance": 0.06,
+    "zero_center_tolerance": 0.06,
+    "transmission_guard_tolerance": 0.08,
+    "error_slope_sigma": 5.0,
+    "min_error_slope": 0.02,
+    "transmission_peak_sigma": 5.0,
+    "min_transmission_prominence": 0.04,
+    "stable_frames": 3,
+    "max_offset_attempts": 80,
+    "offset_correction_gain": 0.7
+  },
+  "算法配置 2": {
+    "strategy": "error_primary",
+    "wide_amplitude": 1.0,
+    "min_amplitude": 0.08,
+    "shrink_factor": 0.7,
+    "offset_step": 0.05,
+    "peak_center_tolerance": 0.06,
+    "zero_center_tolerance": 0.06,
+    "transmission_guard_tolerance": 0.08,
+    "error_slope_sigma": 5.0,
+    "min_error_slope": 0.02,
+    "transmission_peak_sigma": 5.0,
+    "min_transmission_prominence": 0.04,
+    "stable_frames": 3,
+    "max_offset_attempts": 80,
+    "offset_correction_gain": 0.7
+  },
+  "算法配置 3": {
+    "strategy": "hybrid",
+    "wide_amplitude": 1.0,
+    "min_amplitude": 0.08,
+    "shrink_factor": 0.7,
+    "offset_step": 0.05,
+    "peak_center_tolerance": 0.06,
+    "zero_center_tolerance": 0.06,
+    "transmission_guard_tolerance": 0.08,
+    "error_slope_sigma": 5.0,
+    "min_error_slope": 0.02,
+    "transmission_peak_sigma": 5.0,
+    "min_transmission_prominence": 0.04,
+    "stable_frames": 3,
+    "max_offset_attempts": 80,
+    "offset_correction_gain": 0.7
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "csv": "complex_time_only_scope_test.csv",
+  "columns": [
+    "time",
+    "transmission",
+    "error1",
+    "error2"
+  ],
+  "target_resonance_time": 8.348,
+  "target_description": "main high-SNR transmission peak with usable PDH zero crossing",
+  "note": "CSV intentionally has no pzt column. The software should generate the effective scan coordinate from PZT center, bias offset, scan span, and the 1 Hz triangle wave."
+}
