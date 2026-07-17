@@ -1,0 +1,279 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1100" viewBox="0 0 1800 1100">
+  <defs>
+    <marker id="arrow-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#1f6feb"/>
+    </marker>
+    <marker id="arrow-analog" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#8b5cf6"/>
+    </marker>
+    <marker id="arrow-clock" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#0f9d8a"/>
+    </marker>
+    <marker id="arrow-control" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#d97706"/>
+    </marker>
+    <marker id="arrow-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#64748b"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.10"/>
+    </filter>
+    <style>
+      text { font-family: "Microsoft YaHei", "SimHei", Arial, sans-serif; letter-spacing: 0; }
+      .title { font-size: 32px; font-weight: 700; fill: #0f172a; }
+      .subtitle { font-size: 18px; fill: #475569; }
+      .zone-title { font-size: 25px; font-weight: 700; fill: #0f172a; }
+      .box-title { font-size: 20px; font-weight: 700; fill: #0f172a; }
+      .body { font-size: 16px; fill: #334155; }
+      .small { font-size: 14px; fill: #475569; }
+      .tiny { font-size: 13px; fill: #64748b; }
+      .chip { font-size: 13px; font-weight: 700; fill: #334155; }
+      .board { fill: #f8fafc; stroke: #334155; stroke-width: 2.4; }
+      .pl-zone { fill: #edf6ff; stroke: #60a5fa; stroke-width: 2; }
+      .ps-zone { fill: #f0fdf4; stroke: #4ade80; stroke-width: 2; }
+      .external-zone { fill: #fffdf7; stroke: #f59e0b; stroke-width: 2; }
+      .pc-zone { fill: #f8f5ff; stroke: #a78bfa; stroke-width: 2; }
+      .module-blue { fill: #ffffff; stroke: #3b82f6; stroke-width: 2; }
+      .module-teal { fill: #ffffff; stroke: #14b8a6; stroke-width: 2; }
+      .module-orange { fill: #fffaf0; stroke: #f59e0b; stroke-width: 2; }
+      .module-green { fill: #ffffff; stroke: #22c55e; stroke-width: 2; }
+      .module-purple { fill: #ffffff; stroke: #8b5cf6; stroke-width: 2; }
+      .module-gray { fill: #ffffff; stroke: #94a3b8; stroke-width: 2; }
+      .tag-blue { fill: #dbeafe; stroke: none; }
+      .tag-green { fill: #dcfce7; stroke: none; }
+      .tag-orange { fill: #ffedd5; stroke: none; }
+      .tag-purple { fill: #ede9fe; stroke: none; }
+      .tag-gray { fill: #e2e8f0; stroke: none; }
+      .data { fill: none; stroke: #1f6feb; stroke-width: 3; marker-end: url(#arrow-data); }
+      .data-bi { fill: none; stroke: #1f6feb; stroke-width: 3; marker-start: url(#arrow-data); marker-end: url(#arrow-data); }
+      .analog { fill: none; stroke: #8b5cf6; stroke-width: 3; marker-end: url(#arrow-analog); }
+      .analog-dash { fill: none; stroke: #8b5cf6; stroke-width: 3; stroke-dasharray: 9 7; marker-end: url(#arrow-analog); }
+      .clock { fill: none; stroke: #0f9d8a; stroke-width: 2.6; marker-end: url(#arrow-clock); }
+      .control { fill: none; stroke: #d97706; stroke-width: 2.5; stroke-dasharray: 9 6; marker-end: url(#arrow-control); }
+      .diag { fill: none; stroke: #64748b; stroke-width: 2.3; stroke-dasharray: 6 6; marker-end: url(#arrow-gray); }
+      .data-label { font-size: 14px; font-weight: 700; fill: #1d4ed8; }
+      .analog-label { font-size: 14px; font-weight: 700; fill: #7c3aed; }
+      .clock-label { font-size: 14px; font-weight: 700; fill: #0f766e; }
+      .control-label { font-size: 14px; font-weight: 700; fill: #b45309; }
+      .note { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1100" fill="#ffffff"/>
+  <text x="900" y="48" text-anchor="middle" class="title">AD9280-Zynq 连续高速采集系统真实结构图</text>
+  <text x="900" y="78" text-anchor="middle" class="subtitle">当前已验证版本：板载 DAC 回环 / 8 位 ADC / SG DMA / PS 千兆网 UDP / PC 实时滚动显示</text>
+
+  <!-- External analog hardware -->
+  <rect x="25" y="120" width="285" height="830" rx="8" class="external-zone"/>
+  <text x="48" y="158" class="zone-title">外部 AD/DA 模块</text>
+
+  <rect x="55" y="210" width="225" height="130" rx="6" class="module-orange" filter="url(#shadow)"/>
+  <text x="167" y="245" text-anchor="middle" class="box-title">AD9708 DAC</text>
+  <text x="167" y="275" text-anchor="middle" class="body">8 bit，最高 125 MSPS</text>
+  <text x="167" y="303" text-anchor="middle" class="small">D[7:0] + DAC_CLK</text>
+  <rect x="92" y="316" width="150" height="18" rx="9" class="tag-orange"/>
+  <text x="167" y="330" text-anchor="middle" class="tiny">板载正弦测试源输出</text>
+
+  <rect x="55" y="455" width="225" height="145" rx="6" class="module-purple" filter="url(#shadow)"/>
+  <text x="167" y="490" text-anchor="middle" class="box-title">AD9280 ADC</text>
+  <text x="167" y="520" text-anchor="middle" class="body">8 bit，最高 32 MSPS</text>
+  <text x="167" y="548" text-anchor="middle" class="small">ADC_D[7:0] + ADC_CLK</text>
+  <rect x="92" y="565" width="150" height="20" rx="10" class="tag-purple"/>
+  <text x="167" y="580" text-anchor="middle" class="tiny">SMA 标称 -5 V～+5 V</text>
+
+  <rect x="55" y="715" width="225" height="92" rx="6" class="module-gray"/>
+  <text x="167" y="750" text-anchor="middle" class="box-title">真实模拟信号</text>
+  <text x="167" y="780" text-anchor="middle" class="small">透射峰 / 误差信号等</text>
+
+  <path d="M167,340 L167,408 L110,408 L110,455" class="analog-dash"/>
+  <text x="178" y="385" class="analog-label">SMA 自回环电缆</text>
+  <path d="M167,715 L167,600" class="analog"/>
+  <text x="178" y="674" class="analog-label">实验时替代回环</text>
+
+  <!-- Zynq board -->
+  <rect x="335" y="100" width="1035" height="870" rx="10" class="board" filter="url(#shadow)"/>
+  <text x="360" y="137" class="zone-title">野火 Zynq-7020 开发板</text>
+  <rect x="365" y="160" width="975" height="470" rx="8" class="pl-zone"/>
+  <text x="390" y="195" class="zone-title">PL / FPGA 可编程逻辑</text>
+  <rect x="365" y="655" width="975" height="275" rx="8" class="ps-zone"/>
+  <text x="390" y="690" class="zone-title">PS / 双核 Cortex-A9 + DDR + 外设</text>
+
+  <!-- PL modules -->
+  <rect x="395" y="230" width="185" height="120" rx="6" class="module-orange"/>
+  <text x="487" y="262" text-anchor="middle" class="box-title">DAC 测试源</text>
+  <text x="487" y="290" text-anchor="middle" class="small">dac_test_source</text>
+  <text x="487" y="314" text-anchor="middle" class="small">256 点 ROM 正弦</text>
+  <rect x="423" y="325" width="128" height="17" rx="8" class="tag-orange"/>
+  <text x="487" y="338" text-anchor="middle" class="tiny">50 MHz 参考时钟</text>
+
+  <rect x="395" y="405" width="185" height="130" rx="6" class="module-teal"/>
+  <text x="487" y="438" text-anchor="middle" class="box-title">ADC 输入前端</text>
+  <text x="487" y="466" text-anchor="middle" class="small">adc_input_frontend</text>
+  <text x="487" y="490" text-anchor="middle" class="small">ODDR 输出 ADC_CLK</text>
+  <text x="487" y="514" text-anchor="middle" class="small">IOB 寄存器采样 D[7:0]</text>
+
+  <rect x="395" y="555" width="185" height="55" rx="6" class="module-teal"/>
+  <text x="487" y="579" text-anchor="middle" class="box-title">Clock Wizard</text>
+  <text x="487" y="600" text-anchor="middle" class="tiny">5 / 10 / 15 / 20 / 24 MSPS</text>
+
+  <rect x="620" y="405" width="190" height="130" rx="6" class="module-blue"/>
+  <text x="715" y="438" text-anchor="middle" class="box-title">异步宽度转换 FIFO</text>
+  <text x="715" y="466" text-anchor="middle" class="small">写端 8 bit @ adc_clk</text>
+  <text x="715" y="490" text-anchor="middle" class="small">读端 32 bit @ 100 MHz</text>
+  <text x="715" y="514" text-anchor="middle" class="small">16384 样点，full/level</text>
+
+  <rect x="850" y="405" width="190" height="130" rx="6" class="module-blue"/>
+  <text x="945" y="438" text-anchor="middle" class="box-title">连续 AXI Stream</text>
+  <text x="945" y="466" text-anchor="middle" class="small">native_fifo_to_axis</text>
+  <text x="945" y="490" text-anchor="middle" class="small">正确响应 TREADY</text>
+  <text x="945" y="514" text-anchor="middle" class="small">65536 字 / TLAST</text>
+
+  <rect x="1080" y="390" width="225" height="160" rx="6" class="module-blue"/>
+  <text x="1192" y="425" text-anchor="middle" class="box-title">AXI DMA</text>
+  <text x="1192" y="454" text-anchor="middle" class="body">S2MM Scatter/Gather</text>
+  <text x="1192" y="480" text-anchor="middle" class="small">32 bit Stream / Memory</text>
+  <text x="1192" y="504" text-anchor="middle" class="small">M_AXI_S2MM + M_AXI_SG</text>
+  <rect x="1126" y="520" width="132" height="20" rx="10" class="tag-blue"/>
+  <text x="1192" y="535" text-anchor="middle" class="tiny">每块 256 KiB</text>
+
+  <rect x="640" y="230" width="205" height="125" rx="6" class="module-orange"/>
+  <text x="742" y="262" text-anchor="middle" class="box-title">DAQ 控制寄存器</text>
+  <text x="742" y="290" text-anchor="middle" class="small">AXI-Lite @ 0x43C10000</text>
+  <text x="742" y="314" text-anchor="middle" class="small">start/reset/trigger/stats</text>
+  <rect x="681" y="329" width="123" height="18" rx="9" class="tag-orange"/>
+  <text x="742" y="343" text-anchor="middle" class="tiny">64 位样点计数</text>
+
+  <rect x="885" y="230" width="175" height="125" rx="6" class="module-gray"/>
+  <text x="972" y="262" text-anchor="middle" class="box-title">ILA</text>
+  <text x="972" y="290" text-anchor="middle" class="small">ADC 时钟域</text>
+  <text x="972" y="314" text-anchor="middle" class="small">sample/full/trigger</text>
+  <rect x="913" y="329" width="118" height="18" rx="9" class="tag-gray"/>
+  <text x="972" y="343" text-anchor="middle" class="tiny">仅调试观测</text>
+
+  <rect x="1100" y="230" width="195" height="125" rx="6" class="module-orange"/>
+  <text x="1197" y="262" text-anchor="middle" class="box-title">AXI 互连</text>
+  <text x="1197" y="290" text-anchor="middle" class="small">GP0：寄存器控制</text>
+  <text x="1197" y="314" text-anchor="middle" class="small">HP0：DMA 访问 DDR</text>
+  <text x="1197" y="338" text-anchor="middle" class="tiny">FCLK_CLK0 = 100 MHz</text>
+
+  <!-- External pin connections -->
+  <path d="M395,270 L280,270" class="data"/>
+  <text x="300" y="254" class="data-label">DAC D[7:0]</text>
+  <path d="M395,318 L280,318" class="clock"/>
+  <text x="300" y="338" class="clock-label">DAC_CLK</text>
+  <path d="M280,500 L395,455" class="data"/>
+  <text x="285" y="472" class="data-label">ADC D[7:0]</text>
+  <path d="M395,510 L280,550" class="clock"/>
+  <text x="288" y="542" class="clock-label">ADC_CLK</text>
+
+  <!-- PL data flow -->
+  <path d="M580,470 L620,470" class="data"/>
+  <path d="M810,470 L850,470" class="data"/>
+  <path d="M1040,470 L1080,470" class="data"/>
+  <text x="589" y="454" class="data-label">8 bit</text>
+  <text x="815" y="454" class="data-label">32 bit</text>
+  <text x="1044" y="454" class="data-label">AXIS</text>
+  <path d="M487,555 L487,535" class="clock"/>
+  <path d="M580,590 L715,590 L715,535" class="clock"/>
+  <text x="590" y="582" class="clock-label">adc_clk</text>
+  <path d="M972,355 L972,390 L487,390 L487,405" class="diag"/>
+  <path d="M972,355 L972,375 L742,375 L742,355" class="diag"/>
+  <path d="M845,292 L885,292" class="diag"/>
+
+  <!-- PS modules -->
+  <rect x="400" y="725" width="255" height="155" rx="6" class="module-green"/>
+  <text x="527" y="758" text-anchor="middle" class="box-title">Cortex-A9 裸机程序</text>
+  <text x="527" y="786" text-anchor="middle" class="small">daq.c：SG 环形块管理</text>
+  <text x="527" y="810" text-anchor="middle" class="small">network.c：lwIP raw UDP</text>
+  <text x="527" y="834" text-anchor="middle" class="small">Cache invalidate / 状态统计</text>
+  <rect x="453" y="849" width="148" height="20" rx="10" class="tag-green"/>
+  <text x="527" y="864" text-anchor="middle" class="tiny">Vitis Run As 启动</text>
+
+  <rect x="700" y="725" width="250" height="155" rx="6" class="module-green"/>
+  <text x="825" y="758" text-anchor="middle" class="box-title">DDR SG 环形缓冲</text>
+  <text x="825" y="786" text-anchor="middle" class="small">8 × 256 KiB = 2 MiB</text>
+  <text x="825" y="810" text-anchor="middle" class="small">BD：0x01FF0000</text>
+  <text x="825" y="834" text-anchor="middle" class="small">Data：0x02000000</text>
+  <text x="825" y="858" text-anchor="middle" class="tiny">DMA_OWNED → READY → CONSUMING</text>
+
+  <rect x="1000" y="725" width="160" height="155" rx="6" class="module-green"/>
+  <text x="1080" y="758" text-anchor="middle" class="box-title">PS GEM0</text>
+  <text x="1080" y="786" text-anchor="middle" class="small">RGMII 千兆网</text>
+  <text x="1080" y="810" text-anchor="middle" class="small">MIO 16～27</text>
+  <text x="1080" y="834" text-anchor="middle" class="small">MDIO/MDC 52～53</text>
+  <rect x="1027" y="849" width="106" height="20" rx="10" class="tag-green"/>
+  <text x="1080" y="864" text-anchor="middle" class="tiny">1 Gbit/s 链路</text>
+
+  <rect x="1190" y="725" width="120" height="155" rx="6" class="module-gray"/>
+  <text x="1250" y="758" text-anchor="middle" class="box-title">UART0</text>
+  <text x="1250" y="786" text-anchor="middle" class="small">MIO 14/15</text>
+  <text x="1250" y="810" text-anchor="middle" class="small">115200</text>
+  <text x="1250" y="834" text-anchor="middle" class="tiny">启动日志</text>
+  <text x="1250" y="855" text-anchor="middle" class="tiny">故障诊断</text>
+
+  <!-- PL/PS interconnects -->
+  <path d="M1192,550 L1192,640 L825,640 L825,725" class="data"/>
+  <text x="1000" y="628" class="data-label">S_AXI_HP0：DMA 数据与描述符</text>
+  <path d="M700,825 L655,825" class="data"/>
+  <path d="M950,802 L1000,802" class="data"/>
+  <path d="M655,775 L700,775" class="data"/>
+  <text x="663" y="757" class="data-label">块接口</text>
+  <path d="M527,725 L527,670 L1197,670 L1197,355" class="control"/>
+  <text x="690" y="662" class="control-label">M_AXI_GP0：DMA / Clock Wizard / DAQ 寄存器配置</text>
+  <path d="M527,725 L527,640 L742,640 L742,355" class="control"/>
+  <path d="M1305,470 L1320,470 L1320,620 L620,620 L620,725" class="control"/>
+  <text x="890" y="612" class="control-label">S2MM IRQ 61 → PS GIC → DMA ISR</text>
+
+  <rect x="440" y="902" width="835" height="20" rx="10" class="tag-green"/>
+  <text x="857" y="917" text-anchor="middle" class="chip">实测：20 MSPS / 8 bit，UDP 约 164 Mbit/s，FIFO overflow = 0，DMA error = 0</text>
+
+  <!-- PC side -->
+  <rect x="1400" y="120" width="370" height="830" rx="8" class="pc-zone"/>
+  <text x="1425" y="158" class="zone-title">PC 上位机</text>
+
+  <rect x="1430" y="215" width="310" height="115" rx="6" class="module-purple"/>
+  <text x="1585" y="248" text-anchor="middle" class="box-title">千兆有线网卡</text>
+  <text x="1585" y="278" text-anchor="middle" class="body">192.168.10.1 / 24</text>
+  <text x="1585" y="304" text-anchor="middle" class="small">板卡：192.168.10.2</text>
+
+  <rect x="1430" y="385" width="310" height="170" rx="6" class="module-purple"/>
+  <text x="1585" y="418" text-anchor="middle" class="box-title">UDP 实时接收后端</text>
+  <text x="1585" y="446" text-anchor="middle" class="small">daq_udp.py / 常驻 QThread</text>
+  <text x="1585" y="470" text-anchor="middle" class="small">约 2 秒 uint8 环形缓存</text>
+  <text x="1585" y="494" text-anchor="middle" class="small">乱序重排 / 丢包无效区</text>
+  <rect x="1470" y="513" width="230" height="25" rx="12" class="tag-purple"/>
+  <text x="1585" y="531" text-anchor="middle" class="chip">UDP 5000 控制 / 5001 数据</text>
+
+  <rect x="1430" y="625" width="310" height="190" rx="6" class="module-purple"/>
+  <text x="1585" y="658" text-anchor="middle" class="box-title">PySide6 实时 GUI</text>
+  <text x="1585" y="686" text-anchor="middle" class="small">ad9280_daq_gui.py</text>
+  <text x="1585" y="712" text-anchor="middle" class="small">10～30 FPS 独立刷新</text>
+  <text x="1585" y="738" text-anchor="middle" class="small">min/max 包络降采样</text>
+  <text x="1585" y="764" text-anchor="middle" class="small">滚动 / 冻结 / CSV / NPY</text>
+  <rect x="1478" y="782" width="214" height="20" rx="10" class="tag-purple"/>
+  <text x="1585" y="797" text-anchor="middle" class="tiny">显示刷新与采样率完全解耦</text>
+
+  <!-- Network and diagnostic links -->
+  <path d="M1160,780 L1175,780 L1175,700 L1370,700 L1370,272 L1430,272" class="data-bi"/>
+  <text x="1248" y="691" class="data-label">UDP/IP</text>
+  <path d="M1585,330 L1585,385" class="data-bi"/>
+  <path d="M1585,555 L1585,625" class="data"/>
+  <path d="M1310,835 L1390,835 L1390,870 L1540,870" class="diag"/>
+  <text x="1440" y="894" class="small">USB-Serial CH340，仅日志</text>
+
+  <!-- Legend and boundary note -->
+  <rect x="25" y="990" width="1745" height="85" rx="8" class="note"/>
+  <line x1="55" y1="1020" x2="120" y2="1020" class="data"/>
+  <text x="135" y="1026" class="body">高速数字数据流</text>
+  <line x1="315" y1="1020" x2="380" y2="1020" class="analog-dash"/>
+  <text x="395" y="1026" class="body">模拟 SMA 回环或真实输入</text>
+  <line x1="670" y1="1020" x2="735" y2="1020" class="clock"/>
+  <text x="750" y="1026" class="body">时钟</text>
+  <line x1="875" y1="1020" x2="940" y2="1020" class="control"/>
+  <text x="955" y="1026" class="body">控制与状态</text>
+  <line x1="1150" y1="1020" x2="1215" y2="1020" class="diag"/>
+  <text x="1230" y="1026" class="body">调试与诊断</text>
+  <text x="55" y="1057" class="small">边界说明：当前硬件是单通道 AD9280；ARM/Linux 本地锁频算法尚未接入，但可直接复用 DDR 数据块接口，不依赖 PC 或 UDP。</text>
+  <text x="1740" y="1057" text-anchor="end" class="tiny">当前实现基线：20 MSPS 连续 UDP 采集</text>
+</svg>
