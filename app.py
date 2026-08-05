@@ -404,6 +404,7 @@ class MainWindow(QMainWindow):
                 snapshot_provider=lambda: self.snapshot,
                 dlc_service=self.service,
                 snapshot_consumer=self._on_snapshot_updated,
+                falc_window_opener=self.show_falc_window,
             )
             self.daq_window.destroyed.connect(
                 lambda: setattr(self, "daq_window", None)

@@ -180,3 +180,103 @@ def test_network_connection_uses_configured_command_and_monitoring_ports(monkeyp
         "monitoring_line_port": 2199,
         "timeout": 7,
     }
+
+
+def test_engage_falc_uses_current_path_selection_without_tuning_writes(monkeypatch) -> None:
+    class Parameter:
+        def __init__(self, value):
+            self.value = value
+            self.writes = []
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+            self.writes.append(value)
+
+    scan_enabled = Parameter(True)
+    main_enabled = Parameter(False)
+    unlim_enabled = Parameter(False)
+    board = type("Board", (), {
+        "path_selection": Parameter(3),
+        "main": type("Main", (), {"enabled": main_enabled})(),
+        "unlim": type("Unlim", (), {"enabled": unlim_enabled})(),
+    })()
+    service = DlcProService()
+    monkeypatch.setattr(service, "_falc", lambda _index: board)
+    monkeypatch.setattr(
+        service, "_scan", lambda: type("Scan", (), {"enabled": scan_enabled})()
+    )
+    sentinel = object()
+    monkeypatch.setattr(
+        service, "_read_snapshot_request_unlocked", lambda _request: sentinel
+    )
+
+    assert service.engage_falc1_configured_paths() is sentinel
+    assert scan_enabled.writes == [False]
+    assert unlim_enabled.writes == [True]
+    assert main_enabled.writes == [True]
+
+
+def test_engage_falc_rejects_none_path_before_stopping_scan(monkeypatch) -> None:
+    class Parameter:
+        def __init__(self, value):
+            self.value = value
+            self.writes = []
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+            self.writes.append(value)
+
+    scan_enabled = Parameter(True)
+    board = type("Board", (), {"path_selection": Parameter(0)})()
+    service = DlcProService()
+    monkeypatch.setattr(service, "_falc", lambda _index: board)
+    monkeypatch.setattr(
+        service, "_scan", lambda: type("Scan", (), {"enabled": scan_enabled})()
+    )
+
+    with pytest.raises(RuntimeError, match="Path Selection"):
+        service.engage_falc1_configured_paths()
+    assert scan_enabled.writes == []
+
+
+def test_engage_falc_rolls_back_partial_enable_failure(monkeypatch) -> None:
+    class Parameter:
+        def __init__(self, value, fail_on_true=False):
+            self.value = value
+            self.fail_on_true = fail_on_true
+            self.writes = []
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.writes.append(value)
+            if self.fail_on_true and value is True:
+                raise RuntimeError("simulated Main enable failure")
+            self.value = value
+
+    scan_enabled = Parameter(True)
+    unlim_enabled = Parameter(False)
+    main_enabled = Parameter(False, fail_on_true=True)
+    board = type("Board", (), {
+        "path_selection": Parameter(3),
+        "main": type("Main", (), {"enabled": main_enabled})(),
+        "unlim": type("Unlim", (), {"enabled": unlim_enabled})(),
+    })()
+    service = DlcProService()
+    monkeypatch.setattr(service, "_falc", lambda _index: board)
+    monkeypatch.setattr(
+        service, "_scan", lambda: type("Scan", (), {"enabled": scan_enabled})()
+    )
+
+    with pytest.raises(RuntimeError, match="simulated Main"):
+        service.engage_falc1_configured_paths()
+    assert scan_enabled.value is True
+    assert unlim_enabled.value is False
+    assert main_enabled.value is False

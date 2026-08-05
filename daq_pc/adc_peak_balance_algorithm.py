@@ -18,8 +18,11 @@ class PeakBalanceSettings:
     noise_sigma: float = 6.0
     carrier_dominance_ratio: float = 2.0
     offset_step: float = 0.01
+    min_offset_step: float = 0.001
     max_offset_deviation: float = 0.2
     shrink_ratio: float = 0.75
+    target_amplitude: float = 0.2
+    max_search_amplitude_factor: float = 2.0
     min_amplitude_fraction: float = 0.05
     safety_margin: float = 0.25
     balance_tolerance: float = 0.02
@@ -31,12 +34,19 @@ class PeakBalanceSettings:
             raise ValueError("透射峰通道必须是A或B")
         if self.polarity not in {"auto", "positive", "negative"}:
             raise ValueError("峰极性无效")
-        if self.offset_step <= 0 or self.max_offset_deviation <= 0:
+        if (self.offset_step <= 0 or self.min_offset_step <= 0
+                or self.max_offset_deviation <= 0):
             raise ValueError("Offset步长和最大允许偏移必须大于0")
+        if self.min_offset_step > self.offset_step:
+            raise ValueError("Offset最小步长不能大于Offset初始步长")
         if not 0.2 <= self.shrink_ratio < 1.0:
             raise ValueError("Amplitude缩小比例必须位于0.2到1之间")
         if not 0.0 < self.min_amplitude_fraction < 1.0:
             raise ValueError("最小幅度保护比例必须位于0到1之间")
+        if self.target_amplitude <= 0:
+            raise ValueError("最终扫频范围目标必须大于0")
+        if not 1.0 <= self.max_search_amplitude_factor <= 10.0:
+            raise ValueError("无峰最大扩幅倍数必须位于1到10之间")
         if self.carrier_dominance_ratio <= 1.0:
             raise ValueError("00模/次峰强度比必须大于1")
         if not 0.0 < self.balance_tolerance < 0.5:
@@ -280,17 +290,33 @@ class PeakBalanceEngine:
         self.recovery_origin: float | None = None
         self.refine_attempt = 0
         self.finalized = False
+        self.ambiguous_count = 0
+        self.missing_count = 0
 
     @property
     def offset_limits(self) -> tuple[float, float]:
         span = self.settings.max_offset_deviation
         return self.start_offset - span, self.start_offset + span
 
+    @property
+    def amplitude_floor(self) -> float:
+        """Never shrink below either the absolute target or safety fraction."""
+        return max(
+            self.settings.target_amplitude,
+            self.start_amplitude * self.settings.min_amplitude_fraction,
+        )
+
+    @property
+    def search_amplitude_ceiling(self) -> float:
+        return self.start_amplitude * self.settings.max_search_amplitude_factor
+
     def start(self, offset: float, amplitude: float) -> None:
         if abs(amplitude) <= 1e-12:
             raise ValueError("启动Scan Amplitude不能为0")
         self.start_offset = self.current_offset = float(offset)
         self.start_amplitude = self.current_amplitude = abs(float(amplitude))
+        if self.settings.target_amplitude > self.start_amplitude + 1e-12:
+            raise ValueError("最终扫频范围目标不能大于启动Scan Amplitude")
         self.last_good_amplitude = self.current_amplitude
         self.state = "select"
 
@@ -300,7 +326,7 @@ class PeakBalanceEngine:
 
     def set_offset_step(self, step: float) -> bool:
         """Switch the amplitude-dependent tuning gear without carrying old probes."""
-        step = float(step)
+        step = max(float(step), self.settings.min_offset_step)
         if step <= 0:
             raise ValueError("Offset步长必须大于0")
         if abs(step - self.base_step_size) <= 1e-12:
@@ -336,9 +362,40 @@ class PeakBalanceEngine:
         s = self.settings
         if (observation.ambiguous
                 and self.state not in {"verify_shrink", "refine"}):
+            self.ambiguous_count += 1
+            if self.ambiguous_count < 3:
+                return self._action(
+                    "none", None,
+                    f"00模候选不唯一，等待独立窗口复核 {self.ambiguous_count}/3",
+                )
             return self._action("stop", None, observation.reason, "ambiguous")
+        if observation.valid:
+            self.ambiguous_count = 0
+            self.missing_count = 0
         if self.state == "select":
             if not observation.valid:
+                if observation.reason == "未找到足够的00模穿越峰":
+                    self.missing_count += 1
+                    if self.missing_count < 2:
+                        return self._action(
+                            "none", None,
+                            "启动幅度未找到00模，等待第二个独立窗口复核 1/2",
+                        )
+                    self.missing_count = 0
+                    target = min(
+                        self.search_amplitude_ceiling,
+                        self.current_amplitude * 1.25,
+                    )
+                    if target > self.current_amplitude * 1.001:
+                        return self._action(
+                            "amplitude", target,
+                            "启动幅度未找到00模，扩大Scan Amplitude继续搜索",
+                            "select",
+                        )
+                    return self._action(
+                        "stop", None,
+                        "已达到无峰最大搜索幅度，仍未找到00模", "fault",
+                    )
                 return self._action("none", None, observation.reason)
             self.fingerprint = CarrierFingerprint(
                 observation.prominence, observation.width_seconds,
@@ -366,9 +423,10 @@ class PeakBalanceEngine:
                     "restore_amplitude",
                 )
             if self.state == "restore_amplitude":
-                if self.current_amplitude < self.start_amplitude * 0.999:
+                if self.current_amplitude < self.search_amplitude_ceiling * 0.999:
                     target = min(
-                        self.start_amplitude, self.current_amplitude * 1.5
+                        self.search_amplitude_ceiling,
+                        max(self.last_good_amplitude, self.current_amplitude * 1.5),
                     )
                     return self._action(
                         "amplitude", target,
@@ -391,7 +449,7 @@ class PeakBalanceEngine:
             if not improved:
                 self.direction = -1.0
                 self.step_size = max(
-                    self.base_step_size / 8.0, self.step_size / 2.0
+                    s.min_offset_step, self.step_size / 2.0
                 )
                 return self._offset_action(
                     self.previous_offset - self.step_size,
@@ -414,11 +472,16 @@ class PeakBalanceEngine:
                 if self.finalized:
                     return self._action("none", None, "00模均衡保持", "track")
                 self.last_good_amplitude = self.current_amplitude
-                minimum = self.start_amplitude * s.min_amplitude_fraction
-                target = max(minimum, self.current_amplitude * s.shrink_ratio)
+                target = max(
+                    self.amplitude_floor,
+                    self.current_amplitude * s.shrink_ratio,
+                )
                 if target >= self.current_amplitude * 0.999:
                     self.finalized = True
-                    return self._action("none", None, "达到Amplitude保护下限", "track")
+                    return self._action(
+                        "none", None,
+                        "达到最终Scan Amplitude目标并通过峰间隔复核", "track",
+                    )
                 return self._action(
                     "amplitude", target, "00模已居中，缩小Scan Amplitude",
                     "verify_shrink",
@@ -432,7 +495,7 @@ class PeakBalanceEngine:
                     and observation.balance_error > self.previous_error * 1.05):
                 self.direction *= -1.0
                 self.step_size = max(
-                    self.base_step_size / 8.0, self.step_size / 2.0
+                    s.min_offset_step, self.step_size / 2.0
                 )
             self.previous_error = observation.balance_error
             return self._offset_action(
@@ -469,7 +532,7 @@ class PeakBalanceEngine:
             magnitude = (self.recovery_attempt + 1) // 2
             sign = 1.0 if self.recovery_attempt % 2 else -1.0
             probe = max(
-                self.base_step_size / 8.0,
+                self.settings.min_offset_step,
                 self.current_amplitude * 0.05,
             )
             # Every target is relative to the last valid offset.  Clamp the
@@ -487,7 +550,7 @@ class PeakBalanceEngine:
                 "local_recover",
             )
         self.recovery_origin = None
-        target = min(self.start_amplitude, max(
+        target = min(self.search_amplitude_ceiling, max(
             self.last_good_amplitude, self.current_amplitude * 1.5
         ))
         if target > self.current_amplitude * 1.001:
@@ -507,14 +570,17 @@ class PeakBalanceEngine:
         good = self.last_good_amplitude
         fail = self.fail_amplitude
         if self.refine_attempt > 4 or abs(good - fail) <= good * 0.05:
-            operating = min(good, fail * (1.0 + self.settings.safety_margin))
+            operating = max(
+                self.amplitude_floor,
+                min(good, fail * (1.0 + self.settings.safety_margin)),
+            )
             self.finalized = True
             if abs(operating - self.current_amplitude) <= 1e-12:
                 return self._action("none", None, "进入最小可靠幅度保持", "track")
             return self._action(
                 "amplitude", operating, "应用最小可靠幅度安全裕量", "track"
             )
-        trial = (good + fail) / 2.0
+        trial = max(self.amplitude_floor, (good + fail) / 2.0)
         return self._action(
             "amplitude", trial, "二分验证最小可靠Scan Amplitude", "refine"
         )

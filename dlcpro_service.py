@@ -976,6 +976,54 @@ class DlcProService:
                 SnapshotRequest.for_sections(SnapshotSection.FALC)
             )
 
+    def engage_falc1_configured_paths(self) -> DeviceSnapshot:
+        """Stop Scan and enable only the FALC paths selected on the device.
+
+        This deliberately leaves every FALC gain/filter/range parameter intact.
+        The current ``path-selection`` readback is the authority for whether
+        Unlim, Main, or both paths are engaged.
+        """
+        with self._lock:
+            board = self._falc(1)
+            path = int(board.path_selection.get())
+            if path not in (1, 2, 3):
+                raise RuntimeError(
+                    "FALC pro当前Path Selection为None；请先在FALC pro设置中选择"
+                    "Unlim、Main或Unlim + Main。"
+                )
+            scan = self._scan()
+            scan_was_enabled = bool(scan.enabled.get())
+            unlim_was_enabled = bool(board.unlim.enabled.get())
+            main_was_enabled = bool(board.main.enabled.get())
+            try:
+                # The peak-balancing acquisition requires Scan, whereas
+                # closed-loop FALC operation starts from a stationary output.
+                scan.enabled.set(False)
+                if path & 1:
+                    board.unlim.enabled.set(True)
+                if path & 2:
+                    board.main.enabled.set(True)
+                snapshot = self._read_snapshot_request_unlocked(
+                    SnapshotRequest.for_sections(
+                        SnapshotSection.SCAN_LOCK, SnapshotSection.FALC
+                    )
+                )
+            except Exception:
+                # Never leave a half-engaged loop after a transport/parameter
+                # failure. Restore the states that existed before this action;
+                # rollback is best-effort so the original SDK error is kept.
+                for parameter, old_value in (
+                    (board.main.enabled, main_was_enabled),
+                    (board.unlim.enabled, unlim_was_enabled),
+                    (scan.enabled, scan_was_enabled),
+                ):
+                    try:
+                        parameter.set(old_value)
+                    except Exception:
+                        pass
+                raise
+            return snapshot
+
     def set_falc1_unlim_hold(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).unlim.hold.set(bool(enabled))

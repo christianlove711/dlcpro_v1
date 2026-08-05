@@ -1,7 +1,7 @@
 """ADC-side DLC pro scan control popup backed by the shared SDK session."""
 from __future__ import annotations
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QSettings, QTimer, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
@@ -74,6 +74,15 @@ QMessageBox QLabel { background: transparent; color: #172033; min-width: 420px; 
 """
 
 
+class PositiveFrequencySpinBox(SafeDoubleSpinBox):
+    """Prevent one coarse decrement from accidentally collapsing Hz to zero."""
+
+    def stepBy(self, steps: int) -> None:  # noqa: N802
+        if steps < 0 and self.value() + steps * self.singleStep() <= 0.0:
+            return
+        super().stepBy(steps)
+
+
 class DlcScanControlWindow(QMainWindow):
     """Manual scan controls sharing the ADC window's single DLC pro session."""
 
@@ -90,6 +99,8 @@ class DlcScanControlWindow(QMainWindow):
         self.settings = settings
         self._scan_edit_locked = False
         self._write_pending = False
+        self._active_write = None
+        self._queued_writes = {}
         self._connected = bool(session.is_connected)
         self._step = float(settings.value("dlcpro/scan_step", 0.01))
         valid_steps = {value for _label, value in self.PRECISION_OPTIONS}
@@ -155,7 +166,11 @@ class DlcScanControlWindow(QMainWindow):
 
         self.amplitude = self._numeric_spin(decimals=6)
         self.offset = self._numeric_spin(decimals=6)
-        self.frequency = self._numeric_spin(decimals=3, minimum=0.0)
+        self.frequency = PositiveFrequencySpinBox()
+        self.frequency.setRange(0.001, 1_000_000.0)
+        self.frequency.setDecimals(3)
+        self.frequency.setKeyboardTracking(False)
+        self.frequency.set_button_only_mode()
         self.frequency.setSuffix(" Hz")
 
         self.amplitude_row = StepTargetSpinBoxRow(
@@ -218,13 +233,22 @@ class DlcScanControlWindow(QMainWindow):
 
         self.enable_button.clicked.connect(self._write_enabled)
         self.amplitude.connect_live_apply(
-            lambda: self._write(self.session.set_scan_amplitude, self.amplitude.value())
+            lambda: self._queue_write(
+                "amplitude", self.session.set_scan_amplitude,
+                self.amplitude.value(), "sc_amplitude"
+            )
         )
         self.offset.connect_live_apply(
-            lambda: self._write(self.session.set_scan_offset, self.offset.value())
+            lambda: self._queue_write(
+                "offset", self.session.set_scan_offset,
+                self.offset.value(), "sc_offset"
+            )
         )
         self.frequency.connect_live_apply(
-            lambda: self._write(self.session.set_scan_frequency, self.frequency.value())
+            lambda: self._queue_write(
+                "frequency", self.session.set_scan_frequency,
+                self.frequency.value(), "sc_frequency"
+            )
         )
         self.output.currentIndexChanged.connect(self._write_output)
         self.shape.currentIndexChanged.connect(self._write_shape)
@@ -262,12 +286,39 @@ class DlcScanControlWindow(QMainWindow):
             button.setChecked(button._precision_target is spinbox)
             button.blockSignals(False)
 
-    def _write(self, setter, value):
-        if not self._can_write():
+    def _queue_write(self, key, setter, value, snapshot_field=None):
+        if not self._can_edit():
             return
+        if (self._active_write is not None
+                and self._active_write[0] == key
+                and self._active_write[1] == value
+                and key not in self._queued_writes):
+            return
+        if (not self._write_pending and snapshot_field
+                and self.session.snapshot() is not None
+                and abs(float(getattr(self.session.snapshot(), snapshot_field))
+                        - float(value)) <= 1e-12):
+            return
+        # Coalesce repeated arrow presses per parameter.  The UI remains
+        # responsive while the single SDK worker serializes actual writes.
+        self._queued_writes[key] = (
+            setter, value, snapshot_field
+        )
+        self._dispatch_next_write()
+
+    def _dispatch_next_write(self):
+        if self._write_pending or not self._can_edit() or not self._queued_writes:
+            return
+        key = next(iter(self._queued_writes))
+        setter, value, snapshot_field = self._queued_writes.pop(key)
         self._write_pending = True
+        self._active_write = (key, float(value) if isinstance(value, (int, float)) else value,
+                              snapshot_field)
         self._update_editable()
         setter(value)
+
+    def _write(self, setter, value):
+        self._queue_write("misc", setter, value)
 
     def _write_enabled(self, checked: bool):
         self._write(self.session.set_scan_enabled, bool(checked))
@@ -282,12 +333,28 @@ class DlcScanControlWindow(QMainWindow):
             return
         self._write(self.session.set_scan_signal_type, int(self.shape.currentData()))
 
-    def _can_write(self) -> bool:
-        return self._connected and not self._scan_edit_locked and not self._write_pending
+    def _can_edit(self) -> bool:
+        return self._connected and not self._scan_edit_locked
 
-    def _write_completed(self, _snapshot):
+    def _write_completed(self, snapshot):
+        active = self._active_write
         self._write_pending = False
+        self._active_write = None
+        if active is not None:
+            _key, expected, field = active
+            if field:
+                actual = float(getattr(snapshot, field))
+                display_lsb = 1e-3 if field == "sc_frequency" else 1e-6
+                tolerance = max(display_lsb / 2.0,
+                                abs(float(expected)) * 1e-9)
+                if abs(actual - float(expected)) > tolerance:
+                    self._queued_writes.clear()
+                    self._show_error(
+                        f"设备读回校验失败：期望 {float(expected):.9g}，实际 {actual:.9g}。"
+                    )
+                    return
         self._update_editable()
+        QTimer.singleShot(0, self._dispatch_next_write)
 
     def _render_snapshot(self, snapshot):
         self.amplitude.sync_from_device(float(snapshot.sc_amplitude))
@@ -319,17 +386,21 @@ class DlcScanControlWindow(QMainWindow):
 
     def _connection_changed(self, connected: bool, text: str):
         self._connected = bool(connected)
-        self._write_pending = False
+        if not connected:
+            self._write_pending = False
+            self._active_write = None
+            self._queued_writes.clear()
         self.status.setText("已连接 DLC pro" if connected else text)
         self._update_editable()
 
     def _update_editable(self):
-        editable = self._can_write()
-        for widget in (
-            self.enable_button, self.amplitude, self.offset, self.frequency,
-            self.output, self.shape,
-        ):
+        editable = self._can_edit()
+        for widget in (self.amplitude, self.offset, self.frequency):
             widget.setEnabled(editable)
+        # This task only makes the three numeric scan writes queueable.  Keep
+        # unrelated switches serialized behind the active device transaction.
+        for widget in (self.enable_button, self.output, self.shape):
+            widget.setEnabled(editable and not self._write_pending)
         self.precision_row.setEnabled(not self._scan_edit_locked)
         self.refresh_button.setEnabled(self._connected and not self._write_pending)
         if self._scan_edit_locked:
@@ -337,6 +408,8 @@ class DlcScanControlWindow(QMainWindow):
 
     def _show_error(self, message: str):
         self._write_pending = False
+        self._active_write = None
+        self._queued_writes.clear()
         self._update_editable()
         if self._connected:
             self.session.refresh()

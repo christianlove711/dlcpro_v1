@@ -100,6 +100,11 @@ PARAMETER_HELP = {
         "软件允许范围：0.000001～1000000。默认：0.010000。\n"
         "实际可用范围仍受当前DLC pro配置限制。"
     ),
+    "Offset最小步长": (
+        "Offset接近居中时允许算法使用的最小调节步长；反向或减半试探不会低于此值。\n\n"
+        "使用PC Voltage扫描时单位为V。软件允许范围：0.000001～1000000，"
+        "且不能大于Offset初始步长。默认：0.001000 V。"
+    ),
     "启动Offset最大偏移": (
         "自动运行期间Scan Offset相对启动值允许偏离的最大绝对量。\n\n"
         "软件允许范围：0.000001～1000000。默认：0.200000。\n"
@@ -108,6 +113,19 @@ PARAMETER_HELP = {
     "Amplitude缩小比例": (
         "每次缩幅时，新Scan Amplitude等于当前Amplitude乘以该比例。数值越小，缩幅越快。\n\n"
         "软件允许范围：0.20～0.99。默认：0.75。"
+    ),
+    "最终扫频范围目标": (
+        "自动流程逐级缩小Scan Amplitude时的最终目标。算法不会缩到该值以下；"
+        "达到目标并连续满足峰间隔标准后，才允许自动使能FALC pro。\n\n"
+        "本功能强制要求Scan Output为PC Voltage，因此单位为Vpp。"
+        "软件允许范围：0.000001～1000000。默认：0.200000 Vpp；"
+        "目标不能大于启动Amplitude。若‘启动幅度最低保护’计算出的保护值更大，"
+        "软件采用两者中的较大值作为实际最终目标。"
+    ),
+    "无峰最大扩幅倍数": (
+        "启动时以DLC pro当前Scan Amplitude为搜索起点。若没有检测到足够的00模穿越峰，"
+        "自动模式按1.25倍逐级扩大，观察模式给出相同的人工建议。此参数限制最大搜索幅度，"
+        "防止无限扩幅。\n\n软件允许范围：1.0～10.0倍。默认：2.0倍。"
     ),
     "启动幅度最低保护": (
         "Scan Amplitude允许缩小到启动Amplitude的最低百分比，防止扫频范围缩到接近零。\n\n"
@@ -211,13 +229,15 @@ class AdviceHistoryDialog(QDialog):
 
 
 class AdcPeakBalanceWindow(QMainWindow):
-    def __init__(self, controller, settings_store, parent=None):
+    def __init__(self, controller, settings_store, parent=None,
+                 falc_window_opener=None):
         super().__init__(parent)
         self.controller = controller
         self.settings_store = settings_store
         self.advice_history: list[str] = []
         self._last_advice = ""
         self.advice_dialog: AdviceHistoryDialog | None = None
+        self.falc_window_opener = falc_window_opener
         self.setWindowTitle("ADC 00模自动锁频")
         self.resize(900, 690)
         self.setMinimumSize(780, 620)
@@ -232,14 +252,17 @@ class AdcPeakBalanceWindow(QMainWindow):
 
         root = QWidget()
         root.setObjectName("peakLockRoot")
-        root.setMinimumHeight(890)
+        root.setMinimumHeight(1150)
         scroll.setWidget(root)
         page = QVBoxLayout(root)
         page.setContentsMargins(20, 18, 20, 20)
         page.setSpacing(12)
         title = QLabel("ADC原始码 00模自动居中与缩幅")
         title.setObjectName("title")
-        note = QLabel("仅调整Scan Offset与Scan Amplitude；不使用误差信号，不启用FALC")
+        note = QLabel(
+            "仅用ADC原始码调整Scan Offset与Scan Amplitude；强制使用PC Voltage（PZT电压）扫描；"
+            "达到最终幅度和峰间隔标准后可按当前配置使能FALC pro"
+        )
         note.setObjectName("muted")
         self.observe_only = VisibleCheckBox("仅观察算法判断（绝不写入DLC pro）")
         self.observe_only.setObjectName("observeOnly")
@@ -291,6 +314,10 @@ class AdcPeakBalanceWindow(QMainWindow):
         self.offset_step.setRange(0.000001, 1_000_000.0)
         self.offset_step.setDecimals(6)
         self.offset_step.setValue(0.01)
+        self.min_offset_step = ParameterDoubleSpinBox()
+        self.min_offset_step.setRange(0.000001, 1_000_000.0)
+        self.min_offset_step.setDecimals(6)
+        self.min_offset_step.setValue(0.001)
         self.offset_range = ParameterDoubleSpinBox()
         self.offset_range.setRange(0.000001, 1_000_000.0)
         self.offset_range.setDecimals(6)
@@ -299,6 +326,14 @@ class AdcPeakBalanceWindow(QMainWindow):
         self.shrink_ratio.setRange(0.20, 0.99)
         self.shrink_ratio.setValue(0.75)
         self.shrink_ratio.setDecimals(2)
+        self.target_amplitude = ParameterDoubleSpinBox()
+        self.target_amplitude.setRange(0.000001, 1_000_000.0)
+        self.target_amplitude.setDecimals(6)
+        self.target_amplitude.setValue(0.2)
+        self.max_search_factor = ParameterDoubleSpinBox()
+        self.max_search_factor.setRange(1.0, 10.0)
+        self.max_search_factor.setDecimals(2)
+        self.max_search_factor.setValue(2.0)
         self.min_fraction = ParameterDoubleSpinBox()
         self.min_fraction.setRange(1.0, 90.0)
         self.min_fraction.setValue(5.0)
@@ -312,14 +347,17 @@ class AdcPeakBalanceWindow(QMainWindow):
         self.balance_tolerance.setValue(2.0)
         self.balance_tolerance.setSuffix(" %")
         self._add_parameter_row(right, "Offset初始步长", self.offset_step)
+        self._add_parameter_row(right, "Offset最小步长", self.min_offset_step)
         self._add_parameter_row(right, "启动Offset最大偏移", self.offset_range)
         self._add_parameter_row(right, "Amplitude缩小比例", self.shrink_ratio)
+        self._add_parameter_row(right, "最终扫频范围目标", self.target_amplitude)
+        self._add_parameter_row(right, "无峰最大扩幅倍数", self.max_search_factor)
         self._add_parameter_row(right, "启动幅度最低保护", self.min_fraction)
         self._add_parameter_row(right, "最小可靠幅度裕量", self.safety_margin)
         self._add_parameter_row(right, "峰间隔目标", self.balance_tolerance)
         grid.addLayout(left, 0, 0)
         grid.addLayout(right, 0, 1)
-        config.setMinimumHeight(310)
+        config.setMinimumHeight(560)
         page.addWidget(config)
 
         status = QFrame()
@@ -332,7 +370,7 @@ class AdcPeakBalanceWindow(QMainWindow):
         self.values = {}
         for row, (key, title) in enumerate((
             ("offset", "Offset 当前/启动"),
-            ("amplitude", "Amplitude 当前/可靠/启动"),
+            ("amplitude", "Amplitude 当前/目标/可靠/启动"),
             ("period", "扫描频率/设备周期/实测周期"),
             ("peaks", "00模/次峰/强度比/SNR"),
             ("spacing", "Δt1/Δt2/不均匀度"),
@@ -368,12 +406,24 @@ class AdcPeakBalanceWindow(QMainWindow):
         self.stop_button = QPushButton("停止")
         self.stop_button.setObjectName("stop")
         self.restore_button = QPushButton("恢复启动Offset/Amplitude")
+        self.falc_button = QPushButton("FALC pro设置")
+        self.falc_button.setToolTip("打开现有FALC pro控制界面；自动流程不会修改其中参数")
+        self.auto_falc = VisibleCheckBox("达到设定标准后自动使能FALC pro")
+        self.auto_falc.setToolTip(
+            "仅在自动控制模式下生效。停止Scan后按FALC pro当前Path Selection使能，"
+            "不修改增益、滤波或范围参数。"
+        )
         controls.addWidget(self.save_button)
         controls.addWidget(self.start_button)
         controls.addWidget(self.stop_button)
         controls.addWidget(self.restore_button)
         controls.addStretch(1)
+        controls.addWidget(self.falc_button)
         page.addLayout(controls)
+        falc_options = QHBoxLayout()
+        falc_options.addWidget(self.auto_falc)
+        falc_options.addStretch(1)
+        page.addLayout(falc_options)
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         self.log.setMinimumHeight(130)
@@ -383,6 +433,7 @@ class AdcPeakBalanceWindow(QMainWindow):
         self.start_button.clicked.connect(self._start)
         self.stop_button.clicked.connect(lambda: self.controller.stop())
         self.restore_button.clicked.connect(self._restore)
+        self.falc_button.clicked.connect(self._open_falc_window)
         self.controller.running_changed.connect(self._running_changed)
         self.controller.status_changed.connect(self._render_status)
         self.controller.log_message.connect(self.log.append)
@@ -420,7 +471,8 @@ class AdcPeakBalanceWindow(QMainWindow):
     def _numeric_parameter_widgets(self):
         return (
             self.min_prominence, self.noise_sigma, self.dominance,
-            self.offset_step, self.offset_range, self.shrink_ratio,
+            self.offset_step, self.min_offset_step, self.offset_range,
+            self.shrink_ratio, self.target_amplitude, self.max_search_factor,
             self.min_fraction, self.safety_margin, self.balance_tolerance,
         )
 
@@ -450,8 +502,11 @@ class AdcPeakBalanceWindow(QMainWindow):
             noise_sigma=float(self.noise_sigma.value()),
             carrier_dominance_ratio=float(self.dominance.value()),
             offset_step=float(self.offset_step.value()),
+            min_offset_step=float(self.min_offset_step.value()),
             max_offset_deviation=float(self.offset_range.value()),
             shrink_ratio=float(self.shrink_ratio.value()),
+            target_amplitude=float(self.target_amplitude.value()),
+            max_search_amplitude_factor=float(self.max_search_factor.value()),
             min_amplitude_fraction=float(self.min_fraction.value()) / 100.0,
             safety_margin=float(self.safety_margin.value()) / 100.0,
             balance_tolerance=float(self.balance_tolerance.value()) / 100.0,
@@ -463,7 +518,9 @@ class AdcPeakBalanceWindow(QMainWindow):
             settings = self.current_settings()
             self._save_ui_settings()
             self.controller.start(
-                settings, observe_only=self.observe_only.isChecked()
+                settings,
+                observe_only=self.observe_only.isChecked(),
+                auto_engage_falc=self.auto_falc.isChecked(),
             )
         except Exception as exc:
             QMessageBox.warning(self, "无法开始自动锁频", str(exc))
@@ -480,22 +537,34 @@ class AdcPeakBalanceWindow(QMainWindow):
         self.stop_button.setEnabled(running)
         self.restore_button.setEnabled(not running)
         self.observe_only.setEnabled(not running)
+        self.auto_falc.setEnabled(not running and not self.observe_only.isChecked())
+        self.falc_button.setEnabled(not running and self.falc_window_opener is not None)
         for widget in (
             self.channel, self.polarity, self.min_prominence,
             self.noise_sigma, self.dominance, self.offset_step,
-            self.offset_range, self.shrink_ratio, self.min_fraction,
+            self.min_offset_step, self.offset_range, self.shrink_ratio,
+            self.target_amplitude, self.max_search_factor, self.min_fraction,
             self.safety_margin, self.balance_tolerance,
         ):
             widget.setEnabled(not running)
 
     def _mode_changed(self):
         observing = self.observe_only.isChecked()
+        self.auto_falc.setEnabled(not observing and not self.controller.running)
         self.start_button.setText("开始观察" if observing else "开始自动锁频")
         self.start_button.setToolTip(
             "只判断00模、周期和居中误差，并给出人工调节建议；不写DLC pro"
             if observing else
             "允许算法自动写入Scan Offset和Scan Amplitude"
         )
+
+    def _open_falc_window(self) -> None:
+        if self.falc_window_opener is None:
+            QMessageBox.information(
+                self, "FALC pro设置", "请从DLC pro主控制台打开FALC pro设置。"
+            )
+            return
+        self.falc_window_opener()
 
     def _render_status(self, data: dict):
         observation = data["observation"]
@@ -506,6 +575,7 @@ class AdcPeakBalanceWindow(QMainWindow):
             "restore_amplitude": "恢复扫频范围", "refine": "二分最小可靠幅度",
             "track": "均衡保持与漂移跟踪", "ambiguous": "00模候选不唯一",
             "observe": "仅观察（禁止写入）", "fault": "已停止/故障",
+            "falc_enabled": "FALC pro已使能",
         }
         state = str(data.get("state", "idle"))
         self.state_label.setText(
@@ -515,7 +585,9 @@ class AdcPeakBalanceWindow(QMainWindow):
             f"{data['offset']:.6f} / {float(data['start_offset'] or 0):.6f}"
         )
         self.values["amplitude"].setText(
-            f"{data['amplitude']:.6f} / {data['last_good_amplitude']:.6f} / "
+            f"{data['amplitude']:.6f} / "
+            f"{float(data.get('target_amplitude', 0.0)):.6f} / "
+            f"{data['last_good_amplitude']:.6f} / "
             f"{float(data['start_amplitude'] or 0):.6f}"
         )
         frequency = float(data.get("scan_frequency", 0.0))
@@ -574,13 +646,20 @@ class AdcPeakBalanceWindow(QMainWindow):
             str(s.value("peak_lock/observe_only", "true")).lower()
             in ("1", "true", "yes")
         )
+        self.auto_falc.setChecked(
+            str(s.value("peak_lock/auto_falc", "false")).lower()
+            in ("1", "true", "yes")
+        )
         numeric = (
             (self.min_prominence, "peak_lock/min_prominence", 50),
             (self.noise_sigma, "peak_lock/noise_sigma", 6.0),
             (self.dominance, "peak_lock/dominance", 2.0),
             (self.offset_step, "peak_lock/offset_step", 0.01),
+            (self.min_offset_step, "peak_lock/min_offset_step", 0.001),
             (self.offset_range, "peak_lock/offset_range", 0.2),
             (self.shrink_ratio, "peak_lock/shrink_ratio", 0.75),
+            (self.target_amplitude, "peak_lock/target_amplitude", 0.2),
+            (self.max_search_factor, "peak_lock/max_search_factor", 2.0),
             (self.min_fraction, "peak_lock/min_fraction", 5.0),
             (self.safety_margin, "peak_lock/safety_margin", 25.0),
             (self.balance_tolerance, "peak_lock/balance_tolerance", 2.0),
@@ -593,13 +672,17 @@ class AdcPeakBalanceWindow(QMainWindow):
         s.setValue("peak_lock/channel", self.channel.currentData())
         s.setValue("peak_lock/polarity", self.polarity.currentData())
         s.setValue("peak_lock/observe_only", self.observe_only.isChecked())
+        s.setValue("peak_lock/auto_falc", self.auto_falc.isChecked())
         for widget, key in (
             (self.min_prominence, "peak_lock/min_prominence"),
             (self.noise_sigma, "peak_lock/noise_sigma"),
             (self.dominance, "peak_lock/dominance"),
             (self.offset_step, "peak_lock/offset_step"),
+            (self.min_offset_step, "peak_lock/min_offset_step"),
             (self.offset_range, "peak_lock/offset_range"),
             (self.shrink_ratio, "peak_lock/shrink_ratio"),
+            (self.target_amplitude, "peak_lock/target_amplitude"),
+            (self.max_search_factor, "peak_lock/max_search_factor"),
             (self.min_fraction, "peak_lock/min_fraction"),
             (self.safety_margin, "peak_lock/safety_margin"),
             (self.balance_tolerance, "peak_lock/balance_tolerance"),

@@ -1648,7 +1648,8 @@ class MainWindow(QMainWindow):
                  settings: QSettings | None = None,
                  snapshot_provider=None,
                  dlc_service=None,
-                 snapshot_consumer=None):
+                 snapshot_consumer=None,
+                 falc_window_opener=None):
         super().__init__()
         self.setAttribute(Qt.WA_DeleteOnClose, True)
         self.setWindowTitle("Zynq-7020 双 ADC 采集卡")
@@ -1663,6 +1664,7 @@ class MainWindow(QMainWindow):
         self.fpga_program_output: list[str] = []
         self.fpga_bit_path: Path | None = None
         self.snapshot_provider = snapshot_provider
+        self.falc_window_opener = falc_window_opener
         self.dlc_session = DlcScanSession(
             service=dlc_service,
             owns_service=dlc_service is None,
@@ -2006,7 +2008,8 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         self.peak_lock_window = AdcPeakBalanceWindow(
-            self.peak_lock_controller, self.settings, self
+            self.peak_lock_controller, self.settings, self,
+            falc_window_opener=self.falc_window_opener,
         )
         self.scan_control_window = DlcScanControlWindow(
             self.dlc_session, self.settings, self

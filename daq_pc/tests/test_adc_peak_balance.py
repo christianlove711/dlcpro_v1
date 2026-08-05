@@ -21,6 +21,7 @@ from daq_pc.daq_udp_dual import DualSampleRingBuffer
 
 class _FakeDlcSession(QObject):
     write_snapshot_changed = Signal(object)
+    falc_engaged = Signal(object)
     connection_changed = Signal(bool, str)
     error = Signal(str)
 
@@ -33,6 +34,8 @@ class _FakeDlcSession(QObject):
             sc_enabled=True,
             sc_frequency=1.0,
             sc_signal_type=1,
+            sc_output_channel=50,
+            sc_unit="V",
             sc_offset=0.0,
             sc_amplitude=1.2,
         )
@@ -49,6 +52,15 @@ class _FakeDlcSession(QObject):
         self.amplitude_writes.append(float(value))
         self._snapshot.sc_amplitude = float(value)
         self.write_snapshot_changed.emit(self._snapshot)
+
+    def engage_configured_falc(self):
+        self._snapshot.sc_enabled = False
+        self._snapshot.falc1 = SimpleNamespace(
+            path_selection=3,
+            main=SimpleNamespace(enabled=True, lock_state=True),
+            unlim=SimpleNamespace(enabled=True, lock_state=True),
+        )
+        self.falc_engaged.emit(self._snapshot)
 
 
 class _FrameRing:
@@ -213,29 +225,74 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
             snr=20.0, balance_error=0.20,
         )
         controller._observe(first)
-        self.assertIn("0.030000", controller.manual_advice)
+        self.assertIn("0.100000", controller.manual_advice)
         self.assertIn("正向试探", controller.manual_advice)
 
-        controller.engine.sync(0.03, 1.2)
+        controller.engine.sync(0.10, 1.2)
         improved = PeakObservation(
             True, "00模有效", prominence=800.0, width_seconds=0.002,
             snr=20.0, balance_error=0.10,
         )
         controller._observe(improved)
         self.assertIn("继续同方向", controller.manual_advice)
-        self.assertIn("0.060000", controller.manual_advice)
+        self.assertIn("0.200000", controller.manual_advice)
 
-        controller.engine.sync(0.06, 1.2)
+        controller.engine.sync(0.20, 1.2)
         worsened = PeakObservation(
             True, "00模有效", prominence=800.0, width_seconds=0.002,
             snr=20.0, balance_error=0.15,
         )
         controller._observe(worsened)
         self.assertIn("反向并减小步长", controller.manual_advice)
-        self.assertIn("0.045000", controller.manual_advice)
+        self.assertIn("0.150000", controller.manual_advice)
         self.assertEqual(session.offset_writes, [])
         self.assertEqual(session.amplitude_writes, [])
         controller.stop()
+
+    def test_falc_engagement_uses_configured_paths_and_finishes(self):
+        cavity = VirtualCavity()
+        session = _FakeDlcSession()
+        controller = AdcPeakBalanceController(
+            _FrameRing(_shifted_history(cavity, 0)), session, lambda: True
+        )
+        controller.running = True
+        controller.auto_engage_falc = True
+        controller._engage_falc()
+        self.assertTrue(controller.falc_engaged)
+        self.assertFalse(controller.running)
+        self.assertFalse(session.snapshot().sc_enabled)
+        self.assertTrue(session.snapshot().falc1.main.enabled)
+        self.assertTrue(session.snapshot().falc1.unlim.enabled)
+
+    def test_automatic_scan_write_requires_matching_device_readback(self):
+        cavity = VirtualCavity()
+        session = _FakeDlcSession()
+        controller = AdcPeakBalanceController(
+            _FrameRing(_shifted_history(cavity, 0)), session, lambda: True
+        )
+        controller.running = True
+        controller.pending_write = True
+        controller.pending_kind = "offset"
+        controller.pending_value = 0.25
+        session._snapshot.sc_offset = 0.20
+        controller._write_completed(session._snapshot)
+        self.assertFalse(controller.running)
+        self.assertFalse(controller.pending_write)
+
+    def test_observe_mode_ignores_shared_manual_write_completion(self):
+        cavity = VirtualCavity()
+        session = _FakeDlcSession()
+        controller = AdcPeakBalanceController(
+            _FrameRing(_shifted_history(cavity, 0)), session, lambda: True
+        )
+        engine = PeakBalanceEngine(self.settings)
+        engine.start(0.0, 1.2)
+        controller.engine = engine
+        controller.running = True
+        controller.observe_only = True
+        session._snapshot.sc_offset = 0.1
+        controller._write_completed(session._snapshot)
+        self.assertEqual(engine.current_offset, 0.0)
 
     def test_voltage_amplitude_selects_operator_offset_step_gears(self):
         choose = AdcPeakBalanceController._operator_step_for_amplitude
@@ -249,6 +306,97 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
         self.assertTrue(engine.set_offset_step(0.1))
         self.assertAlmostEqual(engine.base_step_size, 0.1)
         self.assertAlmostEqual(engine.step_size, 0.1)
+
+    def test_final_amplitude_and_minimum_offset_step_are_hard_limits(self):
+        settings = PeakBalanceSettings(
+            offset_step=0.1,
+            min_offset_step=0.001,
+            target_amplitude=0.2,
+            balance_tolerance=0.05,
+        )
+        engine = PeakBalanceEngine(settings)
+        engine.start(0.0, 4.0)
+        engine.sync(0.0, 0.2)
+        engine.state = "center"
+        engine.step_size = 0.001
+        valid = PeakObservation(
+            True, "00模有效", prominence=800.0, width_seconds=0.002,
+            snr=20.0, balance_error=0.04,
+        )
+        for _ in range(settings.stable_windows):
+            action = engine.update(valid)
+        self.assertTrue(engine.finalized)
+        self.assertEqual(action.kind, "none")
+        self.assertEqual(action.state, "track")
+        self.assertAlmostEqual(engine.amplitude_floor, 0.2)
+
+        engine.finalized = False
+        engine.state = "center"
+        engine.previous_error = 0.01
+        worse = PeakObservation(
+            True, "00模有效", prominence=800.0, width_seconds=0.002,
+            snr=20.0, balance_error=0.20,
+        )
+        engine.update(worse)
+        self.assertGreaterEqual(engine.step_size, 0.001)
+
+    def test_controller_rejects_current_scan_output(self):
+        cavity = VirtualCavity()
+        session = _FakeDlcSession()
+        session._snapshot.sc_output_channel = 51
+        session._snapshot.sc_unit = "mA"
+        controller = AdcPeakBalanceController(
+            _FrameRing(_shifted_history(cavity, 0)), session, lambda: True
+        )
+        with self.assertRaisesRegex(RuntimeError, "PC Voltage"):
+            controller.start(self.settings, observe_only=True)
+
+    def test_initial_missing_peak_expands_from_device_start_amplitude(self):
+        settings = PeakBalanceSettings(
+            offset_step=0.1,
+            target_amplitude=0.2,
+            max_search_amplitude_factor=2.0,
+        )
+        engine = PeakBalanceEngine(settings)
+        engine.start(0.0, 1.0)
+        missing = PeakObservation(False, "未找到足够的00模穿越峰")
+        first = engine.update(missing)
+        self.assertEqual(first.kind, "none")
+        second = engine.update(missing)
+        self.assertEqual(second.kind, "amplitude")
+        self.assertAlmostEqual(second.value, 1.25)
+        engine.sync(0.0, float(second.value))
+        engine.update(missing)
+        fourth = engine.update(missing)
+        self.assertEqual(fourth.kind, "amplitude")
+        self.assertLessEqual(float(fourth.value), 2.0)
+
+    def test_ambiguous_peak_requires_three_independent_windows_to_stop(self):
+        engine = PeakBalanceEngine(self.settings)
+        engine.start(0.0, 1.2)
+        ambiguous = PeakObservation(False, "00模候选不唯一")
+        self.assertEqual(engine.update(ambiguous).kind, "none")
+        self.assertEqual(engine.update(ambiguous).kind, "none")
+        action = engine.update(ambiguous)
+        self.assertEqual(action.kind, "stop")
+        self.assertEqual(action.state, "ambiguous")
+
+    def test_observe_mode_makes_shrink_the_required_next_step(self):
+        cavity = VirtualCavity()
+        session = _FakeDlcSession()
+        controller = AdcPeakBalanceController(
+            _FrameRing(_shifted_history(cavity, 0)), session, lambda: True
+        )
+        controller.start(self.settings, observe_only=True)
+        valid = PeakObservation(
+            True, "00模有效", prominence=800.0, width_seconds=0.002,
+            snr=20.0, balance_error=0.01,
+        )
+        for _ in range(self.settings.stable_windows):
+            controller._observe(valid)
+        self.assertIn("下一步进入缩幅", controller.manual_advice)
+        self.assertIn("直至最终目标", controller.manual_advice)
+        controller.stop()
 
     def test_control_mode_can_write_after_a_fresh_initial_window(self):
         cavity = VirtualCavity()

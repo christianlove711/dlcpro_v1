@@ -30,6 +30,10 @@ class AdcPeakBalanceController(QObject):
         self.running = False
         self.pending_write = False
         self.pending_kind = ""
+        self.pending_value: float | None = None
+        self.pending_wait_cycles = 0.0
+        self.auto_engage_falc = False
+        self.falc_engaged = False
         self.gate_bin: int | None = None
         self.available_after = 0.0
         self.required_cycles = 4.0
@@ -46,11 +50,15 @@ class AdcPeakBalanceController(QObject):
         self.timer.setInterval(250)
         self.timer.timeout.connect(self._tick)
         self.session.write_snapshot_changed.connect(self._write_completed)
+        falc_signal = getattr(self.session, "falc_engaged", None)
+        if falc_signal is not None:
+            falc_signal.connect(self._falc_completed)
         self.session.connection_changed.connect(self._connection_changed)
         self.session.error.connect(self._session_error)
 
     def start(self, settings: PeakBalanceSettings, *,
-              observe_only: bool = False) -> None:
+              observe_only: bool = False,
+              auto_engage_falc: bool = False) -> None:
         if self.running:
             return
         if not self.acquisition_running():
@@ -71,18 +79,52 @@ class AdcPeakBalanceController(QObject):
         # triangle waveform required by the alternating-interval algorithm.
         if int(snapshot.sc_signal_type) != 1:
             raise RuntimeError("当前算法只允许已确认的三角扫描波形")
+        scan_output = int(getattr(snapshot, "sc_output_channel", -1))
+        scan_unit = str(getattr(snapshot, "sc_unit", "") or "").strip()
+        if scan_output != 50:
+            raise RuntimeError(
+                "自动找峰只允许Scan Output=PC Voltage（PZT压电电压，通道50）；"
+                "当前不是PC Voltage。请先在DLC pro扫频控制中改为PC Voltage，"
+                "软件不会自动切换输出通道。"
+            )
+        if scan_unit.lower() not in {"v", "volt", "volts"}:
+            raise RuntimeError(
+                f"PC Voltage扫描单位应为V，当前设备读回单位为“{scan_unit or '未知'}”"
+            )
+        if auto_engage_falc and not observe_only:
+            falc = getattr(snapshot, "falc1", None)
+            if falc is None:
+                raise RuntimeError("未读取到FALC pro模块，不能启用自动FALC接管")
+            path = int(falc.path_selection)
+            if path not in (1, 2, 3):
+                raise RuntimeError(
+                    "FALC pro的Path Selection为None；请先打开FALC pro设置选择路径"
+                )
+            if ((path & 1 and bool(falc.unlim.enabled))
+                    or (path & 2 and bool(falc.main.enabled))):
+                raise RuntimeError(
+                    "FALC pro选中的路径当前已经使能；首次自动找峰前请先关闭FALC路径"
+                )
         settings = settings.validated()
+        if settings.target_amplitude > abs(float(snapshot.sc_amplitude)) + 1e-12:
+            raise RuntimeError(
+                "最终扫频范围目标不能大于当前启动Scan Amplitude"
+            )
         engine = PeakBalanceEngine(settings)
         engine.start(float(snapshot.sc_offset), float(snapshot.sc_amplitude))
-        self.scan_unit = str(getattr(snapshot, "sc_unit", "") or "").strip()
+        self.scan_unit = scan_unit
         self._apply_amplitude_step_profile(engine, self.scan_unit)
         self.settings = settings
         self.engine = engine
         self.scan_frequency = frequency
         self.observe_only = bool(observe_only)
+        self.auto_engage_falc = bool(auto_engage_falc and not observe_only)
+        self.falc_engaged = False
         self.start_offset = float(snapshot.sc_offset)
         self.start_amplitude = float(snapshot.sc_amplitude)
         self.pending_write = False
+        self.pending_value = None
+        self.pending_wait_cycles = 0.0
         self.restore_queue.clear()
         self.manual_advice = "正在采集4个完整扫描周期，请暂时不要调节"
         self.gate_bin = self._latest_bin()
@@ -103,6 +145,8 @@ class AdcPeakBalanceController(QObject):
         self.running = False
         self.timer.stop()
         self.pending_write = False
+        self.pending_value = None
+        self.pending_wait_cycles = 0.0
         self.running_changed.emit(False)
         self._log(reason)
         self.stopped.emit(reason)
@@ -123,6 +167,8 @@ class AdcPeakBalanceController(QObject):
         kind, value = self.restore_queue.pop(0)
         self.pending_write = True
         self.pending_kind = f"restore_{kind}"
+        self.pending_value = value
+        self.pending_wait_cycles = 0.0
         if kind == "offset":
             self.session.set_scan_offset(value)
         else:
@@ -231,6 +277,10 @@ class AdcPeakBalanceController(QObject):
             self.stop(action.reason)
         elif action.kind in {"offset", "amplitude"} and action.value is not None:
             self._submit_action(action)
+        elif (self.auto_engage_falc and self.engine.finalized
+              and action.state == "track" and observation.valid
+              and observation.balance_error <= self.engine.settings.balance_tolerance):
+            self._engage_falc()
         else:
             # Consume this window. Stable confirmations and tracking checks
             # must never count the same ADC bins more than once.
@@ -251,6 +301,23 @@ class AdcPeakBalanceController(QObject):
                     f"当前峰识别失败（{observation.reason}）。请先把 Scan Amplitude "
                     f"恢复到最近可靠值 {engine.last_good_amplitude:.6f}，然后等待4个周期。"
                 )
+            elif observation.reason == "未找到足够的00模穿越峰":
+                target = min(
+                    engine.search_amplitude_ceiling,
+                    engine.current_amplitude * 1.25,
+                )
+                if target > engine.current_amplitude * 1.001:
+                    self.manual_advice = (
+                        "当前没有检测到足够的00模穿越峰。请保持Offset不动，"
+                        f"把 Scan Amplitude 从 {engine.current_amplitude:.6f} Vpp "
+                        f"扩大到 {target:.6f} Vpp，然后等待4个周期。"
+                    )
+                else:
+                    self.manual_advice = (
+                        f"当前没有检测到00模，且已达到安全搜索上限 "
+                        f"{engine.search_amplitude_ceiling:.6f} Vpp。请检查光路、"
+                        "透射峰通道和峰极性，不要继续扩大。"
+                    )
             else:
                 self.manual_advice = (
                     f"当前峰识别失败（{observation.reason}）。先保持 Offset 不动；"
@@ -274,15 +341,24 @@ class AdcPeakBalanceController(QObject):
             engine.previous_error = observation.balance_error
             engine.previous_offset = engine.current_offset
             if engine.stable_count >= settings.stable_windows:
-                minimum = engine.start_amplitude * settings.min_amplitude_fraction
                 target = max(
-                    minimum, engine.current_amplitude * settings.shrink_ratio
+                    engine.amplitude_floor,
+                    engine.current_amplitude * settings.shrink_ratio,
                 )
-                self.manual_advice = (
-                    f"已连续{settings.stable_windows}个独立窗口居中。"
-                    f"如果要继续缩小扫频范围，请手动把 Scan Amplitude 调到 "
-                    f"{target:.6f}；如果只验证居中，保持当前值即可。调节后等待4个周期。"
-                )
+                if target >= engine.current_amplitude * 0.999:
+                    self.manual_advice = (
+                        f"已连续{settings.stable_windows}个独立窗口居中，且Scan "
+                        f"Amplitude已达到最终目标 {engine.amplitude_floor:.6f} Vpp。"
+                        "观察模式不会使能FALC pro；可保持当前参数验证稳定性。"
+                    )
+                else:
+                    self.manual_advice = (
+                        f"已连续{settings.stable_windows}个独立窗口居中。"
+                        "下一步进入缩幅：请把 Scan Amplitude 从 "
+                        f"{engine.current_amplitude:.6f} Vpp 调到 {target:.6f} Vpp，"
+                        "然后保持不动等待4个周期；之后会重新居中并继续缩幅，"
+                        f"直至最终目标 {engine.amplitude_floor:.6f} Vpp。"
+                    )
             else:
                 self.manual_advice = (
                     f"峰间隔已合格，正在用独立窗口复核 "
@@ -295,7 +371,7 @@ class AdcPeakBalanceController(QObject):
         previous_error = engine.previous_error
         previous_offset = engine.previous_offset
         offset_delta = engine.current_offset - previous_offset
-        minimum_step = engine.base_step_size / 8.0
+        minimum_step = settings.min_offset_step
         if previous_error is None or abs(offset_delta) < 1e-12:
             direction = engine.direction
             step = engine.step_size
@@ -313,10 +389,26 @@ class AdcPeakBalanceController(QObject):
             engine.direction = direction
             engine.step_size = step
         low, high = engine.offset_limits
+        if engine.current_offset < low - 1e-12 or engine.current_offset > high + 1e-12:
+            required = abs(engine.current_offset - engine.start_offset)
+            self.manual_advice = (
+                f"当前Scan Offset {engine.current_offset:.6f} 已超出启动值允许范围 "
+                f"[{low:.6f}, {high:.6f}]。请先把Offset恢复到范围内，或停止后把"
+                f"‘启动Offset最大偏移’设为至少 {required:.6f} 再重新开始；"
+                "算法不会给出跨越安全边界的调节建议。"
+            )
+            return ControlAction("none", None, self.manual_advice, "observe")
         target = min(
             high,
             max(low, engine.current_offset + direction * step),
         )
+        if abs(target - engine.current_offset) < 1e-12:
+            self.manual_advice = (
+                f"Offset已到允许边界 {target:.6f}，但不均匀度仍为"
+                f"{observation.balance_error * 100:.2f}%。请停止后增大"
+                "‘启动Offset最大偏移’，或先人工恢复到更合适的启动Offset。"
+            )
+            return ControlAction("none", None, self.manual_advice, "observe")
         engine.previous_error = observation.balance_error
         engine.previous_offset = engine.current_offset
         self.manual_advice = (
@@ -372,9 +464,10 @@ class AdcPeakBalanceController(QObject):
             return
         self.pending_write = True
         self.pending_kind = action.kind
+        self.pending_value = float(action.value)
         self.gate_bin = self._latest_bin()
         cycles = 3.0 if action.kind == "amplitude" else 2.0
-        self._wait_for_new_window(cycles, keep_gate=True)
+        self.pending_wait_cycles = cycles
         self._log(f"{action.reason}：{action.kind} -> {action.value:.6f}")
         if action.kind == "offset":
             self.session.set_scan_offset(float(action.value))
@@ -382,6 +475,33 @@ class AdcPeakBalanceController(QObject):
             self.session.set_scan_amplitude(float(action.value))
 
     def _write_completed(self, snapshot) -> None:
+        # Shared-session manual writes (especially in observe-only mode) must
+        # be detected by _tick as operator changes and receive a fresh 4-cycle
+        # window.  Only consume completions initiated by this controller.
+        if (not self.pending_write
+                or self.pending_kind not in {
+                    "offset", "amplitude", "restore_offset", "restore_amplitude"
+                }):
+            return
+        pending_kind = self.pending_kind
+        pending_value = self.pending_value
+        if pending_value is not None:
+            field = "sc_offset" if pending_kind.endswith("offset") else "sc_amplitude"
+            actual = float(getattr(snapshot, field))
+            # DLC pro readback can be quantized below the six decimals shown in
+            # the UI.  Half a display LSB is accepted; larger disagreement is
+            # still treated as a failed device write.
+            tolerance = max(5e-7, abs(pending_value) * 1e-9)
+            if abs(actual - pending_value) > tolerance:
+                self.pending_write = False
+                self.pending_kind = ""
+                self.pending_value = None
+                self.pending_wait_cycles = 0.0
+                self.stop(
+                    f"DLC pro写入读回不一致：{field}期望{pending_value:.9g}，"
+                    f"实际{actual:.9g}"
+                )
+                return
         if self.engine is not None:
             self.engine.sync(float(snapshot.sc_offset), float(snapshot.sc_amplitude))
             self.scan_unit = str(
@@ -389,12 +509,68 @@ class AdcPeakBalanceController(QObject):
             ).strip()
             self._apply_amplitude_step_profile(self.engine, self.scan_unit)
         was_restore = self.pending_kind.startswith("restore_")
+        wait_cycles = self.pending_wait_cycles
         self.pending_write = False
         self.pending_kind = ""
+        self.pending_value = None
+        self.pending_wait_cycles = 0.0
         if was_restore:
             self._run_restore_queue()
         elif self.running:
             self.gate_bin = self._latest_bin()
+            self._wait_for_new_window(wait_cycles or 2.0, keep_gate=True)
+
+    def _engage_falc(self) -> None:
+        if self.pending_write or self.falc_engaged:
+            return
+        self.pending_write = True
+        self.pending_kind = "falc"
+        self.manual_advice = (
+            "00模已达到设定标准；停止Scan并按FALC pro当前Path Selection使能，"
+            "不会修改任何FALC增益、滤波或范围参数。"
+        )
+        self._log(self.manual_advice)
+        self.session.engage_configured_falc()
+
+    def _falc_completed(self, snapshot) -> None:
+        falc = getattr(snapshot, "falc1", None)
+        if falc is None:
+            self.pending_write = False
+            self.stop("FALC pro读回不可用，无法确认使能结果")
+            return
+        path = int(falc.path_selection)
+        main_ok = not (path & 2) or bool(falc.main.enabled)
+        unlim_ok = not (path & 1) or bool(falc.unlim.enabled)
+        scan_stopped = not bool(snapshot.sc_enabled)
+        if path not in (1, 2, 3) or not main_ok or not unlim_ok or not scan_stopped:
+            self.pending_write = False
+            self.stop("FALC pro使能后读回校验失败，已停止自动流程")
+            return
+        self.pending_write = False
+        self.pending_kind = ""
+        self.falc_engaged = True
+        self.running = False
+        self.timer.stop()
+        selected_states = []
+        if path & 1:
+            selected_states.append(
+                f"Unlim Lock State={'锁定' if falc.unlim.lock_state else '待确认'}"
+            )
+        if path & 2:
+            selected_states.append(
+                f"Main Lock State={'锁定' if falc.main.lock_state else '待确认'}"
+            )
+        self.manual_advice = (
+            "FALC pro已按当前配置使能；" + "，".join(selected_states)
+            + "。自动找峰流程已结束，请观察波形并确认锁定状态。"
+        )
+        self._log(self.manual_advice)
+        self.running_changed.emit(False)
+        self._emit_status(
+            self.last_observation,
+            ControlAction("none", None, self.manual_advice, "falc_enabled"),
+        )
+        self.stopped.emit(self.manual_advice)
 
     def _connection_changed(self, connected: bool, text: str) -> None:
         if self.running and not connected:
@@ -403,6 +579,8 @@ class AdcPeakBalanceController(QObject):
     def _session_error(self, message: str) -> None:
         if self.pending_write:
             self.pending_write = False
+            self.pending_value = None
+            self.pending_wait_cycles = 0.0
             self.restore_queue.clear()
         if self.running:
             self.stop(f"DLC pro写入失败：{message}")
@@ -423,6 +601,9 @@ class AdcPeakBalanceController(QObject):
             "start_amplitude": self.start_amplitude,
             "last_good_amplitude": (
                 engine.last_good_amplitude if engine is not None else 0.0
+            ),
+            "target_amplitude": (
+                engine.amplitude_floor if engine is not None else 0.0
             ),
             "scan_frequency": self.scan_frequency,
             "scan_unit": self.scan_unit,

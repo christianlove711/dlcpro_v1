@@ -30,7 +30,9 @@ from daq_pc.dlcpro_settings_dialog import (
     DlcScanSession,
     RecordingOptionsDialog,
 )
-from daq_pc.scan_control_window import DlcScanControlWindow
+from daq_pc.scan_control_window import (
+    DlcScanControlWindow, PositiveFrequencySpinBox,
+)
 from dlcpro_service import ConnectionSettings
 from daq_pc.daq_udp_dual import DualSampleRingBuffer
 
@@ -465,6 +467,19 @@ class UnifiedGuiTest(unittest.TestCase):
         popup.close()
         session.shutdown()
 
+    def test_scan_frequency_coarse_down_step_never_collapses_to_zero(self):
+        spin = PositiveFrequencySpinBox()
+        spin.setRange(0.001, 1_000_000.0)
+        spin.setSingleStep(1.0)
+        spin.setValue(0.5)
+        spin.stepBy(-1)
+        self.assertEqual(spin.value(), 0.5)
+        spin.stepBy(1)
+        self.assertEqual(spin.value(), 1.5)
+        QApplication.processEvents()
+        spin.deleteLater()
+        QApplication.processEvents()
+
     def test_constant_adc_code_gets_visible_vertical_padding(self):
         minimum = np.full(32, 221, dtype=np.int16)
         maximum = minimum.copy()
@@ -658,8 +673,11 @@ class UnifiedGuiTest(unittest.TestCase):
             (panel.noise_sigma, "7.5", 7.5),
             (panel.dominance, "2.50", 2.5),
             (panel.offset_step, "0.020000", 0.02),
+            (panel.min_offset_step, "0.001000", 0.001),
             (panel.offset_range, "0.350000", 0.35),
             (panel.shrink_ratio, "0.80", 0.8),
+            (panel.target_amplitude, "0.200000", 0.2),
+            (panel.max_search_factor, "2.50", 2.5),
             (panel.min_fraction, "6.00", 6.0),
             (panel.safety_margin, "30.00", 30.0),
             (panel.balance_tolerance, "2.50", 2.5),
@@ -705,7 +723,7 @@ class UnifiedGuiTest(unittest.TestCase):
             float(self.settings.value("peak_lock/offset_range")), 0.35
         )
 
-        self.assertEqual(len(panel.parameter_info_buttons), 11)
+        self.assertEqual(len(panel.parameter_info_buttons), 14)
         with mock.patch.object(QMessageBox, "information") as information:
             panel.parameter_info_buttons["启动Offset最大偏移"].click()
         message = information.call_args.args[2]
@@ -715,7 +733,9 @@ class UnifiedGuiTest(unittest.TestCase):
         configurable = (
             panel.channel, panel.polarity, panel.min_prominence,
             panel.noise_sigma, panel.dominance, panel.offset_step,
-            panel.offset_range, panel.shrink_ratio, panel.min_fraction,
+            panel.min_offset_step, panel.offset_range, panel.shrink_ratio,
+            panel.target_amplitude, panel.max_search_factor,
+            panel.min_fraction,
             panel.safety_margin, panel.balance_tolerance,
         )
         panel._running_changed(True)

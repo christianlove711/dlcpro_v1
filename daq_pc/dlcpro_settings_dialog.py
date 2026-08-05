@@ -138,6 +138,7 @@ class DlcScanSession(QObject):
     connection_changed = Signal(bool, str)
     error = Signal(str)
     busy_changed = Signal(bool)
+    falc_engaged = Signal(object)
 
     def __init__(
         self,
@@ -337,9 +338,23 @@ class DlcScanSession(QObject):
             self._accept_written_snapshot,
         )
 
+    def engage_configured_falc(self):
+        """Engage the already-configured FALC paths without changing tuning."""
+        if not self.is_connected:
+            self.error.emit("DLC pro未连接，无法使能FALC pro。")
+            return
+        self._submit(
+            self.service.engage_falc1_configured_paths,
+            self._accept_falc_engaged,
+        )
+
     def _accept_written_snapshot(self, snapshot):
         self._accept_snapshot(snapshot)
         self.write_snapshot_changed.emit(snapshot)
+
+    def _accept_falc_engaged(self, snapshot):
+        self._accept_snapshot(snapshot)
+        self.falc_engaged.emit(snapshot)
 
     def shutdown(self):
         self.poll_timer.stop()
