@@ -183,9 +183,12 @@ def test_network_connection_uses_configured_command_and_monitoring_ports(monkeyp
 
 
 def test_engage_falc_uses_current_path_selection_without_tuning_writes(monkeypatch) -> None:
+    order = []
+
     class Parameter:
-        def __init__(self, value):
+        def __init__(self, value, name):
             self.value = value
+            self.name = name
             self.writes = []
 
         def get(self):
@@ -194,12 +197,13 @@ def test_engage_falc_uses_current_path_selection_without_tuning_writes(monkeypat
         def set(self, value):
             self.value = value
             self.writes.append(value)
+            order.append((self.name, value))
 
-    scan_enabled = Parameter(True)
-    main_enabled = Parameter(False)
-    unlim_enabled = Parameter(False)
+    scan_enabled = Parameter(True, "scan")
+    main_enabled = Parameter(False, "main")
+    unlim_enabled = Parameter(False, "unlim")
     board = type("Board", (), {
-        "path_selection": Parameter(3),
+        "path_selection": Parameter(3, "path"),
         "main": type("Main", (), {"enabled": main_enabled})(),
         "unlim": type("Unlim", (), {"enabled": unlim_enabled})(),
     })()
@@ -217,6 +221,7 @@ def test_engage_falc_uses_current_path_selection_without_tuning_writes(monkeypat
     assert scan_enabled.writes == [False]
     assert unlim_enabled.writes == [True]
     assert main_enabled.writes == [True]
+    assert order == [("scan", False), ("main", True), ("unlim", True)]
 
 
 def test_engage_falc_rejects_none_path_before_stopping_scan(monkeypatch) -> None:
@@ -258,12 +263,12 @@ def test_engage_falc_rolls_back_partial_enable_failure(monkeypatch) -> None:
         def set(self, value):
             self.writes.append(value)
             if self.fail_on_true and value is True:
-                raise RuntimeError("simulated Main enable failure")
+                raise RuntimeError("simulated FALC enable failure")
             self.value = value
 
     scan_enabled = Parameter(True)
-    unlim_enabled = Parameter(False)
-    main_enabled = Parameter(False, fail_on_true=True)
+    unlim_enabled = Parameter(False, fail_on_true=True)
+    main_enabled = Parameter(False)
     board = type("Board", (), {
         "path_selection": Parameter(3),
         "main": type("Main", (), {"enabled": main_enabled})(),
@@ -275,8 +280,8 @@ def test_engage_falc_rolls_back_partial_enable_failure(monkeypatch) -> None:
         service, "_scan", lambda: type("Scan", (), {"enabled": scan_enabled})()
     )
 
-    with pytest.raises(RuntimeError, match="simulated Main"):
+    with pytest.raises(RuntimeError, match="simulated FALC"):
         service.engage_falc1_configured_paths()
-    assert scan_enabled.value is True
+    assert scan_enabled.value is False
     assert unlim_enabled.value is False
     assert main_enabled.value is False

@@ -627,6 +627,31 @@ class UnifiedGuiTest(unittest.TestCase):
             foreground.assert_called_with(window.scope_b)
         window.close()
 
+    def test_scope_scan_and_auto_lock_are_independent_top_level_windows(self):
+        window = MainWindow(preset_model=1, settings=self.settings)
+        auxiliary_windows = (
+            window.scope_a,
+            window.scope_b,
+            window.scan_control_window,
+            window.peak_lock_window,
+        )
+
+        for auxiliary in auxiliary_windows:
+            self.assertIsNone(auxiliary.parentWidget())
+            self.assertTrue(auxiliary.isWindow())
+            self.assertEqual(auxiliary.windowType(), Qt.Window)
+
+        window.show()
+        for auxiliary in auxiliary_windows:
+            auxiliary.show()
+        self.app.processEvents()
+        window.showMinimized()
+        self.app.processEvents()
+        for auxiliary in auxiliary_windows:
+            self.assertFalse(auxiliary.windowState() & Qt.WindowMinimized)
+
+        window.close()
+
     def test_fpga_bit_selection_is_remembered_and_programming_is_background(self):
         bitstream = Path(self.tempdir.name) / "candidate.bit"
         bitstream.write_bytes(b"test-bitstream")
@@ -784,6 +809,28 @@ class UnifiedGuiTest(unittest.TestCase):
         self.assertIn("0.210000", panel.advice_dialog.current.toPlainText())
         self.assertIn("0.210000", panel.advice_dialog.history.toPlainText())
         panel.advice_dialog.close()
+        window.close()
+
+    def test_peak_lock_final_target_is_editable_from_both_strategy_rows(self):
+        window = MainWindow(preset_model=1, settings=self.settings)
+        panel = window.peak_lock_window
+        narrow = panel.strategy_edits["narrow_boundary"]
+        final = panel.strategy_edits["final_boundary"]
+        narrow.setFocus()
+        narrow.selectAll()
+        QTest.keyClicks(narrow, "0.180000")
+        QTest.keyClick(narrow, Qt.Key_Return)
+        self.assertEqual(final.text(), "0.180000")
+        self.assertAlmostEqual(panel.target_amplitude.value(), 0.18)
+        self.assertAlmostEqual(panel.current_settings().target_amplitude, 0.18)
+
+        top_editor = panel.target_amplitude.lineEdit()
+        top_editor.setFocus()
+        top_editor.selectAll()
+        QTest.keyClicks(top_editor, "0.190000")
+        QTest.keyClick(top_editor, Qt.Key_Return)
+        self.assertEqual(narrow.text(), "0.190000")
+        self.assertEqual(final.text(), "0.190000")
         window.close()
 
     def test_scope_vertical_ranges_are_independent_but_timebase_is_linked(self):

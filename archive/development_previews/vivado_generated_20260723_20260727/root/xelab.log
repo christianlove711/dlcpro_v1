@@ -1,0 +1,9 @@
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe tb_adc_rate_clock_gen -L unisims_ver -s clock_sim 
+Multi-threading is on. Using 14 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+ERROR: [VRFC 10-2989] 'glbl' is not declared [/wrk/ci/prod/2020.2/rdi_builds/continuous/2020_11_18_3064766/data/verilog/src/unisims/MMCME2_ADV.v:435]
+ERROR: [VRFC 10-2989] 'glbl' is not declared [/wrk/ci/prod/2020.2/rdi_builds/continuous/2020_11_18_3064766/data/verilog/src/unisims/MMCME2_ADV.v:2355]
+ERROR: [XSIM 43-3322] Static elaboration of top level Verilog design unit(s) in library work failed.

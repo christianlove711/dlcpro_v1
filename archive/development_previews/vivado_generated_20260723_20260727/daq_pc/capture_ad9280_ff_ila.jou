@@ -1,0 +1,12 @@
+#-----------------------------------------------------------
+# Vivado v2020.2 (64-bit)
+# SW Build 3064766 on Wed Nov 18 09:12:45 MST 2020
+# IP Build 3064653 on Wed Nov 18 14:17:31 MST 2020
+# Start of session at: Thu Jul 23 16:34:28 2026
+# Process ID: 43644
+# Current directory: C:/Users/chris/dlcpro_v1
+# Command line: vivado.exe -mode batch -source C:\Users\chris\dlcpro_v1\daq_pc\capture_ad9280_ff_ila.tcl -log C:\Users\chris\dlcpro_v1\daq_pc\capture_ad9280_ff_ila.log -journal C:\Users\chris\dlcpro_v1\daq_pc\capture_ad9280_ff_ila.jou
+# Log file: C:/Users/chris/dlcpro_v1/daq_pc/capture_ad9280_ff_ila.log
+# Journal file: C:\Users\chris\dlcpro_v1\daq_pc\capture_ad9280_ff_ila.jou
+#-----------------------------------------------------------
+source {C:\Users\chris\dlcpro_v1\daq_pc\capture_ad9280_ff_ila.tcl}

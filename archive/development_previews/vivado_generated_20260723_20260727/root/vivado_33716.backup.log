@@ -1,0 +1,245 @@
+#-----------------------------------------------------------
+# Vivado v2020.2 (64-bit)
+# SW Build 3064766 on Wed Nov 18 09:12:45 MST 2020
+# IP Build 3064653 on Wed Nov 18 14:17:31 MST 2020
+# Start of session at: Mon Jul 27 16:50:39 2026
+# Process ID: 33716
+# Current directory: C:/Users/chris/dlcpro_v1
+# Command line: vivado.exe -mode batch -source C:\Users\chris\dlcpro_v1\tmp\pl_udp_phase1_stage\probe_txc_clock_edges.tcl
+# Log file: C:/Users/chris/dlcpro_v1/vivado.log
+# Journal file: C:/Users/chris/dlcpro_v1\vivado.jou
+#-----------------------------------------------------------
+source {C:\Users\chris\dlcpro_v1\tmp\pl_udp_phase1_stage\probe_txc_clock_edges.tcl}
+# set root {C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main}
+# open_project [file join $root AXI_DMA.xpr]
+Scanning sources...
+Finished scanning sources
+INFO: [IP_Flow 19-234] Refreshing IP repositories
+INFO: [IP_Flow 19-1700] Loaded user IP repository 'c:/Users/chris/FPGA_Projects/ip_repo/myip_1.0'.
+INFO: [IP_Flow 19-2313] Loaded Vivado IP repository 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/ip'.
+open_project: Time (s): cpu = 00:00:06 ; elapsed = 00:00:07 . Memory (MB): peak = 1122.086 ; gain = 0.000
+# open_run impl_1
+INFO: [Device 21-403] Loading part xc7z020clg400-2
+Netlist sorting complete. Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.812 . Memory (MB): peak = 1133.293 ; gain = 0.000
+INFO: [Netlist 29-17] Analyzing 8412 Unisim elements for replacement
+INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
+INFO: [Project 1-479] Netlist was created with Vivado 2020.2
+INFO: [Project 1-570] Preparing netlist for logic optimization
+INFO: [Timing 38-478] Restoring timing data from binary archive.
+INFO: [Timing 38-479] Binary timing data restore complete.
+INFO: [Project 1-856] Restoring constraints from binary archive.
+INFO: [Project 1-853] Binary constraint restore complete.
+Reading XDEF placement.
+Reading placer database...
+Reading XDEF routing.
+Read XDEF File: Time (s): cpu = 00:00:04 ; elapsed = 00:00:04 . Memory (MB): peak = 2117.734 ; gain = 51.160
+Restored from archive | CPU: 4.000000 secs | Memory: 0.000000 MB |
+Finished XDEF File Restore: Time (s): cpu = 00:00:04 ; elapsed = 00:00:04 . Memory (MB): peak = 2117.734 ; gain = 51.160
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00.028 . Memory (MB): peak = 2132.883 ; gain = 0.000
+INFO: [Project 1-111] Unisim Transformation Summary:
+  A total of 488 instances were transformed.
+  IOBUF => IOBUF (IBUF, OBUFT): 1 instance 
+  RAM16X1D => RAM32X1D (RAMD32(x2)): 4 instances
+  RAM32M => RAM32M (RAMD32(x6), RAMS32(x2)): 291 instances
+  RAM64M => RAM64M (RAMD64E(x4)): 160 instances
+  RAM64X1D => RAM64X1D (RAMD64E(x2)): 32 instances
+
+open_run: Time (s): cpu = 00:00:26 ; elapsed = 00:00:39 . Memory (MB): peak = 2132.883 ; gain = 1010.797
+# puts "TXC_SOURCE_PIN=[get_pins -quiet eth_bridge_inst/u_rgmii_tx/txc_oddr/C0]"
+TXC_SOURCE_PIN=eth_bridge_inst/u_rgmii_tx/txc_oddr/C
+# puts "TXC_OUTPUT_PORT=[get_ports -quiet eth_txc]"
+TXC_OUTPUT_PORT=eth_txc
+# create_generated_clock -name pl_eth_txc_probe \
+#     -source [get_pins eth_bridge_inst/u_rgmii_tx/txc_oddr/C0] \
+#     -master_clock [get_clocks shifted_raw] \
+#     -edges {1 2 3} -add [get_ports eth_txc]
+# set tx_ports [get_ports {eth_txd[0] eth_txd[1] eth_txd[2] eth_txd[3] eth_tx_ctl}]
+# set_output_delay -clock [get_clocks pl_eth_txc_probe] -max -0.500 $tx_ports
+# set_output_delay -clock [get_clocks pl_eth_txc_probe] -min -3.100 -add_delay $tx_ports
+# set_output_delay -clock [get_clocks pl_eth_txc_probe] -clock_fall -max -0.500 $tx_ports
+# set_output_delay -clock [get_clocks pl_eth_txc_probe] -clock_fall -min \
+#     -3.100 $tx_ports
+# update_timing
+update_timing: Time (s): cpu = 00:00:16 ; elapsed = 00:00:09 . Memory (MB): peak = 2241.941 ; gain = 109.059
+# puts "TX_SETUP_AFTER_EDGE_MAP"
+TX_SETUP_AFTER_EDGE_MAP
+# report_timing -delay_type max \
+#     -to [get_ports {eth_txd[0] eth_txd[1] eth_txd[2] eth_txd[3] eth_tx_ctl}] \
+#     -group pl_eth_txc_probe -max_paths 1 -nworst 1
+INFO: [Timing 38-91] UpdateTimingParams: Speed grade: -2, Delay Type: max.
+INFO: [Timing 38-191] Multithreading enabled for timing update using a maximum of 2 CPUs
+INFO: [Timing 38-78] ReportTimingParams: -to_pins  -max_paths 1 -nworst 1 -delay_type max -sort_by slack.
+Copyright 1986-2020 Xilinx, Inc. All Rights Reserved.
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2020.2 (win64) Build 3064766 Wed Nov 18 09:12:45 MST 2020
+| Date         : Mon Jul 27 16:51:38 2026
+| Host         : LAPTOP-TOQ4BAST running 64-bit major release  (build 9200)
+| Command      : report_timing -delay_type max -to [get_ports {{eth_txd[0]} {eth_txd[1]} {eth_txd[2]} {eth_txd[3]} eth_tx_ctl}] -group pl_eth_txc_probe -max_paths 1 -nworst 1
+| Design       : top
+| Device       : 7z020-clg400
+| Speed File   : -2  PRODUCTION 1.12 2019-11-22
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Timing Report
+
+Slack (MET) :             4.150ns  (required time - arrival time)
+  Source:                 eth_bridge_inst/u_rgmii_tx/txdata_bus[1].ODDR_inst/C
+                            (rising edge-triggered cell ODDR clocked by shifted_raw  {rise@4.625ns fall@8.625ns period=8.000ns})
+  Destination:            eth_txd[1]
+                            (output port clocked by pl_eth_txc_probe  {rise@4.625ns fall@8.625ns period=8.000ns})
+  Path Group:             pl_eth_txc_probe
+  Path Type:              Max at Slow Process Corner
+  Requirement:            4.000ns  (pl_eth_txc_probe fall@8.625ns - shifted_raw rise@4.625ns)
+  Data Path Delay:        3.343ns  (logic 3.342ns (99.970%)  route 0.001ns (0.030%))
+  Logic Levels:           1  (OBUF=1)
+  Output Delay:           -0.500ns
+  Clock Path Skew:        3.061ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    2.260ns = ( 10.885 - 8.625 ) 
+    Source Clock Delay      (SCD):    -0.306ns = ( 4.319 - 4.625 ) 
+    Clock Pessimism Removal (CPR):    0.495ns
+  Clock Uncertainty:      0.069ns  ((TSJ^2 + DJ^2)^1/2) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Discrete Jitter          (DJ):    0.118ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock shifted_raw rise edge)
+                                                      4.625     4.625 r  
+    K17                                               0.000     4.625 r  eth_rxc (IN)
+                         net (fo=0)                   0.000     4.625    eth_rxc
+    K17                  IBUF (Prop_ibuf_I_O)         1.406     6.031 r  eth_rxc_IBUF_inst/O
+                         net (fo=1, routed)           1.110     7.141    rgmii_clock_inst/eth_rxc_IBUF
+    MMCME2_ADV_X1Y2      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT0)
+                                                     -6.567     0.574 r  rgmii_clock_inst/rgmii_mmcm/CLKOUT0
+                         net (fo=1, routed)           1.884     2.458    rgmii_clock_inst/shifted_raw
+    BUFGCTRL_X0Y17       BUFG (Prop_bufg_I_O)         0.085     2.543 r  rgmii_clock_inst/rgmii_receive_buffer/O
+                         net (fo=1748, routed)        1.776     4.319    eth_bridge_inst/u_rgmii_tx/clk
+    OLOGIC_X1Y139        ODDR                                         r  eth_bridge_inst/u_rgmii_tx/txdata_bus[1].ODDR_inst/C
+  -------------------------------------------------------------------    -------------------
+    OLOGIC_X1Y139        ODDR (Prop_oddr_C_Q)         0.418     4.737 r  eth_bridge_inst/u_rgmii_tx/txdata_bus[1].ODDR_inst/Q
+                         net (fo=1, routed)           0.001     4.738    eth_txd_OBUF[1]
+    E19                  OBUF (Prop_obuf_I_O)         2.924     7.662 r  eth_txd_OBUF[1]_inst/O
+                         net (fo=0)                   0.000     7.662    eth_txd[1]
+    E19                                                               r  eth_txd[1] (OUT)
+  -------------------------------------------------------------------    -------------------
+
+                         (clock pl_eth_txc_probe fall edge)
+                                                      8.625     8.625 f  
+    K17                                               0.000     8.625 f  eth_rxc (IN)
+                         net (fo=0)                   0.000     8.625    eth_rxc
+    K17                  IBUF (Prop_ibuf_I_O)         1.340     9.965 f  eth_rxc_IBUF_inst/O
+                         net (fo=1, routed)           1.004    10.969    rgmii_clock_inst/eth_rxc_IBUF
+    MMCME2_ADV_X1Y2      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT0)
+                                                     -6.527     4.441 f  rgmii_clock_inst/rgmii_mmcm/CLKOUT0
+                         net (fo=1, routed)           1.714     6.156    rgmii_clock_inst/shifted_raw
+    BUFGCTRL_X0Y17       BUFG (Prop_bufg_I_O)         0.077     6.233 f  rgmii_clock_inst/rgmii_receive_buffer/O
+                         net (fo=1748, routed)        1.539     7.771    eth_bridge_inst/u_rgmii_tx/clk
+    OLOGIC_X1Y125        ODDR (Prop_oddr_C_Q)         0.363     8.134 f  eth_bridge_inst/u_rgmii_tx/txc_oddr/Q
+                         net (fo=1, routed)           0.001     8.135    eth_txc_OBUF
+    K18                  OBUF (Prop_obuf_I_O)         2.750    10.885 f  eth_txc_OBUF_inst/O
+                         net (fo=0)                   0.000    10.885    eth_txc
+    K18                                                               f  eth_txc (OUT)
+                         clock pessimism              0.495    11.380    
+                         clock uncertainty           -0.069    11.311    
+                         output delay                 0.500    11.811    
+  -------------------------------------------------------------------
+                         required time                         11.811    
+                         arrival time                          -7.662    
+  -------------------------------------------------------------------
+                         slack                                  4.150    
+
+
+
+
+# puts "TX_HOLD_AFTER_EDGE_MAP"
+TX_HOLD_AFTER_EDGE_MAP
+# report_timing -delay_type min \
+#     -to [get_ports {eth_txd[0] eth_txd[1] eth_txd[2] eth_txd[3] eth_tx_ctl}] \
+#     -group pl_eth_txc_probe -max_paths 1 -nworst 1
+INFO: [Timing 38-91] UpdateTimingParams: Speed grade: -2, Delay Type: min.
+INFO: [Timing 38-191] Multithreading enabled for timing update using a maximum of 2 CPUs
+INFO: [Timing 38-78] ReportTimingParams: -to_pins  -max_paths 1 -nworst 1 -delay_type min -sort_by slack.
+Copyright 1986-2020 Xilinx, Inc. All Rights Reserved.
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2020.2 (win64) Build 3064766 Wed Nov 18 09:12:45 MST 2020
+| Date         : Mon Jul 27 16:51:38 2026
+| Host         : LAPTOP-TOQ4BAST running 64-bit major release  (build 9200)
+| Command      : report_timing -delay_type min -to [get_ports {{eth_txd[0]} {eth_txd[1]} {eth_txd[2]} {eth_txd[3]} eth_tx_ctl}] -group pl_eth_txc_probe -max_paths 1 -nworst 1
+| Design       : top
+| Device       : 7z020-clg400
+| Speed File   : -2  PRODUCTION 1.12 2019-11-22
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Timing Report
+
+Slack (VIOLATED) :        -3.431ns  (arrival time - required time)
+  Source:                 eth_bridge_inst/u_rgmii_tx/txdata_bus[3].ODDR_inst/C
+                            (falling edge-triggered cell ODDR clocked by shifted_raw  {rise@4.625ns fall@8.625ns period=8.000ns})
+  Destination:            eth_txd[3]
+                            (output port clocked by pl_eth_txc_probe  {rise@4.625ns fall@8.625ns period=8.000ns})
+  Path Group:             pl_eth_txc_probe
+  Path Type:              Min at Slow Process Corner
+  Requirement:            0.000ns  (pl_eth_txc_probe fall@0.625ns - shifted_raw fall@0.625ns)
+  Data Path Delay:        3.067ns  (logic 3.066ns (99.967%)  route 0.001ns (0.033%))
+  Logic Levels:           1  (OBUF=1)
+  Output Delay:           -3.100ns
+  Clock Path Skew:        3.397ns (DCD - SCD - CPR)
+    Destination Clock Delay (DCD):    3.044ns = ( 3.669 - 0.625 ) 
+    Source Clock Delay      (SCD):    -0.849ns = ( -0.224 - 0.625 ) 
+    Clock Pessimism Removal (CPR):    0.495ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock shifted_raw fall edge)
+                                                      0.625     0.625 f  
+    K17                                               0.000     0.625 f  eth_rxc (IN)
+                         net (fo=0)                   0.000     0.625    eth_rxc
+    K17                  IBUF (Prop_ibuf_I_O)         1.340     1.965 f  eth_rxc_IBUF_inst/O
+                         net (fo=1, routed)           1.004     2.969    rgmii_clock_inst/eth_rxc_IBUF
+    MMCME2_ADV_X1Y2      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT0)
+                                                     -6.527    -3.559 f  rgmii_clock_inst/rgmii_mmcm/CLKOUT0
+                         net (fo=1, routed)           1.714    -1.844    rgmii_clock_inst/shifted_raw
+    BUFGCTRL_X0Y17       BUFG (Prop_bufg_I_O)         0.077    -1.767 f  rgmii_clock_inst/rgmii_receive_buffer/O
+                         net (fo=1748, routed)        1.544    -0.224    eth_bridge_inst/u_rgmii_tx/clk
+    OLOGIC_X1Y117        ODDR                                         f  eth_bridge_inst/u_rgmii_tx/txdata_bus[3].ODDR_inst/C
+  -------------------------------------------------------------------    -------------------
+    OLOGIC_X1Y117        ODDR (Prop_oddr_C_Q)         0.363     0.139 r  eth_bridge_inst/u_rgmii_tx/txdata_bus[3].ODDR_inst/Q
+                         net (fo=1, routed)           0.001     0.140    eth_txd_OBUF[3]
+    G18                  OBUF (Prop_obuf_I_O)         2.703     2.843 r  eth_txd_OBUF[3]_inst/O
+                         net (fo=0)                   0.000     2.843    eth_txd[3]
+    G18                                                               r  eth_txd[3] (OUT)
+  -------------------------------------------------------------------    -------------------
+
+                         (clock pl_eth_txc_probe fall edge)
+                                                      0.625     0.625 f  
+    K17                                               0.000     0.625 f  eth_rxc (IN)
+                         net (fo=0)                   0.000     0.625    eth_rxc
+    K17                  IBUF (Prop_ibuf_I_O)         1.406     2.031 f  eth_rxc_IBUF_inst/O
+                         net (fo=1, routed)           1.110     3.141    rgmii_clock_inst/eth_rxc_IBUF
+    MMCME2_ADV_X1Y2      MMCME2_ADV (Prop_mmcme2_adv_CLKIN1_CLKOUT0)
+                                                     -6.567    -3.426 f  rgmii_clock_inst/rgmii_mmcm/CLKOUT0
+                         net (fo=1, routed)           1.884    -1.542    rgmii_clock_inst/shifted_raw
+    BUFGCTRL_X0Y17       BUFG (Prop_bufg_I_O)         0.085    -1.457 f  rgmii_clock_inst/rgmii_receive_buffer/O
+                         net (fo=1748, routed)        1.762     0.305    eth_bridge_inst/u_rgmii_tx/clk
+    OLOGIC_X1Y125        ODDR (Prop_oddr_C_Q)         0.418     0.723 f  eth_bridge_inst/u_rgmii_tx/txc_oddr/Q
+                         net (fo=1, routed)           0.001     0.724    eth_txc_OBUF
+    K18                  OBUF (Prop_obuf_I_O)         2.945     3.669 f  eth_txc_OBUF_inst/O
+                         net (fo=0)                   0.000     3.669    eth_txc
+    K18                                                               f  eth_txc (OUT)
+                         clock pessimism             -0.495     3.174    
+                         output delay                 3.100     6.274    
+  -------------------------------------------------------------------
+                         required time                         -6.274    
+                         arrival time                           2.843    
+  -------------------------------------------------------------------
+                         slack                                 -3.431    
+
+
+
+
+# close_project
+# exit
+INFO: [Common 17-206] Exiting Vivado at Mon Jul 27 16:51:40 2026...

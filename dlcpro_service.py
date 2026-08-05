@@ -992,17 +992,24 @@ class DlcProService:
                     "Unlim、Main或Unlim + Main。"
                 )
             scan = self._scan()
-            scan_was_enabled = bool(scan.enabled.get())
             unlim_was_enabled = bool(board.unlim.enabled.get())
             main_was_enabled = bool(board.main.enabled.get())
             try:
                 # The peak-balancing acquisition requires Scan, whereas
                 # closed-loop FALC operation starts from a stationary output.
                 scan.enabled.set(False)
-                if path & 1:
-                    board.unlim.enabled.set(True)
+                if bool(scan.enabled.get()):
+                    raise RuntimeError("关闭Scan后的设备读回校验失败")
+                # For the combined path, establish the finite-bandwidth Main
+                # branch first, verify it, and only then engage Unlim.
                 if path & 2:
                     board.main.enabled.set(True)
+                    if not bool(board.main.enabled.get()):
+                        raise RuntimeError("使能FALC Main后的设备读回校验失败")
+                if path & 1:
+                    board.unlim.enabled.set(True)
+                    if not bool(board.unlim.enabled.get()):
+                        raise RuntimeError("使能FALC Unlim后的设备读回校验失败")
                 snapshot = self._read_snapshot_request_unlocked(
                     SnapshotRequest.for_sections(
                         SnapshotSection.SCAN_LOCK, SnapshotSection.FALC
@@ -1010,12 +1017,12 @@ class DlcProService:
                 )
             except Exception:
                 # Never leave a half-engaged loop after a transport/parameter
-                # failure. Restore the states that existed before this action;
-                # rollback is best-effort so the original SDK error is kept.
+                # failure. Roll back only the FALC branches. Scan deliberately
+                # remains off so a failed hand-off cannot resume an uncontrolled
+                # sweep without an operator decision.
                 for parameter, old_value in (
                     (board.main.enabled, main_was_enabled),
                     (board.unlim.enabled, unlim_was_enabled),
-                    (scan.enabled, scan_was_enabled),
                 ):
                     try:
                         parameter.set(old_value)

@@ -2007,12 +2007,21 @@ class MainWindow(QMainWindow):
             acquisition_running=lambda: self.stream_id is not None,
             parent=self,
         )
+        # These are peer desktop windows, not owned child windows.  A native
+        # owner makes Windows minimize them together with the main ADC window
+        # and can also raise the main window over the independent scopes when
+        # an owned control window is activated.  Keep strong Python references
+        # here for lifetime management, while deliberately leaving the Qt
+        # parent unset so every scope/control window has independent taskbar,
+        # minimize and Z-order behaviour.
         self.peak_lock_window = AdcPeakBalanceWindow(
-            self.peak_lock_controller, self.settings, self,
+            self.peak_lock_controller,
+            self.settings,
+            parent=None,
             falc_window_opener=self.falc_window_opener,
         )
         self.scan_control_window = DlcScanControlWindow(
-            self.dlc_session, self.settings, self
+            self.dlc_session, self.settings, parent=None
         )
         self.peak_lock_controller.running_changed.connect(
             self._peak_lock_running_changed

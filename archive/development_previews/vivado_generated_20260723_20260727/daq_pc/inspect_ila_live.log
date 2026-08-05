@@ -1,0 +1,52 @@
+#-----------------------------------------------------------
+# Vivado v2020.2 (64-bit)
+# SW Build 3064766 on Wed Nov 18 09:12:45 MST 2020
+# IP Build 3064653 on Wed Nov 18 14:17:31 MST 2020
+# Start of session at: Thu Jul 23 16:27:53 2026
+# Process ID: 26576
+# Current directory: C:/Users/chris/dlcpro_v1
+# Command line: vivado.exe -mode batch -source C:\Users\chris\dlcpro_v1\daq_pc\inspect_ila_live.tcl -log C:\Users\chris\dlcpro_v1\daq_pc\inspect_ila_live.log -journal C:\Users\chris\dlcpro_v1\daq_pc\inspect_ila_live.jou
+# Log file: C:/Users/chris/dlcpro_v1/daq_pc/inspect_ila_live.log
+# Journal file: C:\Users\chris\dlcpro_v1\daq_pc\inspect_ila_live.jou
+#-----------------------------------------------------------
+source {C:\Users\chris\dlcpro_v1\daq_pc\inspect_ila_live.tcl}
+# catch {open_hw_manager}
+# connect_hw_server -url localhost:3121 -allow_non_jtag
+INFO: [Labtools 27-2285] Connecting to hw_server url TCP:localhost:3121
+INFO: [Labtools 27-3415] Connecting to cs_server url TCP:localhost:3042
+INFO: [Labtools 27-3414] Connected to existing cs_server.
+# open_hw_target
+INFO: [Labtoolstcl 44-466] Opening hw_target localhost:3121/xilinx_tcf/Digilent/210357A7D00EA
+# set devices [get_hw_devices -filter {PART =~ "xc7z020*"}]
+# puts "DEVICES=$devices"
+DEVICES=xc7z020_1
+# if {[llength $devices]} {
+#   current_hw_device [lindex $devices 0]
+#   refresh_hw_device [lindex $devices 0]
+#   puts "ILAS=[get_hw_ilas -of_objects [lindex $devices 0]]"
+#   foreach ila [get_hw_ilas -of_objects [lindex $devices 0]] {
+#     puts "ILA=$ila"
+#     puts "PROBES=[get_hw_probes -of_objects $ila]"
+#   }
+# }
+INFO: [Labtools 27-2302] Device xc7z020 (JTAG device index = 1) is programmed with a design that has 1 ILA core(s).
+WARNING: [Labtools 27-1347] Unable to find Debug Probes file []. Please update hw_device property [PROBES.FILE]
+ Update of hw_probe objects, will be skipped.
+WARNING: [Labtools 27-1974] Mismatch between the design programmed into the device xc7z020_1 and the probes file(s) .
+The device design has 1 ILA core(s) and 0 VIO core(s). 0 ILA core(s) and 0 VIO core(s) are matched in the probes file(s).
+Resolution: 
+1. Reprogram device with the correct programming file and associated probes file(s) OR
+2. Goto device properties and associate the correct probes file(s) with the programming file already programmed in the device.
+ILAS=hw_ila_1
+ILA=hw_ila_1
+WARNING: [Labtoolstcl 44-131] No matching hw_probes were found.
+PROBES=
+# close_hw_manager
+****** Webtalk v2020.2 (64-bit)
+  **** SW Build 3064766 on Wed Nov 18 09:12:45 MST 2020
+  **** IP Build 3064653 on Wed Nov 18 14:17:31 MST 2020
+    ** Copyright 1986-2020 Xilinx, Inc. All Rights Reserved.
+
+source C:/Users/chris/dlcpro_v1/.Xil/Vivado-26576-LAPTOP-TOQ4BAST/webtalk/labtool_webtalk.tcl -notrace
+INFO: [Common 17-206] Exiting Webtalk at Thu Jul 23 16:28:16 2026...
+INFO: [Common 17-206] Exiting Vivado at Thu Jul 23 16:28:16 2026...

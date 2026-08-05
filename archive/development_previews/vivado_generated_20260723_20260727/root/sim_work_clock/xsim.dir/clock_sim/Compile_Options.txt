@@ -1,0 +1,1 @@
+"tb_adc_rate_clock_gen" "glbl" -L "unisims_ver" -s "clock_sim" 

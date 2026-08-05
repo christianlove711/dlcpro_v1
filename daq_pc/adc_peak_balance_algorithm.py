@@ -379,6 +379,16 @@ class PeakBalanceEngine:
         self.finalized = False
         self.ambiguous_count = 0
         self.missing_count = 0
+        self.trial_origin_offset: float | None = None
+        self.trial_origin_error: float | None = None
+        self.trial_direction = 1.0
+        self.trial_step = self.step_size
+        self.best_offset = 0.0
+        self.best_error: float | None = None
+        self.best_observation: PeakObservation | None = None
+        self.neutral_count = 0
+        self.boundary_directions: set[int] = set()
+        self.last_decision = ""
 
     @property
     def offset_limits(self) -> tuple[float, float]:
@@ -406,6 +416,10 @@ class PeakBalanceEngine:
         if self.settings.target_amplitude > self.start_amplitude + 1e-12:
             raise ValueError("最终扫频范围目标不能大于启动Scan Amplitude")
         self.last_good_amplitude = self.current_amplitude
+        self.best_offset = self.current_offset
+        self.best_error = None
+        self.best_observation = None
+        self._clear_trial()
         self.state = "select"
 
     def sync(self, offset: float, amplitude: float) -> None:
@@ -426,7 +440,55 @@ class PeakBalanceEngine:
         self.step_size = step
         self.previous_error = None
         self.previous_offset = self.current_offset
+        self._clear_trial()
         return True
+
+    @staticmethod
+    def _decision_margin(reference_error: float) -> float:
+        """Absolute balance-error deadband: 0.5 percentage point or 5%."""
+        return max(0.005, abs(float(reference_error)) * 0.05)
+
+    def _clear_trial(self) -> None:
+        self.trial_origin_offset = None
+        self.trial_origin_error = None
+        self.neutral_count = 0
+
+    def reset_direction_experiment(self) -> None:
+        """Discard direction evidence after a frequency or operator change."""
+        self.previous_error = None
+        self.previous_offset = self.current_offset
+        self.direction = 1.0
+        self.step_size = self.base_step_size
+        self.stable_count = 0
+        self.bad_track_count = 0
+        self.boundary_directions.clear()
+        self._clear_trial()
+
+    def reset_after_amplitude_change(self) -> None:
+        """Start a fresh direction experiment for the new scan span."""
+        self.best_offset = self.current_offset
+        self.best_error = None
+        self.best_observation = None
+        self.recovery_attempt = 0
+        self.recovery_origin = None
+        self.reset_direction_experiment()
+
+    def reset_after_frequency_change(self) -> None:
+        """Frequency changes invalidate both timing evidence and old optima."""
+        self.best_offset = self.current_offset
+        self.best_error = None
+        self.best_observation = None
+        self.recovery_attempt = 0
+        self.recovery_origin = None
+        self.reset_direction_experiment()
+
+    def _remember_best(self, observation: PeakObservation) -> None:
+        if (self.best_error is None
+                or observation.balance_error < self.best_error):
+            self.best_error = observation.balance_error
+            self.best_offset = self.current_offset
+            self.best_observation = observation
+            self.boundary_directions.clear()
 
     def _action(self, kind, value, reason, state=None):
         if state is not None:
@@ -435,35 +497,149 @@ class PeakBalanceEngine:
 
     def _offset_action(self, target: float, reason: str, state=None):
         low, high = self.offset_limits
-        bounded = min(high, max(low, float(target)))
+        target = float(target)
+        requested_direction = 1 if target > self.current_offset else -1
+        if target < low - 1e-12 or target > high + 1e-12:
+            self.boundary_directions.add(requested_direction)
+            opposite = -requested_direction
+            reduced = max(
+                self.current_stage.min_offset_step, self.step_size / 2.0
+            )
+            reverse_target = self.best_offset + opposite * reduced
+            if (opposite not in self.boundary_directions
+                    and low <= reverse_target <= high
+                    and abs(reverse_target - self.current_offset) > 1e-12):
+                self.direction = float(opposite)
+                self.step_size = reduced
+                self.trial_origin_offset = self.best_offset
+                self.trial_origin_error = self.best_error
+                self.trial_direction = self.direction
+                self.trial_step = reduced
+                self.last_decision = "单侧安全边界：回到最佳点并反向减小步长"
+                return self._action(
+                    "offset", reverse_target,
+                    f"即将越过Offset安全边界[{low:.6f}, {high:.6f}]；"
+                    f"从最佳Offset={self.best_offset:.6f}反向，步长={reduced:.6f}",
+                    state or "center",
+                )
+            if abs(self.current_offset - self.best_offset) > 1e-12:
+                self.last_decision = "两侧边界受限：恢复历史最佳Offset"
+                return self._action(
+                    "offset", self.best_offset,
+                    f"Offset两侧搜索受限；恢复最佳Offset={self.best_offset:.6f}，"
+                    f"最佳不均匀度={((self.best_error if self.best_error is not None else 1.0) * 100):.2f}%",
+                    "boundary_recover",
+                )
+            detail = (
+                f"Offset安全范围[{low:.6f}, {high:.6f}]两侧均已尝试；"
+                f"最佳Offset={self.best_offset:.6f}，最佳不均匀度="
+                f"{((self.best_error if self.best_error is not None else 1.0) * 100):.2f}%"
+            )
+            if self.current_amplitude < self.last_good_amplitude * 0.999:
+                return self._action(
+                    "amplitude", self.last_good_amplitude,
+                    detail + "；先恢复上一级可靠Amplitude后重新识别",
+                    "restore_amplitude",
+                )
+            return self._action("stop", None, detail, "fault")
+        bounded = target
         if abs(bounded - self.current_offset) < 1e-12:
-            return self._action("stop", None, "Offset已到允许边界", "fault")
+            return self._action("none", None, "Offset目标与当前读回相同", state)
         self.previous_offset = self.current_offset
         return self._action("offset", bounded, reason, state)
 
+    def _start_trial(
+        self, observation: PeakObservation, direction: float, step: float,
+        reason: str, state: str = "probe", *, origin_offset: float | None = None,
+        origin_error: float | None = None,
+    ) -> ControlAction:
+        origin = self.current_offset if origin_offset is None else origin_offset
+        reference = (
+            observation.balance_error if origin_error is None else origin_error
+        )
+        self.trial_origin_offset = float(origin)
+        self.trial_origin_error = float(reference)
+        self.trial_direction = 1.0 if direction >= 0 else -1.0
+        self.trial_step = float(step)
+        self.direction = self.trial_direction
+        self.step_size = float(step)
+        self.neutral_count = 0
+        self.last_decision = reason
+        return self._offset_action(
+            origin + self.trial_direction * self.trial_step,
+            f"{reason}；参考不均匀度={reference * 100:.2f}%，"
+            f"方向={'+' if self.trial_direction > 0 else '-'}，步长={step:.6f}",
+            state,
+        )
+
+    def _reverse_from_best(self, reason: str) -> ControlAction:
+        stage = self.current_stage
+        old_direction = self.trial_direction or self.direction
+        step = max(stage.min_offset_step, self.trial_step / 2.0)
+        reference = self.best_error
+        if reference is None:
+            reference = self.trial_origin_error
+        if reference is None:
+            reference = 1.0
+        origin = self.best_offset
+        self.trial_origin_offset = origin
+        self.trial_origin_error = reference
+        self.trial_direction = -old_direction
+        self.trial_step = step
+        self.direction = self.trial_direction
+        self.step_size = step
+        self.neutral_count = 0
+        self.last_decision = reason
+        return self._offset_action(
+            origin + self.trial_direction * step,
+            f"{reason}；恢复最佳Offset={origin:.6f}，反向后步长={step:.6f}，"
+            f"参考不均匀度={reference * 100:.2f}%",
+            "center",
+        )
+
     def _begin_centering(self, observation: PeakObservation):
         self.previous_error = observation.balance_error
+        self._remember_best(observation)
         self.stable_count = 0
-        return self._offset_action(
-            self.current_offset + self.step_size,
+        return self._start_trial(
+            observation, self.direction, self.step_size,
             "试探Offset响应方向", "probe",
         )
 
     def update(self, observation: PeakObservation) -> ControlAction:
         s = self.settings
         stage = self.current_stage
-        if (observation.ambiguous
-                and self.state not in {"verify_shrink", "refine"}):
+        if observation.ambiguous:
             self.ambiguous_count += 1
-            if self.ambiguous_count < 3:
-                return self._action(
-                    "none", None,
-                    f"00模候选不唯一，等待独立窗口复核 {self.ambiguous_count}/3",
+            if (self.state in {"probe", "center", "track"}
+                    and self.best_error is not None
+                    and self.trial_origin_error is not None):
+                return self._reverse_from_best(
+                    "00模候选不唯一，本次Offset试探判为失败"
                 )
-            return self._action("stop", None, observation.reason, "ambiguous")
+            if self.state == "verify_shrink" and self.current_amplitude < self.last_good_amplitude:
+                self.fail_amplitude = self.current_amplitude
+                return self._action(
+                    "amplitude", self.last_good_amplitude,
+                    "缩幅后00模候选不唯一，恢复上一级可靠Amplitude",
+                    "restore_amplitude",
+                )
+            if self.fingerprint is None:
+                if self.recovery_origin is None:
+                    self.recovery_origin = self.start_offset
+                return self._recovery_action(
+                    "启动阶段00模候选不唯一，围绕启动Offset对称搜索"
+                )
+            if self.state in {"center", "track"}:
+                self.recovery_attempt = 0
+                self.recovery_origin = self.best_offset
+                return self._recovery_action(
+                    "00模候选不唯一，围绕最近最佳Offset对称重捕获"
+                )
         if observation.valid:
             self.ambiguous_count = 0
             self.missing_count = 0
+            self._remember_best(observation)
         if self.state == "select":
             if not observation.valid:
                 if observation.reason == "未找到足够的00模穿越峰":
@@ -541,21 +717,26 @@ class PeakBalanceEngine:
             self.fingerprint.update(observation)
 
         if self.state == "probe":
-            improved = (
-                self.previous_error is None
-                or observation.balance_error < self.previous_error
-            )
-            if not improved:
-                self.direction = -1.0
-                self.step_size = max(
-                    stage.min_offset_step, self.step_size / 2.0
-                )
-                return self._offset_action(
-                    self.previous_offset - self.step_size,
-                    "正向试探变差，改为反向调节", "center",
-                )
-            self.direction = 1.0
+            reference = self.trial_origin_error
+            if reference is None:
+                reference = self.previous_error or observation.balance_error
+            margin = self._decision_margin(reference)
+            if observation.balance_error > reference + margin:
+                return self._reverse_from_best("Offset试探使不均匀度变差")
+            if observation.balance_error >= reference - margin:
+                self.neutral_count += 1
+                if self.neutral_count < 2:
+                    return self._action(
+                        "none", None,
+                        f"Offset试探落在判定死区；当前={observation.balance_error * 100:.2f}% "
+                        f"参考={reference * 100:.2f}%，等待第二个独立窗口",
+                    )
+                return self._reverse_from_best("Offset试探连续两次没有明确改善")
+            self.direction = self.trial_direction
             self.previous_error = observation.balance_error
+            self.previous_offset = self.current_offset
+            self._remember_best(observation)
+            self._clear_trial()
             self.state = "center"
 
         if self.state in {"center", "track"}:
@@ -595,15 +776,32 @@ class PeakBalanceEngine:
                 self.bad_track_count += 1
                 if self.bad_track_count < 2:
                     return self._action("none", None, "保持状态首次超差，等待复核")
-            if (self.previous_error is not None
-                    and observation.balance_error > self.previous_error * 1.05):
-                self.direction *= -1.0
-                self.step_size = max(
-                    stage.min_offset_step, self.step_size / 2.0
-                )
+                # A drifting cavity makes an old all-time optimum physically
+                # obsolete. Start a new local experiment at the present point.
+                self.best_offset = self.current_offset
+                self.best_error = observation.balance_error
+                self.best_observation = observation
+                self.boundary_directions.clear()
+                self._clear_trial()
+            if self.trial_origin_error is not None:
+                reference = self.trial_origin_error
+                margin = self._decision_margin(reference)
+                if observation.balance_error > reference + margin:
+                    return self._reverse_from_best("Offset连续调节使不均匀度变差")
+                if observation.balance_error >= reference - margin:
+                    self.neutral_count += 1
+                    if self.neutral_count < 2:
+                        return self._action(
+                            "none", None,
+                            f"不均匀度变化位于死区；当前={observation.balance_error * 100:.2f}% "
+                            f"参考={reference * 100:.2f}%，等待复核",
+                        )
+                    return self._reverse_from_best("连续两次没有明确改善")
+            self._remember_best(observation)
             self.previous_error = observation.balance_error
-            return self._offset_action(
-                self.current_offset + self.direction * self.step_size,
+            self.previous_offset = self.current_offset
+            return self._start_trial(
+                observation, self.direction, self.step_size,
                 "修正00模峰间隔不均匀", "center",
             )
 

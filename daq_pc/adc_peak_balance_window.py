@@ -394,7 +394,7 @@ class AdcPeakBalanceWindow(QMainWindow):
                 ("boundary", boundary), ("tolerance", tolerance),
                 ("step", step), ("shrink", shrink), ("windows", windows),
             ), start=1):
-                if value in {"最终目标", "不缩幅"}:
+                if value == "不缩幅":
                     label = QLabel(value)
                     label.setStyleSheet(
                         "min-height:32px; padding:0 8px; color:#69758a; "
@@ -403,16 +403,22 @@ class AdcPeakBalanceWindow(QMainWindow):
                     )
                     stage_grid.addWidget(label, row, column)
                     continue
-                edit = QLineEdit(value)
+                edit = QLineEdit(
+                    f"{self.target_amplitude.value():.6f}"
+                    if value == "最终目标" else value
+                )
                 edit.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 edit.setProperty("stageParameter", True)
-                edit.setToolTip({
+                edit.setToolTip(
+                    "最终扫频范围目标，单位Vpp；修改后会与另一目标框及上方目标参数同步。"
+                    if value == "最终目标" else {
                     "boundary": "阶段边界必须依次满足：宽扫 > 中扫 > 细扫 > 最终目标。",
                     "tolerance": "本阶段允许不均匀度，范围：大于0且小于50%。",
                     "step": "本阶段Offset起始步长；必须不小于Offset绝对最小步长，且逐级不增大。",
                     "shrink": "本阶段通过后Amplitude乘以该倍率，范围：0.20～0.99。",
                     "windows": "必须由多少个完全独立的新数据窗口连续确认，范围：1～10。",
-                }[field])
+                    }[field]
+                )
                 self.strategy_edits[f"{key}_{field}"] = edit
                 stage_grid.addWidget(edit, row, column)
         strategy_box.addLayout(stage_grid)
@@ -502,7 +508,17 @@ class AdcPeakBalanceWindow(QMainWindow):
         self.controller.log_message.connect(self.log.append)
         self.observe_only.toggled.connect(self._mode_changed)
         self.manual_advice_label.clicked.connect(self._show_advice_history)
+        self.strategy_edits["narrow_boundary"].editingFinished.connect(
+            lambda: self._sync_target_from_stage("narrow_boundary")
+        )
+        self.strategy_edits["final_boundary"].editingFinished.connect(
+            lambda: self._sync_target_from_stage("final_boundary")
+        )
+        self.target_amplitude.editingFinished.connect(
+            self._sync_stage_targets_from_primary
+        )
         self._restore_ui_settings()
+        self._sync_stage_targets_from_primary()
         self._mode_changed()
         self._running_changed(False)
 
@@ -543,6 +559,25 @@ class AdcPeakBalanceWindow(QMainWindow):
         for widget in self._numeric_parameter_widgets():
             widget.interpretText()
 
+    def _sync_target_from_stage(self, source_key: str) -> None:
+        text = self.strategy_edits[source_key].text().strip()
+        try:
+            value = float(text)
+        except ValueError:
+            return
+        if value <= 0:
+            return
+        self.target_amplitude.setValue(value)
+        formatted = f"{value:.6f}"
+        self.strategy_edits["narrow_boundary"].setText(formatted)
+        self.strategy_edits["final_boundary"].setText(formatted)
+
+    def _sync_stage_targets_from_primary(self) -> None:
+        self.target_amplitude.interpretText()
+        formatted = f"{float(self.target_amplitude.value()):.6f}"
+        self.strategy_edits["narrow_boundary"].setText(formatted)
+        self.strategy_edits["final_boundary"].setText(formatted)
+
     def _save_parameters(self) -> None:
         try:
             self._commit_parameter_edits()
@@ -572,6 +607,10 @@ class AdcPeakBalanceWindow(QMainWindow):
         medium_shrink = stage_float("medium_shrink")
         final_tolerance = stage_float("final_tolerance") / 100.0
         final_windows = stage_int("final_windows")
+        narrow_target = stage_float("narrow_boundary")
+        final_target = stage_float("final_boundary")
+        if abs(narrow_target - final_target) > 1e-12:
+            raise ValueError("窄扫与最终验收的目标Amplitude必须一致")
         return PeakBalanceSettings(
             channel=str(self.channel.currentData()),
             polarity=str(self.polarity.currentData()),
@@ -582,7 +621,7 @@ class AdcPeakBalanceWindow(QMainWindow):
             min_offset_step=float(self.min_offset_step.value()),
             max_offset_deviation=float(self.offset_range.value()),
             shrink_ratio=medium_shrink,
-            target_amplitude=float(self.target_amplitude.value()),
+            target_amplitude=final_target,
             max_search_amplitude_factor=float(self.max_search_factor.value()),
             min_amplitude_fraction=float(self.min_fraction.value()) / 100.0,
             safety_margin=float(self.safety_margin.value()) / 100.0,

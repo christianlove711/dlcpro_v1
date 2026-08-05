@@ -1,0 +1,26 @@
+#-----------------------------------------------------------
+# Vivado v2020.2 (64-bit)
+# SW Build 3064766 on Wed Nov 18 09:12:45 MST 2020
+# IP Build 3064653 on Wed Nov 18 14:17:31 MST 2020
+# Start of session at: Mon Jul 27 17:36:39 2026
+# Process ID: 30228
+# Current directory: C:/Users/chris/dlcpro_v1
+# Command line: vivado.exe -mode batch -source C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\run_pl_udp_phase1_sims.tcl
+# Log file: C:/Users/chris/dlcpro_v1/vivado.log
+# Journal file: C:/Users/chris/dlcpro_v1\vivado.jou
+#-----------------------------------------------------------
+source {C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\run_pl_udp_phase1_sims.tcl}
+source tb_adc_rate_clock_gen.tcl
+source tb_ad9269_scope_capture.tcl
+source tb_native_fifo_to_axis_fwft.tcl
+source tb_ad9269_spi.tcl
+source tb_ad9269_frontend_t9.tcl
+source tb_iterative_math.tcl
+source tb_peak_feature_engine.tcl
+source tb_peak_scenarios.tcl
+source tb_daq_acq_manager.tcl
+source tb_pl_daq_control.tcl
+source tb_pl_daq_control_cdc.tcl
+source tb_udp_control_integration.tcl
+source tb_daq_control_regs_v3.tcl
+source tb_rgmii_ddr_mapping.tcl

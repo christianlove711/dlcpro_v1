@@ -1,0 +1,12 @@
+#-----------------------------------------------------------
+# Webtalk v2020.2 (64-bit)
+# SW Build 3064766 on Wed Nov 18 09:12:45 MST 2020
+# IP Build 3064653 on Wed Nov 18 14:17:31 MST 2020
+# Start of session at: Thu Jul 23 16:34:50 2026
+# Process ID: 68880
+# Current directory: C:/Users/chris/dlcpro_v1
+# Command line: wbtcv.exe -mode batch -source C:/Users/chris/dlcpro_v1/.Xil/Vivado-43644-LAPTOP-TOQ4BAST/webtalk/labtool_webtalk.tcl -notrace
+# Log file: C:/Users/chris/dlcpro_v1/webtalk.log
+# Journal file: C:/Users/chris/dlcpro_v1\webtalk.jou
+#-----------------------------------------------------------
+source C:/Users/chris/dlcpro_v1/.Xil/Vivado-43644-LAPTOP-TOQ4BAST/webtalk/labtool_webtalk.tcl -notrace

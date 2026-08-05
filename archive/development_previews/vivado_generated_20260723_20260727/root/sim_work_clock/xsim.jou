@@ -1,0 +1,13 @@
+#-----------------------------------------------------------
+# xsim v2020.2 (64-bit)
+# SW Build 3064766 on Wed Nov 18 09:12:45 MST 2020
+# IP Build 3064653 on Wed Nov 18 14:17:31 MST 2020
+# Start of session at: Sat Jul 25 16:24:42 2026
+# Process ID: 31544
+# Current directory: C:/Users/chris/dlcpro_v1/sim_work_clock
+# Command line: xsim.exe -mode tcl -source {xsim.dir/clock_sim/xsim_script.tcl}
+# Log file: C:/Users/chris/dlcpro_v1/sim_work_clock/xsim.log
+# Journal file: C:/Users/chris/dlcpro_v1/sim_work_clock\xsim.jou
+#-----------------------------------------------------------
+source xsim.dir/clock_sim/xsim_script.tcl
+run -all

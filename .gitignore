@@ -9,6 +9,7 @@ __pycache__/
 htmlcov/
 build/
 dist/
+release/
 *.egg-info/
 .venv/
 venv/
@@ -16,6 +17,7 @@ venv/
 Thumbs.db
 daq_pc/captures/
 .ui_checks/
+pktmon_select.txt
 
 # Vivado/xsim runtime products. Keep Tcl sources, reports and bitstreams.
 /.Xil/

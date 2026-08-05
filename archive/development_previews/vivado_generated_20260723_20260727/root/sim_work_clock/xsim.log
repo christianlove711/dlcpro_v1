@@ -1,0 +1,20 @@
+#-----------------------------------------------------------
+# xsim v2020.2 (64-bit)
+# SW Build 3064766 on Wed Nov 18 09:12:45 MST 2020
+# IP Build 3064653 on Wed Nov 18 14:17:31 MST 2020
+# Start of session at: Sat Jul 25 16:24:42 2026
+# Process ID: 31544
+# Current directory: C:/Users/chris/dlcpro_v1/sim_work_clock
+# Command line: xsim.exe -mode tcl -source {xsim.dir/clock_sim/xsim_script.tcl}
+# Log file: C:/Users/chris/dlcpro_v1/sim_work_clock/xsim.log
+# Journal file: C:/Users/chris/dlcpro_v1/sim_work_clock\xsim.jou
+#-----------------------------------------------------------
+source xsim.dir/clock_sim/xsim_script.tcl
+# xsim {clock_sim} -autoloadwcfg -runall
+Vivado Simulator 2020.2
+Time resolution is 1 ps
+run -all
+PASS: AD9269 5/10/20/40/80 MHz single-BUFG clock
+$finish called at time : 2525 ns : File "C:/Users/chris/dlcpro_v1/tools/tb_adc_rate_clock_gen.sv" Line 75
+exit
+INFO: [Common 17-206] Exiting xsim at Sat Jul 25 16:24:46 2026...

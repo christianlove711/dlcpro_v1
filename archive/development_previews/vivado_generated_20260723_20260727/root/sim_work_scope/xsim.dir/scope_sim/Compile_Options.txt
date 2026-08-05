@@ -1,0 +1,1 @@
+"tb_ad9269_scope_capture" -s "scope_sim" 

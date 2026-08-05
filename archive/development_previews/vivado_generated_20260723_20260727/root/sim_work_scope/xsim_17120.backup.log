@@ -1,0 +1,22 @@
+#-----------------------------------------------------------
+# xsim v2020.2 (64-bit)
+# SW Build 3064766 on Wed Nov 18 09:12:45 MST 2020
+# IP Build 3064653 on Wed Nov 18 14:17:31 MST 2020
+# Start of session at: Sat Jul 25 16:23:14 2026
+# Process ID: 17120
+# Current directory: C:/Users/chris/dlcpro_v1/sim_work_scope
+# Command line: xsim.exe -mode tcl -source {xsim.dir/scope_sim/xsim_script.tcl}
+# Log file: C:/Users/chris/dlcpro_v1/sim_work_scope/xsim.log
+# Journal file: C:/Users/chris/dlcpro_v1/sim_work_scope\xsim.jou
+#-----------------------------------------------------------
+source xsim.dir/scope_sim/xsim_script.tcl
+# xsim {scope_sim} -autoloadwcfg -runall
+Vivado Simulator 2020.2
+Time resolution is 1 ps
+run -all
+FAIL: overflow=1 dropped=27
+Fatal: Scope capture failures=1
+Time: 4405 ns  Iteration: 0  Process: /tb_ad9269_scope_capture/Initial113_7/Block118_9  Scope: .tb_ad9269_scope_capture.  File: C:/Users/chris/dlcpro_v1/tools/tb_ad9269_scope_capture.sv Line: 133
+$finish called at time : 4405 ns
+exit
+INFO: [Common 17-206] Exiting xsim at Sat Jul 25 16:23:18 2026...

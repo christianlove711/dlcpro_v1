@@ -1,5 +1,7 @@
 # 自动锁频算法配置与使用说明
 
+> 适用范围：本文描述主 DLC pro 控制台中的双信号自动锁频模块（透射峰/误差信号三策略）。ADC采集页面中的“ADC原始码00模自动锁频”是另一套控制器，当前实装算法请以 [`reports/adc_peak_balance/ALGORITHM_REPORT.md`](../reports/adc_peak_balance/ALGORITHM_REPORT.md) 为准。
+
 本文档对应当前唯一的“自动锁频”实现。当前版本支持三套可切换算法：
 
 ```text

@@ -1,0 +1,12 @@
+#-----------------------------------------------------------
+# Vivado v2020.2 (64-bit)
+# SW Build 3064766 on Wed Nov 18 09:12:45 MST 2020
+# IP Build 3064653 on Wed Nov 18 14:17:31 MST 2020
+# Start of session at: Mon Jul 27 17:40:45 2026
+# Process ID: 4284
+# Current directory: C:/Users/chris/dlcpro_v1
+# Command line: vivado.exe -mode batch -source C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\run_pl_udp_rollback_verify.tcl
+# Log file: C:/Users/chris/dlcpro_v1/vivado.log
+# Journal file: C:/Users/chris/dlcpro_v1\vivado.jou
+#-----------------------------------------------------------
+source {C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\run_pl_udp_rollback_verify.tcl}

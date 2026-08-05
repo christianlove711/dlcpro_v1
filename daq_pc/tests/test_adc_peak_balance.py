@@ -31,6 +31,7 @@ class _FakeDlcSession(QObject):
         self.is_connected = True
         self.offset_writes = []
         self.amplitude_writes = []
+        self.scan_writes = []
         self._snapshot = SimpleNamespace(
             sc_enabled=True,
             sc_frequency=1.0,
@@ -52,6 +53,11 @@ class _FakeDlcSession(QObject):
     def set_scan_amplitude(self, value):
         self.amplitude_writes.append(float(value))
         self._snapshot.sc_amplitude = float(value)
+        self.write_snapshot_changed.emit(self._snapshot)
+
+    def set_scan_enabled(self, enabled):
+        self.scan_writes.append(bool(enabled))
+        self._snapshot.sc_enabled = bool(enabled)
         self.write_snapshot_changed.emit(self._snapshot)
 
     def engage_configured_falc(self):
@@ -443,15 +449,172 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
         self.assertEqual(fourth.kind, "amplitude")
         self.assertLessEqual(float(fourth.value), 2.0)
 
-    def test_ambiguous_peak_requires_three_independent_windows_to_stop(self):
+    def test_initial_ambiguous_peak_uses_symmetric_recovery_without_stopping(self):
         engine = PeakBalanceEngine(self.settings)
         engine.start(0.0, 1.2)
         ambiguous = PeakObservation(False, "00模候选不唯一")
-        self.assertEqual(engine.update(ambiguous).kind, "none")
-        self.assertEqual(engine.update(ambiguous).kind, "none")
-        action = engine.update(ambiguous)
-        self.assertEqual(action.kind, "stop")
-        self.assertEqual(action.state, "ambiguous")
+        actions = []
+        for _ in range(4):
+            action = engine.update(ambiguous)
+            actions.append(action)
+            self.assertEqual(action.kind, "offset")
+            engine.sync(float(action.value), 1.2)
+        self.assertEqual([round(float(row.value), 6) for row in actions], [
+            0.06, -0.06, 0.12, -0.12,
+        ])
+        self.assertNotIn("ambiguous", {row.state for row in actions})
+
+    def test_wrong_offset_trial_restores_best_and_reverses(self):
+        engine = PeakBalanceEngine(self.settings)
+        engine.start(0.0, 1.2)
+        engine.set_offset_step(0.05)
+        baseline = PeakObservation(True, "00模有效", balance_error=0.20)
+        first = engine.update(baseline)
+        self.assertEqual(first.kind, "offset")
+        engine.sync(float(first.value), 1.2)
+        worse = PeakObservation(True, "00模有效", balance_error=0.23)
+        reverse = engine.update(worse)
+        self.assertEqual(reverse.kind, "offset")
+        self.assertLess(float(reverse.value), engine.best_offset)
+        self.assertIn("反向", reverse.reason)
+
+    def test_two_neutral_windows_reverse_against_fixed_reference(self):
+        engine = PeakBalanceEngine(self.settings)
+        engine.start(0.0, 1.2)
+        engine.set_offset_step(0.05)
+        first = engine.update(PeakObservation(
+            True, "00模有效", balance_error=0.20
+        ))
+        engine.sync(float(first.value), 1.2)
+        wait = engine.update(PeakObservation(
+            True, "00模有效", balance_error=0.198
+        ))
+        self.assertEqual(wait.kind, "none")
+        reverse = engine.update(PeakObservation(
+            True, "00模有效", balance_error=0.199
+        ))
+        self.assertEqual(reverse.kind, "offset")
+        self.assertLess(float(reverse.value), engine.best_offset)
+
+    def test_single_offset_boundary_reverses_from_best(self):
+        settings = PeakBalanceSettings(
+            max_offset_deviation=0.05, offset_step=0.05,
+            min_offset_step=0.001,
+        )
+        engine = PeakBalanceEngine(settings)
+        engine.start(0.0, 1.2)
+        engine.set_offset_step(0.05)
+        first = engine.update(PeakObservation(
+            True, "00模有效", balance_error=0.20
+        ))
+        engine.sync(float(first.value), 1.2)
+        boundary_recovery = engine.update(PeakObservation(
+            True, "00模有效", balance_error=0.15
+        ))
+        self.assertEqual(boundary_recovery.kind, "offset")
+        self.assertLess(float(boundary_recovery.value), engine.best_offset)
+        self.assertIn("安全边界", boundary_recovery.reason)
+
+    def test_tracking_drift_rebases_obsolete_historical_best(self):
+        engine = PeakBalanceEngine(self.settings)
+        engine.start(0.0, 0.2)
+        engine.state = "track"
+        engine.finalized = True
+        engine.best_offset = 0.0
+        engine.best_error = 0.001
+        engine.sync(0.20, 0.2)
+        drifted = PeakObservation(True, "00模有效", balance_error=0.20)
+        self.assertEqual(engine.update(drifted).kind, "none")
+        action = engine.update(drifted)
+        self.assertEqual(action.kind, "offset")
+        self.assertAlmostEqual(engine.best_offset, 0.20)
+        self.assertGreater(float(action.value), 0.19)
+
+    def test_control_mode_enables_scan_before_analysis(self):
+        cavity = VirtualCavity()
+        session = _FakeDlcSession()
+        session._snapshot.sc_enabled = False
+        controller = AdcPeakBalanceController(
+            _FrameRing(_shifted_history(cavity, 0)), session, lambda: True
+        )
+        controller.start(self.settings, observe_only=False)
+        self.assertEqual(session.scan_writes, [True])
+        self.assertTrue(session.snapshot().sc_enabled)
+        self.assertTrue(controller.running)
+        self.assertIsNotNone(controller.engine)
+        self.assertEqual(controller.required_cycles, 4.0)
+        controller.stop()
+
+    def test_observe_mode_does_not_auto_enable_scan(self):
+        cavity = VirtualCavity()
+        session = _FakeDlcSession()
+        session._snapshot.sc_enabled = False
+        controller = AdcPeakBalanceController(
+            _FrameRing(_shifted_history(cavity, 0)), session, lambda: True
+        )
+        with self.assertRaisesRegex(RuntimeError, "观察模式禁止写入"):
+            controller.start(self.settings, observe_only=True)
+        self.assertEqual(session.scan_writes, [])
+
+    def test_failed_scan_enable_never_starts_offset_control(self):
+        cavity = VirtualCavity()
+        session = _FakeDlcSession()
+        session._snapshot.sc_enabled = False
+
+        def reject_scan(_enabled):
+            session.scan_writes.append(True)
+            session.write_snapshot_changed.emit(session._snapshot)
+
+        session.set_scan_enabled = reject_scan
+        controller = AdcPeakBalanceController(
+            _FrameRing(_shifted_history(cavity, 0)), session, lambda: True
+        )
+        controller.start(self.settings, observe_only=False)
+        self.assertFalse(controller.running)
+        self.assertEqual(session.offset_writes, [])
+        self.assertEqual(session.amplitude_writes, [])
+
+    def test_write_discards_settle_cycles_before_four_cycle_window(self):
+        cavity = VirtualCavity()
+        ring = _FrameRing(_shifted_history(cavity, 0))
+        session = _FakeDlcSession()
+        controller = AdcPeakBalanceController(ring, session, lambda: True)
+        controller.start(self.settings, observe_only=False)
+        controller._submit_action(SimpleNamespace(
+            kind="offset", value=0.05, reason="测试写入", state="center"
+        ))
+        self.assertTrue(controller.settle_pending)
+        self.assertEqual(controller.settle_kind, "Offset")
+        ring.frame = _shifted_history(cavity, 20_000)
+        controller.settle_until = 0.0
+        controller.available_after = 0.0
+        controller._tick()
+        self.assertFalse(controller.settle_pending)
+        self.assertEqual(controller.required_cycles, 4.0)
+        self.assertEqual(controller.gate_bin, int(ring.frame.bin_indices[-1]))
+        controller.stop()
+
+    def test_automatic_action_log_contains_balance_evidence(self):
+        cavity = VirtualCavity()
+        session = _FakeDlcSession()
+        controller = AdcPeakBalanceController(
+            _FrameRing(_shifted_history(cavity, 0)), session, lambda: True
+        )
+        controller.start(self.settings, observe_only=False)
+        messages = []
+        controller.log_message.connect(messages.append)
+        observation = PeakObservation(
+            True, "00模有效", delta_t1=0.21, delta_t2=0.29,
+            balance_error=0.16,
+        )
+        controller._log_decision(observation, SimpleNamespace(
+            kind="offset", value=0.05, reason="方向试探", state="probe"
+        ))
+        text = "\n".join(messages)
+        self.assertIn("不均匀度=16.00%", text)
+        self.assertIn("Δt1=0.210000s", text)
+        self.assertIn("方向试探", text)
+        controller.stop()
 
     def test_observe_mode_makes_shrink_the_required_next_step(self):
         cavity = VirtualCavity()

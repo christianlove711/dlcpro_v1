@@ -1,0 +1,41 @@
+#-----------------------------------------------------------
+# Vivado v2020.2 (64-bit)
+# SW Build 3064766 on Wed Nov 18 09:12:45 MST 2020
+# IP Build 3064653 on Wed Nov 18 14:17:31 MST 2020
+# Start of session at: Thu Jul 23 16:33:17 2026
+# Process ID: 10688
+# Current directory: C:/Users/chris/dlcpro_v1
+# Command line: vivado.exe -mode batch -source C:\Users\chris\dlcpro_v1\daq_pc\capture_ad9280_ff_ila.tcl -log C:\Users\chris\dlcpro_v1\daq_pc\capture_ad9280_ff_ila.log -journal C:\Users\chris\dlcpro_v1\daq_pc\capture_ad9280_ff_ila.jou
+# Log file: C:/Users/chris/dlcpro_v1/daq_pc/capture_ad9280_ff_ila.log
+# Journal file: C:\Users\chris\dlcpro_v1\daq_pc\capture_ad9280_ff_ila.jou
+#-----------------------------------------------------------
+source {C:\Users\chris\dlcpro_v1\daq_pc\capture_ad9280_ff_ila.tcl}
+# set ltx_file {C:/Users/chris/Desktop/2/02_/top.ltx}
+# set csv_file {C:/Users/chris/dlcpro_v1/daq_pc/captures/ad9280_ff_trigger.csv}
+# file mkdir [file dirname $csv_file]
+# catch {open_hw_manager}
+# connect_hw_server -url localhost:3121 -allow_non_jtag
+INFO: [Labtools 27-2285] Connecting to hw_server url TCP:localhost:3121
+INFO: [Labtools 27-3415] Connecting to cs_server url TCP:localhost:3042
+INFO: [Labtools 27-3414] Connected to existing cs_server.
+# open_hw_target
+INFO: [Labtoolstcl 44-466] Opening hw_target localhost:3121/xilinx_tcf/Digilent/210357A7D00EA
+# set device [lindex [get_hw_devices -filter {PART =~ "xc7z020*"}] 0]
+# current_hw_device $device
+# set_property PROBES.FILE $ltx_file $device
+# set_property FULL_PROBES.FILE $ltx_file $device
+# refresh_hw_device $device
+INFO: [Labtools 27-2302] Device xc7z020 (JTAG device index = 1) is programmed with a design that has 1 ILA core(s).
+# set ila [lindex [get_hw_ilas -of_objects $device] 0]
+# set debug_probe [get_hw_probes zynq_u/System_i/Controller/ad9280_debug_0_2 \
+#     -of_objects $ila]
+# set_property TRIGGER_COMPARE_VALUE \
+#     "eq51'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx11111111xxxxxxxx" \
+#     $debug_probe
+# set_property CONTROL.TRIGGER_POSITION 512 $ila
+# run_hw_ila $ila
+INFO: [Labtools 27-1964] The ILA core 'hw_ila_1' trigger was armed at 2026-Jul-23 16:33:33
+# after 5000 [list stop_hw_ila $ila]
+# wait_on_hw_ila $ila
+ERROR: [Labtoolstcl 44-155] hw_ila [hw_ila_1] does not have a [STATUS] property
+INFO: [Common 17-206] Exiting Vivado at Thu Jul 23 16:33:33 2026...

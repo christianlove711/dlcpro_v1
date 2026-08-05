@@ -5,12 +5,34 @@ a = Analysis(
     ['app.py'],
     pathex=[],
     binaries=[],
-    datas=[('auto_lock_algorithm_presets.json', '.')],
+    datas=[
+        ('auto_lock_algorithm_presets.json', '.'),
+        ('tools/program_fpga_bit.tcl', 'tools'),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # This workstation uses a broad Anaconda environment that also contains
+    # PyQt5 and many notebook/documentation tools.  The application is
+    # exclusively PySide6; excluding unrelated development stacks prevents
+    # PyInstaller from collecting a second Qt binding and keeps the operator
+    # package deterministic and compact.
+    excludes=[
+        'PyQt5',
+        'PyQt6',
+        'IPython',
+        'pytest',
+        'sphinx',
+        'docutils',
+        'matplotlib',
+        'black',
+        'astroid',
+        'jedi',
+        'nbformat',
+        'notebook',
+        'tkinter',
+    ],
     noarchive=False,
     optimize=0,
 )
