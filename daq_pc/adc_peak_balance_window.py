@@ -8,7 +8,7 @@ from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QAbstractSpinBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout, QFrame,
     QGridLayout, QHBoxLayout,
-    QLabel, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSpinBox,
+    QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSpinBox,
     QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -38,13 +38,13 @@ QLabel#manualAdvice { background:#fff7e8; border:1px solid #e0bd7b;
 QLabel#manualAdvice:hover { background:#fff1d3; border-color:#d5a64f; }
 QCheckBox#observeOnly { min-height:32px; spacing:8px; color:#195ca8;
     font-weight:700; }
-QComboBox, QSpinBox, QDoubleSpinBox { min-height:32px; padding:0 8px;
+QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit { min-height:32px; padding:0 8px;
     background:#ffffff; border:1px solid #cfd8e6; border-radius:6px;
     color:#172033; selection-color:#ffffff;
     selection-background-color:#2f6fcb; }
-QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QLineEdit:focus {
     border-color:#4b82cf; }
-QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {
+QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QLineEdit:disabled {
     background:#f0f2f5; border-color:#e0e5ec; color:#8993a4; }
 QComboBox::drop-down { border:0; width:28px; }
 QPushButton { min-height:34px; padding:0 16px; background:#ffffff;
@@ -119,8 +119,7 @@ PARAMETER_HELP = {
         "达到目标并连续满足峰间隔标准后，才允许自动使能FALC pro。\n\n"
         "本功能强制要求Scan Output为PC Voltage，因此单位为Vpp。"
         "软件允许范围：0.000001～1000000。默认：0.200000 Vpp；"
-        "目标不能大于启动Amplitude。若‘启动幅度最低保护’计算出的保护值更大，"
-        "软件采用两者中的较大值作为实际最终目标。"
+        "目标不能大于启动Amplitude；该显式目标就是阶梯缩幅的硬下限。"
     ),
     "无峰最大扩幅倍数": (
         "启动时以DLC pro当前Scan Amplitude为搜索起点。若没有检测到足够的00模穿越峰，"
@@ -239,8 +238,8 @@ class AdcPeakBalanceWindow(QMainWindow):
         self.advice_dialog: AdviceHistoryDialog | None = None
         self.falc_window_opener = falc_window_opener
         self.setWindowTitle("ADC 00模自动锁频")
-        self.resize(900, 690)
-        self.setMinimumSize(780, 620)
+        self.resize(1180, 820)
+        self.setMinimumSize(980, 700)
         self.setStyleSheet(PEAK_LOCK_STYLE)
 
         scroll = QScrollArea()
@@ -252,7 +251,7 @@ class AdcPeakBalanceWindow(QMainWindow):
 
         root = QWidget()
         root.setObjectName("peakLockRoot")
-        root.setMinimumHeight(1150)
+        root.setMinimumHeight(1450)
         scroll.setWidget(root)
         page = QVBoxLayout(root)
         page.setContentsMargins(20, 18, 20, 20)
@@ -346,19 +345,78 @@ class AdcPeakBalanceWindow(QMainWindow):
         self.balance_tolerance.setRange(0.1, 25.0)
         self.balance_tolerance.setValue(2.0)
         self.balance_tolerance.setSuffix(" %")
-        self._add_parameter_row(right, "Offset初始步长", self.offset_step)
         self._add_parameter_row(right, "Offset最小步长", self.min_offset_step)
         self._add_parameter_row(right, "启动Offset最大偏移", self.offset_range)
-        self._add_parameter_row(right, "Amplitude缩小比例", self.shrink_ratio)
         self._add_parameter_row(right, "最终扫频范围目标", self.target_amplitude)
         self._add_parameter_row(right, "无峰最大扩幅倍数", self.max_search_factor)
-        self._add_parameter_row(right, "启动幅度最低保护", self.min_fraction)
         self._add_parameter_row(right, "最小可靠幅度裕量", self.safety_margin)
-        self._add_parameter_row(right, "峰间隔目标", self.balance_tolerance)
         grid.addLayout(left, 0, 0)
         grid.addLayout(right, 0, 1)
-        config.setMinimumHeight(560)
+        config.setMinimumHeight(360)
         page.addWidget(config)
+
+        strategy = QFrame()
+        strategy.setObjectName("card")
+        strategy_box = QVBoxLayout(strategy)
+        strategy_box.setContentsMargins(16, 14, 16, 14)
+        strategy_title = QLabel("阶梯缩幅策略（PC Voltage，全部可配置）")
+        strategy_title.setStyleSheet("font-weight:700; font-size:15px;")
+        strategy_box.addWidget(strategy_title)
+        strategy_note = QLabel(
+            "每一级先达到本级不均匀度门槛和独立窗口数，再按倍率缩幅；"
+            "最终级不再缩幅。Offset反向减半时不会低于下一阶段步长。"
+        )
+        strategy_note.setObjectName("muted")
+        strategy_note.setWordWrap(True)
+        strategy_box.addWidget(strategy_note)
+        stage_grid = QGridLayout()
+        stage_grid.setHorizontalSpacing(9)
+        stage_grid.setVerticalSpacing(8)
+        for column, text in enumerate((
+            "阶段", "Amplitude下界(Vpp)", "允许不均匀度(%)",
+            "Offset步长(V)", "缩幅倍率", "独立窗口",
+        )):
+            header = QLabel(text)
+            header.setStyleSheet("font-weight:700; color:#475569;")
+            stage_grid.addWidget(header, 0, column)
+        self.strategy_edits = {}
+        stage_rows = (
+            ("coarse", "宽扫", "2.0", "20", "0.1", "0.70", "1"),
+            ("medium", "中扫", "1.0", "12", "0.05", "0.75", "2"),
+            ("fine", "细扫", "0.5", "8", "0.01", "0.75", "2"),
+            ("narrow", "窄扫", "最终目标", "6", "0.001", "0.80", "2"),
+            ("final", "最终验收", "最终目标", "5", "0.001", "不缩幅", "3"),
+        )
+        for row, values in enumerate(stage_rows, start=1):
+            key, name, boundary, tolerance, step, shrink, windows = values
+            stage_grid.addWidget(QLabel(name), row, 0)
+            for column, (field, value) in enumerate((
+                ("boundary", boundary), ("tolerance", tolerance),
+                ("step", step), ("shrink", shrink), ("windows", windows),
+            ), start=1):
+                if value in {"最终目标", "不缩幅"}:
+                    label = QLabel(value)
+                    label.setStyleSheet(
+                        "min-height:32px; padding:0 8px; color:#69758a; "
+                        "background:#f0f2f5; border:1px solid #e0e5ec; "
+                        "border-radius:6px;"
+                    )
+                    stage_grid.addWidget(label, row, column)
+                    continue
+                edit = QLineEdit(value)
+                edit.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                edit.setProperty("stageParameter", True)
+                edit.setToolTip({
+                    "boundary": "阶段边界必须依次满足：宽扫 > 中扫 > 细扫 > 最终目标。",
+                    "tolerance": "本阶段允许不均匀度，范围：大于0且小于50%。",
+                    "step": "本阶段Offset起始步长；必须不小于Offset绝对最小步长，且逐级不增大。",
+                    "shrink": "本阶段通过后Amplitude乘以该倍率，范围：0.20～0.99。",
+                    "windows": "必须由多少个完全独立的新数据窗口连续确认，范围：1～10。",
+                }[field])
+                self.strategy_edits[f"{key}_{field}"] = edit
+                stage_grid.addWidget(edit, row, column)
+        strategy_box.addLayout(stage_grid)
+        page.addWidget(strategy)
 
         status = QFrame()
         status.setObjectName("card")
@@ -385,7 +443,12 @@ class AdcPeakBalanceWindow(QMainWindow):
         step_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         status_grid.addWidget(step_label, 6, 1, 1, 3)
         self.values["step"] = step_label
-        status_grid.addWidget(QLabel("人工操作建议"), 7, 0, Qt.AlignTop)
+        status_grid.addWidget(QLabel("当前阶梯"), 7, 0)
+        stage_label = QLabel("--")
+        stage_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        status_grid.addWidget(stage_label, 7, 1, 1, 3)
+        self.values["stage"] = stage_label
+        status_grid.addWidget(QLabel("人工操作建议"), 8, 0, Qt.AlignTop)
         self.manual_advice_label = ClickableAdviceLabel(
             "开始观察后，这里会给出保持、修改Offset或修改Amplitude的具体建议。"
         )
@@ -395,7 +458,7 @@ class AdcPeakBalanceWindow(QMainWindow):
         self.manual_advice_label.setCursor(Qt.PointingHandCursor)
         self.manual_advice_label.setToolTip("点击打开完整建议与历史记录")
         self.manual_advice_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        status_grid.addWidget(self.manual_advice_label, 7, 1, 1, 3)
+        status_grid.addWidget(self.manual_advice_label, 8, 1, 1, 3)
         page.addWidget(status)
 
         controls = QHBoxLayout()
@@ -495,21 +558,56 @@ class AdcPeakBalanceWindow(QMainWindow):
         )
 
     def current_settings(self) -> PeakBalanceSettings:
+        def stage_float(key: str) -> float:
+            text = self.strategy_edits[key].text().strip().replace("％", "%")
+            return float(text.rstrip("% "))
+
+        def stage_int(key: str) -> int:
+            value = stage_float(key)
+            if not value.is_integer():
+                raise ValueError("阶梯策略的独立窗口数必须是整数")
+            return int(value)
+
+        coarse_step = stage_float("coarse_step")
+        medium_shrink = stage_float("medium_shrink")
+        final_tolerance = stage_float("final_tolerance") / 100.0
+        final_windows = stage_int("final_windows")
         return PeakBalanceSettings(
             channel=str(self.channel.currentData()),
             polarity=str(self.polarity.currentData()),
             min_prominence_codes=float(self.min_prominence.value()),
             noise_sigma=float(self.noise_sigma.value()),
             carrier_dominance_ratio=float(self.dominance.value()),
-            offset_step=float(self.offset_step.value()),
+            offset_step=coarse_step,
             min_offset_step=float(self.min_offset_step.value()),
             max_offset_deviation=float(self.offset_range.value()),
-            shrink_ratio=float(self.shrink_ratio.value()),
+            shrink_ratio=medium_shrink,
             target_amplitude=float(self.target_amplitude.value()),
             max_search_amplitude_factor=float(self.max_search_factor.value()),
             min_amplitude_fraction=float(self.min_fraction.value()) / 100.0,
             safety_margin=float(self.safety_margin.value()) / 100.0,
-            balance_tolerance=float(self.balance_tolerance.value()) / 100.0,
+            balance_tolerance=final_tolerance,
+            stable_windows=final_windows,
+            coarse_boundary=stage_float("coarse_boundary"),
+            medium_boundary=stage_float("medium_boundary"),
+            fine_boundary=stage_float("fine_boundary"),
+            coarse_tolerance=stage_float("coarse_tolerance") / 100.0,
+            medium_tolerance=stage_float("medium_tolerance") / 100.0,
+            fine_tolerance=stage_float("fine_tolerance") / 100.0,
+            narrow_tolerance=stage_float("narrow_tolerance") / 100.0,
+            coarse_step=coarse_step,
+            medium_step=stage_float("medium_step"),
+            fine_step=stage_float("fine_step"),
+            narrow_step=stage_float("narrow_step"),
+            final_step=stage_float("final_step"),
+            coarse_shrink=stage_float("coarse_shrink"),
+            medium_shrink=medium_shrink,
+            fine_shrink=stage_float("fine_shrink"),
+            narrow_shrink=stage_float("narrow_shrink"),
+            coarse_windows=stage_int("coarse_windows"),
+            medium_windows=stage_int("medium_windows"),
+            fine_windows=stage_int("fine_windows"),
+            narrow_windows=stage_int("narrow_windows"),
         ).validated()
 
     def _start(self):
@@ -547,6 +645,8 @@ class AdcPeakBalanceWindow(QMainWindow):
             self.safety_margin, self.balance_tolerance,
         ):
             widget.setEnabled(not running)
+        for edit in self.strategy_edits.values():
+            edit.setEnabled(not running)
 
     def _mode_changed(self):
         observing = self.observe_only.isChecked()
@@ -608,6 +708,13 @@ class AdcPeakBalanceWindow(QMainWindow):
             f"{float(data.get('offset_step', 0.0)):.6f} · "
             f"{data.get('step_profile', '用户设定')}"
         )
+        shrink = data.get("stage_shrink")
+        shrink_text = "不再缩幅" if shrink is None else f"×{float(shrink):.2f}"
+        self.values["stage"].setText(
+            f"{data.get('stage_name', '--')} / 门槛≤"
+            f"{float(data.get('stage_tolerance', 0.0)) * 100:.2f}% / "
+            f"{shrink_text} / 连续{int(data.get('stage_windows', 0))}个独立窗口"
+        )
         advice = str(
             data.get("manual_advice") or data.get("message") or "--"
         )
@@ -666,6 +773,25 @@ class AdcPeakBalanceWindow(QMainWindow):
         )
         for widget, key, default in numeric:
             widget.setValue(float(s.value(key, default)))
+        stage_defaults = {
+            "coarse_boundary": "2.0", "medium_boundary": "1.0",
+            "fine_boundary": "0.5",
+            "coarse_tolerance": "20", "medium_tolerance": "12",
+            "fine_tolerance": "8", "narrow_tolerance": "6",
+            "final_tolerance": "5",
+            "coarse_step": "0.1", "medium_step": "0.05",
+            "fine_step": "0.01", "narrow_step": "0.001",
+            "final_step": "0.001",
+            "coarse_shrink": "0.70", "medium_shrink": "0.75",
+            "fine_shrink": "0.75", "narrow_shrink": "0.80",
+            "coarse_windows": "1", "medium_windows": "2",
+            "fine_windows": "2", "narrow_windows": "2",
+            "final_windows": "3",
+        }
+        for key, default in stage_defaults.items():
+            self.strategy_edits[key].setText(
+                str(s.value(f"peak_lock/stage/{key}", default))
+            )
 
     def _save_ui_settings(self):
         s = self.settings_store
@@ -688,6 +814,8 @@ class AdcPeakBalanceWindow(QMainWindow):
             (self.balance_tolerance, "peak_lock/balance_tolerance"),
         ):
             s.setValue(key, widget.value())
+        for key, edit in self.strategy_edits.items():
+            s.setValue(f"peak_lock/stage/{key}", edit.text().strip())
         s.sync()
 
     def closeEvent(self, event):

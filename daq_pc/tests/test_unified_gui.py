@@ -672,15 +672,11 @@ class UnifiedGuiTest(unittest.TestCase):
             (panel.min_prominence, "120", 120.0),
             (panel.noise_sigma, "7.5", 7.5),
             (panel.dominance, "2.50", 2.5),
-            (panel.offset_step, "0.020000", 0.02),
             (panel.min_offset_step, "0.001000", 0.001),
             (panel.offset_range, "0.350000", 0.35),
-            (panel.shrink_ratio, "0.80", 0.8),
             (panel.target_amplitude, "0.200000", 0.2),
             (panel.max_search_factor, "2.50", 2.5),
-            (panel.min_fraction, "6.00", 6.0),
             (panel.safety_margin, "30.00", 30.0),
-            (panel.balance_tolerance, "2.50", 2.5),
         )
         panel.show()
         self.app.processEvents()
@@ -704,17 +700,17 @@ class UnifiedGuiTest(unittest.TestCase):
         # Clicking in the text must place a normal caret instead of forcing
         # the complete value to remain selected. A single digit can then be
         # replaced without deleting and retyping the whole parameter.
-        editor = panel.shrink_ratio.lineEdit()
+        editor = panel.strategy_edits["medium_shrink"]
         editor.setFocus()
         editor.selectAll()
         QTest.mouseClick(editor, Qt.LeftButton, pos=editor.rect().center())
         self.app.processEvents()
         self.assertEqual(editor.selectedText(), "")
-        editor.setCursorPosition(len(editor.text()) - 1)
+        editor.setCursorPosition(2)
         QTest.keyClick(editor, Qt.Key_Delete)
-        QTest.keyClicks(editor, "5")
+        QTest.keyClicks(editor, "8")
         QTest.keyClick(editor, Qt.Key_Return)
-        self.assertAlmostEqual(panel.shrink_ratio.value(), 0.85)
+        self.assertEqual(editor.text(), "0.85")
 
         with mock.patch.object(QMessageBox, "information") as information:
             panel.save_button.click()
@@ -722,8 +718,11 @@ class UnifiedGuiTest(unittest.TestCase):
         self.assertAlmostEqual(
             float(self.settings.value("peak_lock/offset_range")), 0.35
         )
+        self.assertEqual(
+            str(self.settings.value("peak_lock/stage/medium_shrink")), "0.85"
+        )
 
-        self.assertEqual(len(panel.parameter_info_buttons), 14)
+        self.assertEqual(len(panel.parameter_info_buttons), 10)
         with mock.patch.object(QMessageBox, "information") as information:
             panel.parameter_info_buttons["启动Offset最大偏移"].click()
         message = information.call_args.args[2]
@@ -732,14 +731,16 @@ class UnifiedGuiTest(unittest.TestCase):
 
         configurable = (
             panel.channel, panel.polarity, panel.min_prominence,
-            panel.noise_sigma, panel.dominance, panel.offset_step,
-            panel.min_offset_step, panel.offset_range, panel.shrink_ratio,
+            panel.noise_sigma, panel.dominance,
+            panel.min_offset_step, panel.offset_range,
             panel.target_amplitude, panel.max_search_factor,
-            panel.min_fraction,
-            panel.safety_margin, panel.balance_tolerance,
+            panel.safety_margin,
         )
         panel._running_changed(True)
         self.assertTrue(all(not widget.isEnabled() for widget in configurable))
+        self.assertTrue(all(
+            not edit.isEnabled() for edit in panel.strategy_edits.values()
+        ))
         self.assertFalse(panel.save_button.isEnabled())
         self.assertTrue(all(
             button.isEnabled()
@@ -747,6 +748,9 @@ class UnifiedGuiTest(unittest.TestCase):
         ))
         panel._running_changed(False)
         self.assertTrue(all(widget.isEnabled() for widget in configurable))
+        self.assertTrue(all(
+            edit.isEnabled() for edit in panel.strategy_edits.values()
+        ))
         self.assertTrue(panel.save_button.isEnabled())
         window.close()
 

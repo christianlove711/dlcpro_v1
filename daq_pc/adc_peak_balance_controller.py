@@ -220,6 +220,14 @@ class AdcPeakBalanceController(QObject):
                         f"Amplitude {self.engine.current_amplitude:.6f} → {amplitude:.6f}"
                     )
                 self.engine.sync(offset, amplitude)
+                # A manual parameter change starts a new control experiment.
+                # Never carry a confirmation count or direction comparison
+                # across different Offset/Amplitude values.
+                self.engine.stable_count = 0
+                self.engine.previous_error = None
+                self.engine.previous_offset = offset
+                if amplitude_changed:
+                    self.engine.finalized = False
                 self.scan_unit = str(
                     getattr(snapshot, "sc_unit", self.scan_unit) or ""
                 ).strip()
@@ -336,24 +344,34 @@ class AdcPeakBalanceController(QObject):
             engine.fingerprint.update(observation)
         engine.last_good_amplitude = engine.current_amplitude
 
-        if observation.balance_error <= settings.balance_tolerance:
+        stage = engine.current_stage
+        if observation.balance_error <= stage.balance_tolerance:
             engine.stable_count += 1
             engine.previous_error = observation.balance_error
             engine.previous_offset = engine.current_offset
-            if engine.stable_count >= settings.stable_windows:
+            if engine.stable_count >= stage.stable_windows:
+                if stage.shrink_ratio is None:
+                    self.manual_advice = (
+                        f"已连续{stage.stable_windows}个独立窗口达到最终验收标准："
+                        f"Amplitude={engine.current_amplitude:.6f} Vpp，"
+                        f"不均匀度≤{stage.balance_tolerance * 100:.2f}%。"
+                        "观察模式不会关闭Scan或使能FALC pro；保持当前参数即可验证稳定性。"
+                    )
+                    return ControlAction("none", None, self.manual_advice, "observe")
                 target = max(
                     engine.amplitude_floor,
-                    engine.current_amplitude * settings.shrink_ratio,
+                    engine.current_amplitude * stage.shrink_ratio,
                 )
                 if target >= engine.current_amplitude * 0.999:
                     self.manual_advice = (
-                        f"已连续{settings.stable_windows}个独立窗口居中，且Scan "
+                        f"已连续{stage.stable_windows}个独立窗口居中，且Scan "
                         f"Amplitude已达到最终目标 {engine.amplitude_floor:.6f} Vpp。"
                         "观察模式不会使能FALC pro；可保持当前参数验证稳定性。"
                     )
                 else:
                     self.manual_advice = (
-                        f"已连续{settings.stable_windows}个独立窗口居中。"
+                        f"{stage.name}已连续{stage.stable_windows}个独立窗口通过"
+                        f"（门槛≤{stage.balance_tolerance * 100:.2f}%）。"
                         "下一步进入缩幅：请把 Scan Amplitude 从 "
                         f"{engine.current_amplitude:.6f} Vpp 调到 {target:.6f} Vpp，"
                         "然后保持不动等待4个周期；之后会重新居中并继续缩幅，"
@@ -361,8 +379,9 @@ class AdcPeakBalanceController(QObject):
                     )
             else:
                 self.manual_advice = (
-                    f"峰间隔已合格，正在用独立窗口复核 "
-                    f"{engine.stable_count}/{settings.stable_windows}。"
+                    f"{stage.name}峰间隔已合格（门槛≤"
+                    f"{stage.balance_tolerance * 100:.2f}%），正在用独立窗口复核 "
+                    f"{engine.stable_count}/{stage.stable_windows}。"
                     "现在不要调节，等待下一批4个周期。"
                 )
             return ControlAction("none", None, self.manual_advice, "observe")
@@ -371,7 +390,7 @@ class AdcPeakBalanceController(QObject):
         previous_error = engine.previous_error
         previous_offset = engine.previous_offset
         offset_delta = engine.current_offset - previous_offset
-        minimum_step = settings.min_offset_step
+        minimum_step = stage.min_offset_step
         if previous_error is None or abs(offset_delta) < 1e-12:
             direction = engine.direction
             step = engine.step_size
@@ -427,26 +446,14 @@ class AdcPeakBalanceController(QObject):
             time.monotonic() + self.required_cycles / self.scan_frequency
         )
 
-    @staticmethod
-    def _operator_step_for_amplitude(
-        amplitude: float, unit: str, fallback: float
-    ) -> tuple[float, str]:
-        """Apply the operator's verified voltage-scan tuning gears only to V."""
-        normalized_unit = str(unit or "").strip().lower().replace(" ", "")
-        if normalized_unit not in {"v", "vpp", "volt", "volts"}:
-            return float(fallback), "用户设定"
-        amplitude = abs(float(amplitude))
-        if amplitude <= 0.5 + 1e-12:
-            return 0.001, "细调（Amplitude≤0.5 Vpp）"
-        if amplitude <= 1.0 + 1e-12:
-            return 0.01, "中调（Amplitude≤1 Vpp）"
-        return 0.1, "粗调（Amplitude>1 Vpp）"
-
     def _apply_amplitude_step_profile(
         self, engine: PeakBalanceEngine, unit: str
     ) -> None:
-        step, profile = self._operator_step_for_amplitude(
-            engine.current_amplitude, unit, engine.settings.offset_step
+        stage = engine.current_stage
+        step = stage.offset_step
+        profile = (
+            f"{stage.name}（允许不均匀度≤{stage.balance_tolerance * 100:.2f}%，"
+            f"连续{stage.stable_windows}个独立窗口）"
         )
         changed = engine.set_offset_step(step)
         self.step_profile = profile
@@ -588,6 +595,7 @@ class AdcPeakBalanceController(QObject):
     def _emit_status(self, observation: PeakObservation,
                      action: ControlAction | None = None) -> None:
         engine = self.engine
+        stage = engine.current_stage if engine is not None else None
         self.status_changed.emit({
             "running": self.running,
             "state": action.state if action is not None else (
@@ -611,6 +619,12 @@ class AdcPeakBalanceController(QObject):
                 engine.step_size if engine is not None else 0.0
             ),
             "step_profile": self.step_profile,
+            "stage_name": stage.name if stage is not None else "--",
+            "stage_tolerance": (
+                stage.balance_tolerance if stage is not None else 0.0
+            ),
+            "stage_windows": stage.stable_windows if stage is not None else 0,
+            "stage_shrink": stage.shrink_ratio if stage is not None else None,
             "manual_advice": self.manual_advice,
         })
 

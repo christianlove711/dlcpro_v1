@@ -10,6 +10,16 @@ import numpy as np
 Polarity = Literal["auto", "positive", "negative"]
 
 
+@dataclass(frozen=True, slots=True)
+class AmplitudeStage:
+    name: str
+    balance_tolerance: float
+    offset_step: float
+    min_offset_step: float
+    shrink_ratio: float | None
+    stable_windows: int
+
+
 @dataclass(slots=True)
 class PeakBalanceSettings:
     channel: str = "A"
@@ -25,8 +35,28 @@ class PeakBalanceSettings:
     max_search_amplitude_factor: float = 2.0
     min_amplitude_fraction: float = 0.05
     safety_margin: float = 0.25
-    balance_tolerance: float = 0.02
+    balance_tolerance: float = 0.05
     stable_windows: int = 3
+    coarse_boundary: float = 2.0
+    medium_boundary: float = 1.0
+    fine_boundary: float = 0.5
+    coarse_tolerance: float = 0.20
+    medium_tolerance: float = 0.12
+    fine_tolerance: float = 0.08
+    narrow_tolerance: float = 0.06
+    coarse_step: float = 0.1
+    medium_step: float = 0.05
+    fine_step: float = 0.01
+    narrow_step: float = 0.001
+    final_step: float = 0.001
+    coarse_shrink: float = 0.70
+    medium_shrink: float = 0.75
+    fine_shrink: float = 0.75
+    narrow_shrink: float = 0.80
+    coarse_windows: int = 1
+    medium_windows: int = 2
+    fine_windows: int = 2
+    narrow_windows: int = 2
 
     def validated(self) -> "PeakBalanceSettings":
         channel = str(self.channel).upper()
@@ -51,7 +81,64 @@ class PeakBalanceSettings:
             raise ValueError("00模/次峰强度比必须大于1")
         if not 0.0 < self.balance_tolerance < 0.5:
             raise ValueError("峰间隔容差必须位于0到0.5之间")
+        if not (self.coarse_boundary > self.medium_boundary
+                > self.fine_boundary > self.target_amplitude):
+            raise ValueError("阶梯幅度边界必须满足：宽扫>中扫>细扫>最终目标")
+        for value in (
+            self.coarse_tolerance, self.medium_tolerance,
+            self.fine_tolerance, self.narrow_tolerance,
+        ):
+            if not 0.0 < value < 0.5:
+                raise ValueError("各阶段允许不均匀度必须位于0到50%之间")
+        for value in (
+            self.coarse_step, self.medium_step,
+            self.fine_step, self.narrow_step, self.final_step,
+        ):
+            if value < self.min_offset_step:
+                raise ValueError("各阶段Offset步长不能小于Offset绝对最小步长")
+        if not (self.coarse_step >= self.medium_step >= self.fine_step
+                >= self.narrow_step >= self.final_step):
+            raise ValueError("Offset步长必须随缩幅阶段逐级减小或保持不变")
+        for value in (
+            self.coarse_shrink, self.medium_shrink,
+            self.fine_shrink, self.narrow_shrink,
+        ):
+            if not 0.2 <= value < 1.0:
+                raise ValueError("各阶段缩幅倍率必须位于0.2到1之间")
+        for value in (
+            self.coarse_windows, self.medium_windows,
+            self.fine_windows, self.narrow_windows, self.stable_windows,
+        ):
+            if not 1 <= int(value) <= 10:
+                raise ValueError("各阶段连续确认窗口必须位于1到10之间")
         return replace(self, channel=channel)
+
+    def stage_for(self, amplitude: float, amplitude_floor: float) -> AmplitudeStage:
+        amplitude = abs(float(amplitude))
+        if amplitude <= amplitude_floor * 1.001:
+            return AmplitudeStage(
+                "最终验收", self.balance_tolerance, self.final_step,
+                self.min_offset_step, None, self.stable_windows,
+            )
+        if amplitude > self.coarse_boundary:
+            return AmplitudeStage(
+                "宽扫", self.coarse_tolerance, self.coarse_step,
+                self.medium_step, self.coarse_shrink, self.coarse_windows,
+            )
+        if amplitude > self.medium_boundary:
+            return AmplitudeStage(
+                "中扫", self.medium_tolerance, self.medium_step,
+                self.fine_step, self.medium_shrink, self.medium_windows,
+            )
+        if amplitude > self.fine_boundary:
+            return AmplitudeStage(
+                "细扫", self.fine_tolerance, self.fine_step,
+                self.narrow_step, self.fine_shrink, self.fine_windows,
+            )
+        return AmplitudeStage(
+            "窄扫", self.narrow_tolerance, self.narrow_step,
+            self.min_offset_step, self.narrow_shrink, self.narrow_windows,
+        )
 
 
 @dataclass(slots=True)
@@ -300,15 +387,16 @@ class PeakBalanceEngine:
 
     @property
     def amplitude_floor(self) -> float:
-        """Never shrink below either the absolute target or safety fraction."""
-        return max(
-            self.settings.target_amplitude,
-            self.start_amplitude * self.settings.min_amplitude_fraction,
-        )
+        """The explicit operator target is the hard staged-control floor."""
+        return self.settings.target_amplitude
 
     @property
     def search_amplitude_ceiling(self) -> float:
         return self.start_amplitude * self.settings.max_search_amplitude_factor
+
+    @property
+    def current_stage(self) -> AmplitudeStage:
+        return self.settings.stage_for(self.current_amplitude, self.amplitude_floor)
 
     def start(self, offset: float, amplitude: float) -> None:
         if abs(amplitude) <= 1e-12:
@@ -326,7 +414,10 @@ class PeakBalanceEngine:
 
     def set_offset_step(self, step: float) -> bool:
         """Switch the amplitude-dependent tuning gear without carrying old probes."""
-        step = max(float(step), self.settings.min_offset_step)
+        step = max(
+            float(step), self.settings.min_offset_step,
+            self.current_stage.min_offset_step,
+        )
         if step <= 0:
             raise ValueError("Offset步长必须大于0")
         if abs(step - self.base_step_size) <= 1e-12:
@@ -360,6 +451,7 @@ class PeakBalanceEngine:
 
     def update(self, observation: PeakObservation) -> ControlAction:
         s = self.settings
+        stage = self.current_stage
         if (observation.ambiguous
                 and self.state not in {"verify_shrink", "refine"}):
             self.ambiguous_count += 1
@@ -401,7 +493,14 @@ class PeakBalanceEngine:
                 observation.prominence, observation.width_seconds,
                 observation.polarity,
             )
-            return self._begin_centering(observation)
+            if observation.balance_error > stage.balance_tolerance:
+                return self._begin_centering(observation)
+            # A safely centered initial window may enter the stage
+            # confirmation directly; a blind direction probe is unnecessary.
+            self.previous_error = observation.balance_error
+            self.previous_offset = self.current_offset
+            self.stable_count = 0
+            self.state = "center"
 
         if not observation.valid:
             if self.state in {"verify_shrink", "center", "probe", "track"}:
@@ -449,7 +548,7 @@ class PeakBalanceEngine:
             if not improved:
                 self.direction = -1.0
                 self.step_size = max(
-                    s.min_offset_step, self.step_size / 2.0
+                    stage.min_offset_step, self.step_size / 2.0
                 )
                 return self._offset_action(
                     self.previous_offset - self.step_size,
@@ -460,21 +559,26 @@ class PeakBalanceEngine:
             self.state = "center"
 
         if self.state in {"center", "track"}:
-            if observation.balance_error <= s.balance_tolerance:
+            if observation.balance_error <= stage.balance_tolerance:
                 self.stable_count += 1
                 self.bad_track_count = 0
-                if self.stable_count < s.stable_windows:
+                if self.stable_count < stage.stable_windows:
                     return self._action(
                         "none", None,
-                        f"峰间隔稳定确认 {self.stable_count}/{s.stable_windows}",
+                        f"{stage.name}峰间隔确认 "
+                        f"{self.stable_count}/{stage.stable_windows}",
                     )
                 self.stable_count = 0
-                if self.finalized:
-                    return self._action("none", None, "00模均衡保持", "track")
+                if stage.shrink_ratio is None:
+                    self.finalized = True
+                    return self._action(
+                        "none", None,
+                        "最终幅度与峰间隔连续通过，允许FALC接管", "track",
+                    )
                 self.last_good_amplitude = self.current_amplitude
                 target = max(
                     self.amplitude_floor,
-                    self.current_amplitude * s.shrink_ratio,
+                    self.current_amplitude * stage.shrink_ratio,
                 )
                 if target >= self.current_amplitude * 0.999:
                     self.finalized = True
@@ -495,7 +599,7 @@ class PeakBalanceEngine:
                     and observation.balance_error > self.previous_error * 1.05):
                 self.direction *= -1.0
                 self.step_size = max(
-                    s.min_offset_step, self.step_size / 2.0
+                    stage.min_offset_step, self.step_size / 2.0
                 )
             self.previous_error = observation.balance_error
             return self._offset_action(
@@ -564,7 +668,6 @@ class PeakBalanceEngine:
 
     def _refine_action(self) -> ControlAction:
         if self.fail_amplitude is None:
-            self.finalized = True
             return self._action("none", None, "最小可靠幅度无需二分", "track")
         self.refine_attempt += 1
         good = self.last_good_amplitude
@@ -574,7 +677,6 @@ class PeakBalanceEngine:
                 self.amplitude_floor,
                 min(good, fail * (1.0 + self.settings.safety_margin)),
             )
-            self.finalized = True
             if abs(operating - self.current_amplitude) <= 1e-12:
                 return self._action("none", None, "进入最小可靠幅度保持", "track")
             return self._action(
