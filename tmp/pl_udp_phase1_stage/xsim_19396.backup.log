@@ -1,0 +1,31 @@
+#-----------------------------------------------------------
+# xsim v2020.2 (64-bit)
+# SW Build 3064766 on Wed Nov 18 09:12:45 MST 2020
+# IP Build 3064653 on Wed Nov 18 14:17:31 MST 2020
+# Start of session at: Wed Jul 29 21:06:49 2026
+# Process ID: 19396
+# Current directory: C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage
+# Command line: xsim.exe -mode tcl -source {xsim.dir/sim_raw_bram/xsim_script.tcl}
+# Log file: C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/xsim.log
+# Journal file: C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage\xsim.jou
+#-----------------------------------------------------------
+source xsim.dir/sim_raw_bram/xsim_script.tcl
+# xsim {sim_raw_bram} -autoloadwcfg -runall
+Vivado Simulator 2020.2
+Time resolution is 1 ps
+run -all
+WAIT packet bytes=80 time=875000 fifo=0 stream=1
+GOT packet bytes=80 time=901000 fifo=0
+mono pushed time=15180000 fifo=0
+WAIT packet bytes=1448 time=15180000 fifo=0 stream=1
+GOT packet bytes=1448 time=15253000 fifo=0
+dual pushed time=21900000 fifo=1
+WAIT packet bytes=1448 time=21900000 fifo=1 stream=2
+GOT packet bytes=1448 time=21973000 fifo=0
+jumbo pushed time=45580000 fifo=1
+WAIT packet bytes=8232 time=45580000 fifo=1 stream=3
+GOT packet bytes=8232 time=45653000 fifo=0
+PASS: DAQS extension, U8/S16 payload order, standard/jumbo MTU, stream and sequence
+$finish called at time : 62148 ns : File "C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/tb_pl_raw_udp_streamer.sv" Line 123
+exit
+INFO: [Common 17-206] Exiting xsim at Wed Jul 29 21:06:53 2026...

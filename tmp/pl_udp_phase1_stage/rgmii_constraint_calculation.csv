@@ -1,0 +1,4 @@
+direction,quantity,base_min_ns,base_max_ns,pcb_skew_budget_ns,candidate_min_ns,candidate_max_ns,status
+RX,input_delay,-2.8,-1.2,0.5,-3.3,-0.7,PROVISIONAL_WAITING_FOR_PCB_LENGTHS
+TX,output_delay,-2.6,-1.0,0.5,-3.1,-0.5,PROVISIONAL_WAITING_FOR_PCB_LENGTHS
+

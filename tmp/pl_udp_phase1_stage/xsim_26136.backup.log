@@ -1,0 +1,20 @@
+#-----------------------------------------------------------
+# xsim v2020.2 (64-bit)
+# SW Build 3064766 on Wed Nov 18 09:12:45 MST 2020
+# IP Build 3064653 on Wed Nov 18 14:17:31 MST 2020
+# Start of session at: Wed Jul 29 21:06:39 2026
+# Process ID: 26136
+# Current directory: C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage
+# Command line: xsim.exe -mode tcl -source {xsim.dir/sim_gap_bram/xsim_script.tcl}
+# Log file: C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/xsim.log
+# Journal file: C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage\xsim.jou
+#-----------------------------------------------------------
+source xsim.dir/sim_gap_bram/xsim_script.tcl
+# xsim {sim_gap_bram} -autoloadwcfg -runall
+Vivado Simulator 2020.2
+Time resolution is 1 ps
+run -all
+PASS: FIFO-full gap position, packet continuity, 64-bit wrap, and STOP/START flush
+$finish called at time : 32428 ns : File "C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/tb_pl_monitor_gap_index.sv" Line 116
+exit
+INFO: [Common 17-206] Exiting xsim at Wed Jul 29 21:06:43 2026...

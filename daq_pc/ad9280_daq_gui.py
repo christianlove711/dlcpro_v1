@@ -6,6 +6,7 @@ import struct
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import serial
@@ -31,7 +32,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from daq_protocol import (
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from daq_pc.daq_protocol import (
     DATA_PORT,
     FLAG_DMA_ERROR,
     FLAG_FIFO_FULL,
@@ -40,7 +44,8 @@ from daq_protocol import (
     FLAG_RUNNING,
     Command,
 )
-from daq_udp import ControlClient, SampleRingBuffer, UdpReceiver
+from daq_pc.daq_qt import UdpReceiver
+from daq_pc.daq_udp import ControlClient, SampleRingBuffer
 
 
 TIMEBASES = [
@@ -265,7 +270,7 @@ class MainWindow(QMainWindow):
         self.backend_combo = QComboBox()
         self.backend_combo.addItem("UDP 高速", "udp")
         self.backend_combo.addItem("UART 诊断", "uart")
-        self.board_ip = QLineEdit("192.168.10.2")
+        self.board_ip = QLineEdit("192.168.20.2")
         self.port_combo = QComboBox()
         self.refresh_button = QPushButton("刷新")
         self.baud_combo = QComboBox()
@@ -472,7 +477,11 @@ class MainWindow(QMainWindow):
             return
 
         self.ring.clear()
-        self.receiver = UdpReceiver(self.ring, DATA_PORT)
+        self.receiver = UdpReceiver(
+            self.ring,
+            DATA_PORT,
+            board_ip=self.board_ip.text().strip(),
+        )
         self.receiver.metrics.connect(self.update_metrics)
         self.receiver.failed.connect(self.receiver_failed)
         self.receiver.start()
@@ -710,11 +719,13 @@ QStatusBar { background: #eef1f5; color: #526075; }
 
 
 def main():
-    app = QApplication(sys.argv)
-    app.setApplicationName("AD9280 Continuous DAQ")
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec())
+    # Compatibility launcher: all new operation uses the unified GUI.
+    try:
+        from daq_pc.unified_daq_gui import main as unified_main
+    except ModuleNotFoundError:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from daq_pc.unified_daq_gui import main as unified_main
+    raise SystemExit(unified_main(preset_model=0))
 
 
 if __name__ == "__main__":

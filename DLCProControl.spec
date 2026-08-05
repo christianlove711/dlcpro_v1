@@ -5,7 +5,7 @@ a = Analysis(
     ['app.py'],
     pathex=[],
     binaries=[],
-    datas=[('auto_lock_presets.json', '.')],
+    datas=[('auto_lock_algorithm_presets.json', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

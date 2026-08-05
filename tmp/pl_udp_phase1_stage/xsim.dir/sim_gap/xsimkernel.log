@@ -1,0 +1,7 @@
+Running: xsim.dir/sim_gap/xsimk.exe -runall -simmode gui -wdb sim_gap.wdb -simrunnum 0 -socket 49676
+Design successfully loaded
+Design Loading Memory Usage: 8140 KB (Peak: 8140 KB)
+Design Loading CPU Usage: 15 ms
+Simulation completed
+Simulation Memory Usage: 8736 KB (Peak: 8736 KB)
+Simulation CPU Usage: 31 ms

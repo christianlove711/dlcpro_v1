@@ -1,0 +1,12 @@
+#-----------------------------------------------------------
+# Webtalk v2020.2 (64-bit)
+# SW Build 3064766 on Wed Nov 18 09:12:45 MST 2020
+# IP Build 3064653 on Wed Nov 18 14:17:31 MST 2020
+# Start of session at: Wed Jul 29 21:30:42 2026
+# Process ID: 18088
+# Current directory: C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage
+# Command line: wbtcv.exe -mode batch -source C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/xsim.dir/sim_gap_final/webtalk/xsim_webtalk.tcl -notrace
+# Log file: C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/webtalk.log
+# Journal file: C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage\webtalk.jou
+#-----------------------------------------------------------
+source C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/xsim.dir/sim_gap_final/webtalk/xsim_webtalk.tcl -notrace

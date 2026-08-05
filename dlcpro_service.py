@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace
+from enum import Enum
 from threading import RLock
 
 try:
@@ -23,6 +24,35 @@ class ConnectionSettings:
     target: str
     baudrate: int = 115200
     timeout: int = 5
+    command_line_port: int = 1998
+    monitoring_line_port: int = 1999
+
+
+class SnapshotSection(str, Enum):
+    CORE = "core"
+    LASER = "laser"
+    SCAN_LOCK = "scan_lock"
+    FALC = "falc"
+    RELOCK = "relock"
+    STABILIZATION = "stabilization"
+    ALL = "all"
+
+
+@dataclass(frozen=True, slots=True)
+class SnapshotRequest:
+    sections: frozenset[SnapshotSection]
+
+    @classmethod
+    def full(cls) -> "SnapshotRequest":
+        return cls(frozenset({SnapshotSection.ALL}))
+
+    @classmethod
+    def core(cls) -> "SnapshotRequest":
+        return cls(frozenset({SnapshotSection.CORE}))
+
+    @classmethod
+    def for_sections(cls, *sections: SnapshotSection) -> "SnapshotRequest":
+        return cls(frozenset(sections))
 
 
 @dataclass(slots=True)
@@ -91,46 +121,6 @@ class StabilizationSnapshot:
     window_enabled: bool
     window_level_low: float
     window_level_hysteresis: float
-
-
-@dataclass(slots=True)
-class LockPointSnapshot:
-    x: float
-    y: float
-
-
-@dataclass(slots=True)
-class AutoLockTelemetry:
-    sc_enabled: bool
-    sc_offset: float
-    sc_unit: str
-    lock_enabled: bool
-    lock_without_lockpoint: bool
-    lock_state: int | None
-    candidates: tuple[LockPointSnapshot, ...]
-    selected: LockPointSnapshot | None
-    tracking: LockPointSnapshot | None
-    scope: "AutoLockScopeSnapshot | None"
-    scope_error: str | None
-
-
-@dataclass(slots=True)
-class AutoLockScopeSnapshot:
-    variant: int
-    update_rate: int
-    channel1_signal: int
-    channel2_signal: int
-    x_name: str
-    x_unit: str
-    y_name: str
-    y_unit: str
-    y2_name: str
-    y2_unit: str
-    x_values: tuple[float, ...]
-    y_values: tuple[float, ...]
-    y2_values: tuple[float, ...]
-    background_x: tuple[float, ...]
-    background_y: tuple[float, ...]
 
 
 @dataclass(slots=True)
@@ -261,6 +251,8 @@ class DlcProService:
         self._lock = RLock()
         self._device: DLCpro | None = None
         self._settings: ConnectionSettings | None = None
+        self._snapshot_cache: DeviceSnapshot | None = None
+        self._unavailable_sections: set[SnapshotSection] = set()
 
     @property
     def is_connected(self) -> bool:
@@ -275,11 +267,24 @@ class DlcProService:
             device = DLCpro(connection)
             try:
                 device.open()
+                self._device = device
+                # Do not make optional hardware modules a prerequisite for a
+                # valid connection.  Start with a neutral cache and read only
+                # the core parameters; feature pages are refreshed on demand.
+                self._snapshot_cache = self._empty_snapshot(settings)
+                return self._read_snapshot_request_unlocked(SnapshotRequest.core())
             except Exception:
-                device.close()
+                # Transport setup and the initial parameter snapshot form one
+                # connection operation.  A rejected snapshot must not leave a
+                # half-connected service behind (for example DECoP error -22).
+                try:
+                    device.close()
+                finally:
+                    self._device = None
+                    self._settings = None
+                    self._snapshot_cache = None
+                    self._unavailable_sections.clear()
                 raise
-            self._device = device
-            return self._read_snapshot_unlocked()
 
     def disconnect(self) -> None:
         with self._lock:
@@ -289,663 +294,820 @@ class DlcProService:
                 finally:
                     self._device = None
                     self._settings = None
+                    self._snapshot_cache = None
+                    self._unavailable_sections.clear()
 
-    def read_snapshot(self) -> DeviceSnapshot:
+    def read_snapshot(self, request: SnapshotRequest | None = None) -> DeviceSnapshot:
         with self._lock:
-            return self._read_snapshot_unlocked()
-
-    def read_auto_lock_telemetry(self) -> AutoLockTelemetry:
-        with self._lock:
-            device = self._device_required()
-            scan = device.laser1.scan
-            lock = device.laser1.dl.lock
-            raw_candidates = lock.candidates.get()
-            points, lock_state = self._parse_lock_candidates(raw_candidates)
-            scope = None
-            scope_error = None
-            try:
-                scope = self._read_auto_lock_scope_snapshot(device, lock_state)
-            except Exception as exc:  # noqa: BLE001
-                scope_error = self.format_error(exc)
-            return AutoLockTelemetry(
-                sc_enabled=bool(scan.enabled.get()),
-                sc_offset=float(scan.offset.get()),
-                sc_unit=scan.unit.get(),
-                lock_enabled=bool(lock.lock_enabled.get()),
-                lock_without_lockpoint=bool(lock.lock_without_lockpoint.get()),
-                lock_state=lock_state,
-                candidates=points.get("c", ()),
-                selected=points.get("l"),
-                tracking=points.get("t"),
-                scope=scope,
-                scope_error=scope_error,
-            )
+            return self._read_snapshot_request_unlocked(request or SnapshotRequest.full())
 
     def set_current(self, value_ma: float) -> DeviceSnapshot:
         with self._lock:
             cc = self._cc()
             cc.current_set.set(float(value_ma))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_current_clip(self, value_ma: float) -> DeviceSnapshot:
         with self._lock:
             cc = self._cc()
             cc.current_clip.set(float(value_ma))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_cc_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             cc = self._cc()
             cc.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_feedforward_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             cc = self._cc()
             cc.feedforward_enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_feedforward_factor(self, value: float) -> DeviceSnapshot:
         with self._lock:
             cc = self._cc()
             cc.feedforward_factor.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_arc_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             ext = self._cc().external_input
             ext.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_arc_signal(self, signal: int) -> DeviceSnapshot:
         with self._lock:
             ext = self._cc().external_input
             ext.signal.set(int(signal))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_arc_factor(self, value: float) -> DeviceSnapshot:
         with self._lock:
             ext = self._cc().external_input
             ext.factor.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_tc_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             tc = self._tc()
             tc.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_temp_set(self, value_c: float) -> DeviceSnapshot:
         with self._lock:
             tc = self._tc()
             tc.temp_set.set(float(value_c))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_tc_arc_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             ext = self._tc().external_input
             ext.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_tc_arc_signal(self, signal: int) -> DeviceSnapshot:
         with self._lock:
             ext = self._tc().external_input
             ext.signal.set(int(signal))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_tc_arc_factor(self, value: float) -> DeviceSnapshot:
         with self._lock:
             ext = self._tc().external_input
             ext.factor.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_pc_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             pc = self._pc()
             pc.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_pc_voltage_set(self, value_v: float) -> DeviceSnapshot:
         with self._lock:
             pc = self._pc()
             pc.voltage_set.set(float(value_v))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_pc_slew_rate_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             output_filter = self._pc().output_filter
             output_filter.slew_rate_enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_pc_slew_rate(self, value: float) -> DeviceSnapshot:
         with self._lock:
             output_filter = self._pc().output_filter
             output_filter.slew_rate.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_pc_arc_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             ext = self._pc().external_input
             ext.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_pc_arc_signal(self, signal: int) -> DeviceSnapshot:
         with self._lock:
             ext = self._pc().external_input
             ext.signal.set(int(signal))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_pc_arc_factor(self, value: float) -> DeviceSnapshot:
         with self._lock:
             ext = self._pc().external_input
             ext.factor.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_pressure_comp_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             pressure_comp = self._pressure_comp()
             pressure_comp.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_pressure_comp_factor(self, value: float) -> DeviceSnapshot:
         with self._lock:
             pressure_comp = self._pressure_comp()
             pressure_comp.factor.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.LASER)
+            )
 
     def set_sc_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             scan = self._scan()
             scan.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_sc_amplitude(self, value: float) -> DeviceSnapshot:
         with self._lock:
             scan = self._scan()
             scan.amplitude.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_sc_offset(self, value: float) -> DeviceSnapshot:
         with self._lock:
             scan = self._scan()
             scan.offset.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_sc_output_channel(self, value: int) -> DeviceSnapshot:
         with self._lock:
             scan = self._scan()
             scan.output_channel.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_sc_frequency(self, value: float) -> DeviceSnapshot:
         with self._lock:
             scan = self._scan()
             scan.frequency.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_sc_signal_type(self, value: int) -> DeviceSnapshot:
         with self._lock:
             scan = self._scan()
             scan.signal_type.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lock_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             lock = self._lock_control()
             lock.lock_enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lock_hold(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             lock = self._lock_control()
             lock.hold.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lock_input_channel(self, value: int) -> DeviceSnapshot:
         with self._lock:
             lock = self._lock_control()
             lock.spectrum_input_channel.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lock_error_channel(self, value: int) -> DeviceSnapshot:
         with self._lock:
             lock = self._lock_control()
             lock.error_channel.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lock_type(self, value: int) -> DeviceSnapshot:
         with self._lock:
             lock = self._lock_control()
             lock.type.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lock_pid_selection(self, value: int) -> DeviceSnapshot:
         with self._lock:
             lock = self._lock_control()
             lock.pid_selection.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lock_falc_selection(self, value: int) -> DeviceSnapshot:
         with self._lock:
             lock = self._lock_control()
             lock.falc_selection.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lock_without_lockpoint(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             lock = self._lock_control()
             lock.lock_without_lockpoint.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lock_candidate_top_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().candidate_filter.top.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lock_candidate_bottom_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().candidate_filter.bottom.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lock_candidate_positive_edge_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().candidate_filter.positive_edge.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lock_candidate_negative_edge_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().candidate_filter.negative_edge.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lock_candidate_edge_level(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().candidate_filter.edge_level.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lock_candidate_peak_noise_tolerance(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().candidate_filter.peak_noise_tolerance.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lock_candidate_edge_min_distance(self, value: int) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().candidate_filter.edge_min_distance.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lock_candidate_top_of_fringe_low_pass(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().candidate_filter.top_of_fringe_low_pass.set(bool(enabled))
-            return self._read_snapshot_unlocked()
-
-    def apply_auto_lock_preset(self, payload: dict[str, object]) -> DeviceSnapshot:
-        with self._lock:
-            lock = self._lock_control()
-            candidate_filter = lock.candidate_filter
-            lock.error_channel.set(int(payload["error_signal"]))
-            lock.falc_selection.set(int(payload["falc_selection"]))
-            self._falc(1).path_selection.set(int(payload["falc_path"]))
-            candidate_filter.top.set(bool(payload["candidate_top"]))
-            candidate_filter.bottom.set(bool(payload["candidate_bottom"]))
-            candidate_filter.positive_edge.set(bool(payload["candidate_positive_edge"]))
-            candidate_filter.negative_edge.set(bool(payload["candidate_negative_edge"]))
-            candidate_filter.edge_level.set(float(payload["candidate_edge_level"]))
-            candidate_filter.peak_noise_tolerance.set(float(payload["candidate_peak_noise_tolerance"]))
-            candidate_filter.edge_min_distance.set(int(payload["candidate_edge_min_distance"]))
-            candidate_filter.top_of_fringe_low_pass.set(bool(payload["candidate_top_of_fringe_low_pass"]))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lockin_modulation_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().lockin.modulation_enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lockin_input_channel(self, value: int) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().lockin.input_channel.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lockin_modulation_output_channel(self, value: int) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().lockin.modulation_output_channel.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lockin_frequency(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().lockin.frequency.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lockin_amplitude(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().lockin.amplitude.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lockin_phase_shift(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().lockin.phase_shift.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_lockin_lock_level(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().lockin.lock_level.set(float(value))
-            return self._read_snapshot_unlocked()
-
-    def set_scope_variant(self, value: int) -> DeviceSnapshot:
-        with self._lock:
-            self._device_required().laser1.scope.variant.set(int(value))
-            return self._read_snapshot_unlocked()
-
-    def set_scope_update_rate(self, value: int) -> DeviceSnapshot:
-        with self._lock:
-            self._device_required().laser1.scope.update_rate.set(int(value))
-            return self._read_snapshot_unlocked()
-
-    def set_scope_channel1_signal(self, value: int) -> DeviceSnapshot:
-        with self._lock:
-            self._device_required().laser1.scope.channel1.signal.set(int(value))
-            return self._read_snapshot_unlocked()
-
-    def set_scope_channel2_signal(self, value: int) -> DeviceSnapshot:
-        with self._lock:
-            self._device_required().laser1.scope.channel2.signal.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid1_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid1.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid1_gain_all(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid1.gain.all.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid1_gain_p(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid1.gain.p.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid1_gain_i(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid1.gain.i.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid1_gain_d(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid1.gain.d.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid1_output_channel(self, value: int) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid1.output_channel.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid1_sign(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid1.sign.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid1_i_cutoff_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid1.gain.i_cutoff_enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid1_i_cutoff(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid1.gain.i_cutoff.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid1_limit_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid1.outputlimit.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid1_limit_max(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid1.outputlimit.max.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid2_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid2.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid2_gain_all(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid2.gain.all.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid2_gain_p(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid2.gain.p.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid2_gain_i(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid2.gain.i.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid2_gain_d(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid2.gain.d.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid2_output_channel(self, value: int) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid2.output_channel.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid2_sign(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid2.sign.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid2_limit_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid2.outputlimit.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_pid2_limit_max(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().pid2.outputlimit.max.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.SCAN_LOCK)
+            )
 
     def set_relock_detection_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().window.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.RELOCK)
+            )
 
     def set_relock_input_channel(self, value: int) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().window.input_channel.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.RELOCK)
+            )
 
     def set_relock_level_high(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().window.level_high.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.RELOCK)
+            )
 
     def set_relock_level_low(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().window.level_low.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.RELOCK)
+            )
 
     def set_relock_level_hysteresis(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().window.level_hysteresis.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.RELOCK)
+            )
 
     def set_relock_delay(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().relock.delay.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.RELOCK)
+            )
 
     def set_relock_reset_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().reset.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.RELOCK)
+            )
 
     def set_relock_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().relock.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.RELOCK)
+            )
 
     def set_relock_amplitude(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().relock.amplitude.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.RELOCK)
+            )
 
     def set_relock_frequency(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().relock.frequency.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.RELOCK)
+            )
 
     def set_relock_output_channel(self, value: int) -> DeviceSnapshot:
         with self._lock:
             self._lock_control().relock.output_channel.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.RELOCK)
+            )
 
     def set_falc1_input_gain(self, value: int) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).input.gain.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.FALC)
+            )
 
     def set_falc1_input_offset(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).input.offset.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.FALC)
+            )
 
     def set_falc1_path_selection(self, value: int) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).path_selection.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.FALC)
+            )
 
     def set_falc1_main_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).main.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.FALC)
+            )
 
     def set_falc1_main_gain_all(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).main.gain.all.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.FALC)
+            )
 
     def set_falc1_main_use_external_input(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).main.gain.use_external_input.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.FALC)
+            )
 
     def set_falc1_main_filter_enabled(self, filter_name: str, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             gain = self._falc(1).main.gain
             getattr(gain, f"{filter_name}_enabled").set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.FALC)
+            )
 
     def set_falc1_main_filter_value(self, filter_name: str, value: int) -> DeviceSnapshot:
         with self._lock:
             gain = self._falc(1).main.gain
             getattr(gain, filter_name).set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.FALC)
+            )
 
     def set_falc1_unlim_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).unlim.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.FALC)
+            )
 
     def set_falc1_unlim_hold(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).unlim.hold.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.FALC)
+            )
 
     def set_falc1_unlim_input_offset(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).unlim.input_offset.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.FALC)
+            )
 
     def set_falc1_unlim_output_range(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).unlim.output_range.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.FALC)
+            )
 
     def set_falc1_unlim_slew_rate(self, value: int) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).unlim.slew_rate.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.FALC)
+            )
 
     def set_falc1_unlim_sign(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).unlim.sign.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.FALC)
+            )
 
     def set_falc1_mon_config(self, value: int) -> DeviceSnapshot:
         with self._lock:
             self._falc(1).mon.config.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.FALC)
+            )
 
     def set_stabilization_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._power_stabilization().enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.STABILIZATION)
+            )
 
     def set_stabilization_setpoint(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._power_stabilization().setpoint.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.STABILIZATION)
+            )
 
     def set_stabilization_hold_output_on_unlock(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._power_stabilization().hold_output_on_unlock.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.STABILIZATION)
+            )
 
     def set_stabilization_gain_all(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._power_stabilization().gain.all.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.STABILIZATION)
+            )
 
     def set_stabilization_gain_p(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._power_stabilization().gain.p.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.STABILIZATION)
+            )
 
     def set_stabilization_gain_i(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._power_stabilization().gain.i.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.STABILIZATION)
+            )
 
     def set_stabilization_gain_d(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._power_stabilization().gain.d.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.STABILIZATION)
+            )
 
     def set_stabilization_pd_ext_input_channel(self, value: int) -> DeviceSnapshot:
         with self._lock:
             self._device_required().laser1.pd_ext.input_channel.set(int(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.STABILIZATION)
+            )
 
     def set_stabilization_pd_ext_cal_factor(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._device_required().laser1.pd_ext.cal_factor.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.STABILIZATION)
+            )
 
     def set_stabilization_pd_ext_cal_offset(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._device_required().laser1.pd_ext.cal_offset.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.STABILIZATION)
+            )
 
     def set_stabilization_window_enabled(self, enabled: bool) -> DeviceSnapshot:
         with self._lock:
             self._power_stabilization().window.enabled.set(bool(enabled))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.STABILIZATION)
+            )
 
     def set_stabilization_window_level_low(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._power_stabilization().window.level_low.set(float(value))
-            return self._read_snapshot_unlocked()
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.STABILIZATION)
+            )
 
     def set_stabilization_window_level_hysteresis(self, value: float) -> DeviceSnapshot:
         with self._lock:
             self._power_stabilization().window.level_hysteresis.set(float(value))
-            return self._read_snapshot_unlocked()
-
+            return self._read_snapshot_request_unlocked(
+                SnapshotRequest.for_sections(SnapshotSection.STABILIZATION)
+            )
     def list_serial_ports(self) -> list[str]:
         if list_ports is None:
             return []
@@ -964,16 +1126,49 @@ class DlcProService:
     @staticmethod
     def format_error(exc: Exception) -> str:
         if isinstance(exc, DeviceNotFoundError):
+            detail = str(exc)
+            if "winerror 121" in detail.lower() or "信号灯超时时间已到" in detail:
+                return (
+                    "DLC pro 的 SDK 连接端口响应超时（WinError 121）。\n"
+                    "设备可以联网但其他客户端可能仍占用 1998/1999 端口。请从系统托盘"
+                    "彻底退出 TOPAS DLC pro，或在任务管理器结束残留的 "
+                    "TOPAS_DLC_pro.exe 后重试。\n"
+                    f"原始错误：{detail}"
+                )
+            if (
+                "winerror 5" in detail.lower()
+                or "10013" in detail
+                or "拒绝访问" in detail
+                or "访问权限不允许" in detail
+            ):
+                return (
+                    "Windows 阻止了到 DLC pro 的 TCP 连接。\n"
+                    "IP 和子网可能是正确的；请关闭 VPN/网络锁定功能，或在防火墙中允许"
+                    "本程序访问 DLC pro 的 169.254.0.0/16 本地网络，然后重试。\n"
+                    f"原始错误：{detail}"
+                )
             return f"Device not found / 未找到设备: {exc}"
         if isinstance(exc, DecopError):
-            return f"Device rejected request / 设备拒绝请求: {exc}"
+            detail = str(exc)
+            if "-22" in detail or "no access" in detail.lower():
+                return (
+                    "已连接到 DLC pro，但设备拒绝访问某项参数（Error -22: no access）。\n"
+                    "这不是子网掩码错误；通常表示该参数或功能模块在当前设备上不可访问，"
+                    "或当前设备状态不允许访问。"
+                )
+            return f"Device rejected request / 设备拒绝请求: {detail}"
         if isinstance(exc, TimeoutError):
-            return f"Timeout / 超时: {exc}"
+            return f"Timeout / 连接超时: {exc}"
         return f"{type(exc).__name__}: {exc}"
 
     def _build_connection(self, settings: ConnectionSettings):
         if settings.mode == "network":
-            return NetworkConnection(settings.target, timeout=settings.timeout)
+            return NetworkConnection(
+                settings.target,
+                command_line_port=settings.command_line_port,
+                monitoring_line_port=settings.monitoring_line_port,
+                timeout=settings.timeout,
+            )
         if settings.mode == "serial":
             return SerialConnection(
                 settings.target,
@@ -1011,6 +1206,267 @@ class DlcProService:
     def _power_stabilization(self):
         return self._device_required().laser1.power_stabilization
 
+    def _read_snapshot_request_unlocked(self, request: SnapshotRequest) -> DeviceSnapshot:
+        device = self._device_required()
+        if self._snapshot_cache is None:
+            settings = self._settings
+            assert settings is not None
+            self._snapshot_cache = self._empty_snapshot(settings)
+
+        requested = set(request.sections)
+        if SnapshotSection.ALL in requested:
+            requested = {
+                SnapshotSection.CORE,
+                SnapshotSection.LASER,
+                SnapshotSection.SCAN_LOCK,
+                SnapshotSection.RELOCK,
+                SnapshotSection.FALC,
+                SnapshotSection.STABILIZATION,
+            }
+
+        values: dict[str, object] = {}
+        if SnapshotSection.CORE in requested:
+            values.update(self._read_core_values(device))
+        if SnapshotSection.LASER in requested:
+            self._read_optional_section(
+                SnapshotSection.LASER,
+                lambda: self._read_laser_values(device),
+                values,
+            )
+        if SnapshotSection.SCAN_LOCK in requested:
+            # Scan itself is fundamental to this application.  Read it before
+            # the larger lock tree so an unavailable optional lock parameter
+            # cannot hide valid Scan Offset/Amplitude/Frequency readbacks.
+            values.update(self._read_scan_values(device))
+            self._read_optional_section(
+                SnapshotSection.SCAN_LOCK,
+                lambda: self._read_scan_lock_values(device),
+                values,
+            )
+        if SnapshotSection.RELOCK in requested:
+            self._read_optional_section(
+                SnapshotSection.RELOCK,
+                lambda: self._read_relock_values(device),
+                values,
+            )
+        if SnapshotSection.FALC in requested:
+            values["falc1"] = self._read_falc_snapshot(device, 1)
+        if SnapshotSection.STABILIZATION in requested:
+            values["stabilization"] = self._read_stabilization_snapshot(device)
+        if values:
+            self._snapshot_cache = replace(self._snapshot_cache, **values)
+        return self._snapshot_cache
+
+    def _read_optional_section(
+        self,
+        section: SnapshotSection,
+        reader,
+        values: dict[str, object],
+    ) -> None:
+        try:
+            values.update(reader())
+            self._unavailable_sections.discard(section)
+        except DecopError:
+            # DLC pro models expose one SDK tree, while individual hardware
+            # configurations may deny access to nodes that are not installed.
+            # Preserve the last cached values instead of dropping the entire
+            # connection with DECoP error -22.
+            self._unavailable_sections.add(section)
+
+    @staticmethod
+    def _empty_snapshot(settings: ConnectionSettings) -> DeviceSnapshot:
+        values: dict[str, object] = {}
+        for field in fields(DeviceSnapshot):
+            if field.name == "connection_mode":
+                values[field.name] = settings.mode
+            elif field.name == "connection_target":
+                values[field.name] = settings.target
+            elif field.name in {"stabilization", "falc1"}:
+                values[field.name] = None
+            elif field.type == "str":
+                values[field.name] = ""
+            elif field.type == "bool":
+                values[field.name] = False
+            elif field.type == "int":
+                values[field.name] = 0
+            else:
+                values[field.name] = 0.0
+        return DeviceSnapshot(**values)
+
+    @staticmethod
+    def _read_core_values(device: DLCpro) -> dict[str, object]:
+        cc = device.laser1.dl.cc
+        tc = device.laser1.dl.tc
+        pc = device.laser1.dl.pc
+        values = {
+            "system_label": device.system_label.get(),
+            "serial_number": device.serial_number.get(),
+            "fw_ver": device.fw_ver.get(),
+            "system_type": device.system_type.get(),
+            "system_model": device.system_model.get(),
+            "uptime_txt": device.uptime_txt.get(),
+            "emission": bool(device.emission.get()),
+            "interlock_open": bool(device.interlock_open.get()),
+            "latest_message": device.system_messages.latest_message.get(),
+            "cc_emission": bool(cc.emission.get()),
+            "current_act": float(cc.current_act.get()),
+            "temp_act": float(tc.temp_act.get()),
+            "pc_voltage_act": float(pc.voltage_act.get()),
+        }
+        try:
+            lock = device.laser1.dl.lock
+            values.update(
+                lock_state=int(lock.state.get()),
+                lock_state_txt=lock.state_txt.get(),
+            )
+        except DecopError:
+            pass
+        return values
+
+    @staticmethod
+    def _read_scan_values(device: DLCpro) -> dict[str, object]:
+        scan = device.laser1.scan
+        return {
+            "sc_enabled": bool(scan.enabled.get()),
+            "sc_amplitude": float(scan.amplitude.get()),
+            "sc_offset": float(scan.offset.get()),
+            "sc_output_channel": int(scan.output_channel.get()),
+            "sc_frequency": float(scan.frequency.get()),
+            "sc_signal_type": int(scan.signal_type.get()),
+            "sc_unit": scan.unit.get(),
+        }
+
+    def _read_laser_values(self, device: DLCpro) -> dict[str, object]:
+        cc = device.laser1.dl.cc
+        ext = cc.external_input
+        tc = device.laser1.dl.tc
+        tc_ext = tc.external_input
+        pc = device.laser1.dl.pc
+        pc_ext = pc.external_input
+        pc_filter = pc.output_filter
+        pressure = device.laser1.dl.pressure_compensation
+        return {
+            "cc_enabled": bool(cc.enabled.get()),
+            "cc_emission": bool(cc.emission.get()),
+            "current_set": float(cc.current_set.get()),
+            "current_act": float(cc.current_act.get()),
+            "current_clip": float(cc.current_clip.get()),
+            "current_clip_tuning": float(cc.current_clip_tuning.get()),
+            "current_clip_limit": float(cc.current_clip_limit.get()),
+            "current_clip_writable_limit": self._compute_current_clip_writable_limit(cc),
+            "effective_current_max": self._compute_effective_current_max(cc),
+            "use_current_clip_tuning": bool(cc.use_current_clip_tuning.get()),
+            "cc_status_txt": cc.status_txt.get(),
+            "feedforward_enabled": bool(cc.feedforward_enabled.get()),
+            "feedforward_factor": float(cc.feedforward_factor.get()),
+            "arc_enabled": bool(ext.enabled.get()),
+            "arc_signal": int(ext.signal.get()),
+            "arc_factor": float(ext.factor.get()),
+            "tc_enabled": bool(tc.enabled.get()),
+            "temp_set": float(tc.temp_set.get()),
+            "temp_act": float(tc.temp_act.get()),
+            "tc_arc_enabled": bool(tc_ext.enabled.get()),
+            "tc_arc_signal": int(tc_ext.signal.get()),
+            "tc_arc_factor": float(tc_ext.factor.get()),
+            "pc_enabled": bool(pc.enabled.get()),
+            "pc_voltage_set": float(pc.voltage_set.get()),
+            "pc_voltage_act": float(pc.voltage_act.get()),
+            "pc_slew_rate_enabled": bool(pc_filter.slew_rate_enabled.get()),
+            "pc_slew_rate": float(pc_filter.slew_rate.get()),
+            "pc_arc_enabled": bool(pc_ext.enabled.get()),
+            "pc_arc_signal": int(pc_ext.signal.get()),
+            "pc_arc_factor": float(pc_ext.factor.get()),
+            "pressure_comp_enabled": bool(pressure.enabled.get()),
+            "pressure_comp_air_pressure": float(pressure.air_pressure.get()),
+            "pressure_comp_factor": float(pressure.factor.get()),
+            "pressure_comp_voltage": float(pressure.compensation_voltage.get()),
+        }
+
+    @staticmethod
+    def _read_scan_lock_values(device: DLCpro) -> dict[str, object]:
+        scan = device.laser1.scan
+        lock = device.laser1.dl.lock
+        candidate = lock.candidate_filter
+        lockin = lock.lockin
+        pid1 = lock.pid1
+        pid2 = lock.pid2
+        return {
+            "sc_enabled": bool(scan.enabled.get()),
+            "sc_amplitude": float(scan.amplitude.get()),
+            "sc_offset": float(scan.offset.get()),
+            "sc_output_channel": int(scan.output_channel.get()),
+            "sc_frequency": float(scan.frequency.get()),
+            "sc_signal_type": int(scan.signal_type.get()),
+            "sc_unit": scan.unit.get(),
+            "lock_state": int(lock.state.get()),
+            "lock_state_txt": lock.state_txt.get(),
+            "lock_enabled": bool(lock.lock_enabled.get()),
+            "lock_hold": bool(lock.hold.get()),
+            "lock_input_channel": int(lock.spectrum_input_channel.get()),
+            "lock_error_channel": int(lock.error_channel.get()),
+            "lock_type": int(lock.type.get()),
+            "lock_pid_selection": int(lock.pid_selection.get()),
+            "lock_falc_selection": int(lock.falc_selection.get()),
+            "lock_without_lockpoint": bool(lock.lock_without_lockpoint.get()),
+            "lock_candidate_top_enabled": bool(candidate.top.get()),
+            "lock_candidate_bottom_enabled": bool(candidate.bottom.get()),
+            "lock_candidate_positive_edge_enabled": bool(candidate.positive_edge.get()),
+            "lock_candidate_negative_edge_enabled": bool(candidate.negative_edge.get()),
+            "lock_candidate_edge_level": float(candidate.edge_level.get()),
+            "lock_candidate_peak_noise_tolerance": float(candidate.peak_noise_tolerance.get()),
+            "lock_candidate_edge_min_distance": int(candidate.edge_min_distance.get()),
+            "lock_candidate_top_of_fringe_low_pass": bool(candidate.top_of_fringe_low_pass.get()),
+            "lockin_modulation_enabled": bool(lockin.modulation_enabled.get()),
+            "lockin_input_channel": int(lockin.input_channel.get()),
+            "lockin_modulation_output_channel": int(lockin.modulation_output_channel.get()),
+            "lockin_frequency": float(lockin.frequency.get()),
+            "lockin_amplitude": float(lockin.amplitude.get()),
+            "lockin_phase_shift": float(lockin.phase_shift.get()),
+            "lockin_lock_level": float(lockin.lock_level.get()),
+            "lockin_auto_lir_state": int(lockin.auto_lir.state.get()),
+            "lockin_auto_lir_progress": int(lockin.auto_lir.progress.get()),
+            "pid1_enabled": bool(pid1.enabled.get()),
+            "pid1_gain_all": float(pid1.gain.all.get()),
+            "pid1_gain_p": float(pid1.gain.p.get()),
+            "pid1_gain_i": float(pid1.gain.i.get()),
+            "pid1_gain_d": float(pid1.gain.d.get()),
+            "pid1_output_channel": int(pid1.output_channel.get()),
+            "pid1_sign": bool(pid1.sign.get()),
+            "pid1_i_cutoff_enabled": bool(pid1.gain.i_cutoff_enabled.get()),
+            "pid1_i_cutoff": float(pid1.gain.i_cutoff.get()),
+            "pid1_limit_enabled": bool(pid1.outputlimit.enabled.get()),
+            "pid1_limit_max": float(pid1.outputlimit.max.get()),
+            "pid2_enabled": bool(pid2.enabled.get()),
+            "pid2_gain_all": float(pid2.gain.all.get()),
+            "pid2_gain_p": float(pid2.gain.p.get()),
+            "pid2_gain_i": float(pid2.gain.i.get()),
+            "pid2_gain_d": float(pid2.gain.d.get()),
+            "pid2_output_channel": int(pid2.output_channel.get()),
+            "pid2_sign": bool(pid2.sign.get()),
+            "pid2_limit_enabled": bool(pid2.outputlimit.enabled.get()),
+            "pid2_limit_max": float(pid2.outputlimit.max.get()),
+        }
+
+    @staticmethod
+    def _read_relock_values(device: DLCpro) -> dict[str, object]:
+        lock = device.laser1.dl.lock
+        relock = lock.relock
+        window = lock.window
+        reset = lock.reset
+        return {
+            "relock_detection_enabled": bool(window.enabled.get()),
+            "relock_input_channel": int(window.input_channel.get()),
+            "relock_level_high": float(window.level_high.get()),
+            "relock_level_low": float(window.level_low.get()),
+            "relock_level_hysteresis": float(window.level_hysteresis.get()),
+            "relock_delay": float(relock.delay.get()),
+            "relock_reset_enabled": bool(reset.enabled.get()),
+            "relock_enabled": bool(relock.enabled.get()),
+            "relock_amplitude": float(relock.amplitude.get()),
+            "relock_frequency": float(relock.frequency.get()),
+            "relock_output_channel": int(relock.output_channel.get()),
+        }
+
     def _read_snapshot_unlocked(self) -> DeviceSnapshot:
         device = self._device_required()
         settings = self._settings
@@ -1032,7 +1488,7 @@ class DlcProService:
         relock = lock.relock
         relock_window = lock.window
         relock_reset = lock.reset
-        return DeviceSnapshot(
+        snapshot = DeviceSnapshot(
             connection_mode=settings.mode,
             connection_target=settings.target,
             system_label=device.system_label.get(),
@@ -1146,72 +1602,8 @@ class DlcProService:
             stabilization=self._read_stabilization_snapshot(device),
             falc1=self._read_falc_snapshot(device, 1),
         )
-
-    @staticmethod
-    def _parse_lock_candidates(raw_candidates) -> tuple[dict[str, object], int | None]:
-        try:
-            from toptica.lasersdk.utils.dlcpro import extract_lock_points, extract_lock_state
-        except ImportError as exc:  # noqa: BLE001
-            raise RuntimeError(
-                "Auto Lock requires the official SDK utilities module "
-                "`toptica.lasersdk.utils.dlcpro`."
-            ) from exc
-
-        parsed = extract_lock_points("clt", raw_candidates)
-        result: dict[str, object] = {}
-        for key in ("c", "l", "t"):
-            point_group = parsed.get(key)
-            if not point_group:
-                continue
-            xs = point_group.get("x", [])
-            ys = point_group.get("y", [])
-            pairs = tuple(
-                LockPointSnapshot(x=float(x), y=float(y))
-                for x, y in zip(xs, ys, strict=False)
-            )
-            if key == "c":
-                result[key] = pairs
-            elif pairs:
-                result[key] = pairs[0]
-        state = extract_lock_state(raw_candidates)
-        return result, None if state is None else int(state)
-
-    @staticmethod
-    def _read_auto_lock_scope_snapshot(
-        device: DLCpro,
-        lock_state: int | None,
-    ) -> AutoLockScopeSnapshot:
-        try:
-            from toptica.lasersdk.utils.dlcpro import extract_float_arrays
-        except ImportError as exc:  # noqa: BLE001
-            raise RuntimeError(
-                "Auto Lock scope view requires the official SDK utilities module "
-                "`toptica.lasersdk.utils.dlcpro`."
-            ) from exc
-
-        scope = device.laser1.scope
-        trace = extract_float_arrays("xyY", scope.data.get())
-        background = {"x": (), "y": ()}
-        if lock_state == 5:
-            background = extract_float_arrays("xy", device.laser1.dl.lock.background_trace.get())
-
-        return AutoLockScopeSnapshot(
-            variant=int(scope.variant.get()),
-            update_rate=int(scope.update_rate.get()),
-            channel1_signal=int(scope.channel1.signal.get()),
-            channel2_signal=int(scope.channel2.signal.get()),
-            x_name=scope.channelx.name.get(),
-            x_unit=scope.channelx.unit.get(),
-            y_name=scope.channel1.name.get(),
-            y_unit=scope.channel1.unit.get(),
-            y2_name=scope.channel2.name.get(),
-            y2_unit=scope.channel2.unit.get(),
-            x_values=tuple(float(value) for value in trace.get("x", ())),
-            y_values=tuple(float(value) for value in trace.get("y", ())),
-            y2_values=tuple(float(value) for value in trace.get("Y", ())),
-            background_x=tuple(float(value) for value in background.get("x", ())),
-            background_y=tuple(float(value) for value in background.get("y", ())),
-        )
+        self._snapshot_cache = snapshot
+        return snapshot
 
     @staticmethod
     def _compute_effective_current_max(cc) -> float:

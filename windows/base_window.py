@@ -10,6 +10,9 @@ class AuxiliaryWindow(QMainWindow):
         self._shutdown_requested = False
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        manager = getattr(self, "_window_layout_manager", None)
+        if manager is not None:
+            manager.save_window(self)
         if self._shutdown_requested:
             event.accept()
             return

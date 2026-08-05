@@ -1,0 +1,20 @@
+#-----------------------------------------------------------
+# xsim v2020.2 (64-bit)
+# SW Build 3064766 on Wed Nov 18 09:12:45 MST 2020
+# IP Build 3064653 on Wed Nov 18 14:17:31 MST 2020
+# Start of session at: Wed Jul 29 21:30:29 2026
+# Process ID: 5800
+# Current directory: C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage
+# Command line: xsim.exe -mode tcl -source {xsim.dir/sim_p2_final/xsim_script.tcl}
+# Log file: C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/xsim.log
+# Journal file: C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage\xsim.jou
+#-----------------------------------------------------------
+source xsim.dir/sim_p2_final/xsim_script.tcl
+# xsim {sim_p2_final} -autoloadwcfg -runall
+Vivado Simulator 2020.2
+Time resolution is 1 ps
+run -all
+PASS: complete standard/jumbo packets, true 64-bit index, stream reset, and TX backpressure
+$finish called at time : 54116 ns : File "C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/tb_pl_monitor_packetizer.sv" Line 106
+exit
+INFO: [Common 17-206] Exiting xsim at Wed Jul 29 21:30:33 2026...

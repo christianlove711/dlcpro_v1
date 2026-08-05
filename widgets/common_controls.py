@@ -3,18 +3,67 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 
 from PySide6.QtCore import QTimer, Qt, Signal
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QStyle,
     QStyleOptionSpinBox,
     QWidget,
 )
+
+
+class VisibleCheckBox(QCheckBox):
+    """Theme-independent checkbox with a high-contrast blue checked state."""
+
+    INDICATOR_SIZE = 18
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        del event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        size = self.INDICATOR_SIZE
+        x = 1
+        y = max(0, (self.height() - size) // 2)
+        checked = self.isChecked()
+        enabled = self.isEnabled()
+        if checked:
+            fill = QColor("#286bc1" if enabled else "#94a3b8")
+            border = fill
+        else:
+            fill = QColor("#ffffff" if enabled else "#f0f2f5")
+            border = QColor("#8794a8" if enabled else "#c7cfda")
+        painter.setPen(QPen(border, 1.4))
+        painter.setBrush(fill)
+        painter.drawRoundedRect(x, y, size, size, 4, 4)
+        if checked:
+            path = QPainterPath()
+            path.moveTo(x + 4.0, y + 9.5)
+            path.lineTo(x + 7.5, y + 13.0)
+            path.lineTo(x + 14.5, y + 5.5)
+            painter.setPen(QPen(
+                QColor("#ffffff"), 2.2,
+                Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin,
+            ))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPath(path)
+        text_color = self.palette().color(
+            self.foregroundRole() if enabled else self.backgroundRole()
+        )
+        if not enabled:
+            text_color = QColor("#8993a4")
+        painter.setPen(text_color)
+        painter.drawText(
+            self.rect().adjusted(size + 9, 0, 0, 0),
+            Qt.AlignLeft | Qt.AlignVCenter,
+            self.text(),
+        )
 
 
 class SafeComboBox(QComboBox):
@@ -316,6 +365,6 @@ class StepTargetSpinBoxRow(QWidget):
 def create_toggle_button(slot, parent: QWidget | None = None) -> QPushButton:
     button = QPushButton(parent)
     button.setCheckable(True)
-    button.setMinimumWidth(124)
+    button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     button.clicked.connect(slot)
     return button

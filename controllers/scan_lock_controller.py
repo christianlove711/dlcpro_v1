@@ -15,6 +15,283 @@ class ScanLockController:
     def __init__(self, owner) -> None:
         self.owner = owner
 
+    def _snapshot(self):
+        if not self.owner.service.is_connected:
+            return None
+        return self.owner.snapshot
+
+    def _submit(self, fn) -> bool:
+        return self.owner.submit_device_task(fn)
+
+    def _toggle(self, guard_attr: str, snapshot_attr: str, setter, checked: bool) -> None:
+        snapshot = self._snapshot()
+        if snapshot is None or getattr(self.owner, guard_attr) or checked == getattr(snapshot, snapshot_attr):
+            return
+        self._submit(lambda: setter(checked))
+
+    def _spin(self, guard_attr: str, snapshot_attr: str, widget, setter, tolerance: float = 1e-9) -> None:
+        snapshot = self._snapshot()
+        if snapshot is None or getattr(self.owner, guard_attr):
+            return
+        value = widget.value()
+        if abs(value - getattr(snapshot, snapshot_attr)) < tolerance:
+            return
+        self._submit(lambda: setter(value))
+
+    def _combo(self, guard_attr: str, snapshot_attr: str, combo, setter) -> None:
+        snapshot = self._snapshot()
+        if snapshot is None or getattr(self.owner, guard_attr):
+            return
+        value = int(combo.currentData())
+        if value == getattr(snapshot, snapshot_attr):
+            return
+        self._submit(lambda: setter(value))
+
+    def _check(self, snapshot_attr: str, checkbox, setter) -> None:
+        snapshot = self._snapshot()
+        if snapshot is None or self.owner.lock_programmatic_update:
+            return
+        checked = checkbox.isChecked()
+        if checked == getattr(snapshot, snapshot_attr):
+            return
+        self._submit(lambda: setter(checked))
+
+    def _on_sc_enable_toggled(self, checked: bool) -> None:
+        self._toggle("sc_programmatic_update", "sc_enabled", self.owner.service.set_sc_enabled, checked)
+
+    def _on_sc_amplitude_finished(self) -> None:
+        self._spin(
+            "sc_programmatic_update",
+            "sc_amplitude",
+            self.owner.scan_amplitude_spin,
+            self.owner.service.set_sc_amplitude,
+        )
+
+    def _on_sc_offset_finished(self) -> None:
+        self._spin(
+            "sc_programmatic_update",
+            "sc_offset",
+            self.owner.scan_offset_spin,
+            self.owner.service.set_sc_offset,
+        )
+
+    def _on_sc_output_changed(self) -> None:
+        self._combo(
+            "sc_programmatic_update",
+            "sc_output_channel",
+            self.owner.scan_output_combo,
+            self.owner.service.set_sc_output_channel,
+        )
+
+    def _on_sc_frequency_finished(self) -> None:
+        self._spin(
+            "sc_programmatic_update",
+            "sc_frequency",
+            self.owner.scan_frequency_spin,
+            self.owner.service.set_sc_frequency,
+        )
+
+    def _on_sc_shape_changed(self) -> None:
+        self._combo(
+            "sc_programmatic_update",
+            "sc_signal_type",
+            self.owner.scan_shape_combo,
+            self.owner.service.set_sc_signal_type,
+        )
+
+    def _on_lock_enabled_toggled(self, checked: bool) -> None:
+        self._toggle("lock_programmatic_update", "lock_enabled", self.owner.service.set_lock_enabled, checked)
+
+    def _on_lock_hold_toggled(self, checked: bool) -> None:
+        self._toggle("lock_programmatic_update", "lock_hold", self.owner.service.set_lock_hold, checked)
+
+    def _on_lock_input_signal_changed(self) -> None:
+        self._combo(
+            "lock_programmatic_update",
+            "lock_input_channel",
+            self.owner.lock_input_signal_combo,
+            self.owner.service.set_lock_input_channel,
+        )
+
+    def _on_lock_error_signal_changed(self) -> None:
+        self._combo(
+            "lock_programmatic_update",
+            "lock_error_channel",
+            self.owner.lock_error_signal_combo,
+            self.owner.service.set_lock_error_channel,
+        )
+
+    def _on_lock_type_changed(self) -> None:
+        self._combo(
+            "lock_programmatic_update",
+            "lock_type",
+            self.owner.lock_type_combo,
+            self.owner.service.set_lock_type,
+        )
+
+    def _on_lock_pid_selection_changed(self) -> None:
+        self._combo(
+            "lock_programmatic_update",
+            "lock_pid_selection",
+            self.owner.lock_pid_selection_combo,
+            self.owner.service.set_lock_pid_selection,
+        )
+
+    def _on_lock_falc_selection_changed(self) -> None:
+        self._combo(
+            "lock_programmatic_update",
+            "lock_falc_selection",
+            self.owner.lock_falc_selection_combo,
+            self.owner.service.set_lock_falc_selection,
+        )
+
+    def _on_lock_without_lockpoint_changed(self) -> None:
+        self._check(
+            "lock_without_lockpoint",
+            self.owner.lock_without_lockpoint_check,
+            self.owner.service.set_lock_without_lockpoint,
+        )
+
+    def _on_lock_candidate_top_changed(self, checked: bool) -> None:
+        self._toggle(
+            "lock_programmatic_update",
+            "lock_candidate_top_enabled",
+            self.owner.service.set_lock_candidate_top_enabled,
+            checked,
+        )
+
+    def _on_lock_candidate_bottom_changed(self, checked: bool) -> None:
+        self._toggle(
+            "lock_programmatic_update",
+            "lock_candidate_bottom_enabled",
+            self.owner.service.set_lock_candidate_bottom_enabled,
+            checked,
+        )
+
+    def _on_lock_candidate_positive_edge_changed(self, checked: bool) -> None:
+        self._toggle(
+            "lock_programmatic_update",
+            "lock_candidate_positive_edge_enabled",
+            self.owner.service.set_lock_candidate_positive_edge_enabled,
+            checked,
+        )
+
+    def _on_lock_candidate_negative_edge_changed(self, checked: bool) -> None:
+        self._toggle(
+            "lock_programmatic_update",
+            "lock_candidate_negative_edge_enabled",
+            self.owner.service.set_lock_candidate_negative_edge_enabled,
+            checked,
+        )
+
+    def _on_lock_candidate_edge_level_finished(self) -> None:
+        self._spin(
+            "lock_programmatic_update",
+            "lock_candidate_edge_level",
+            self.owner.lock_candidate_edge_level_spin,
+            self.owner.service.set_lock_candidate_edge_level,
+            tolerance=1e-12,
+        )
+
+    def _on_lock_candidate_peak_noise_tolerance_finished(self) -> None:
+        self._spin(
+            "lock_programmatic_update",
+            "lock_candidate_peak_noise_tolerance",
+            self.owner.lock_candidate_peak_noise_tolerance_spin,
+            self.owner.service.set_lock_candidate_peak_noise_tolerance,
+            tolerance=1e-12,
+        )
+
+    def _on_lock_candidate_edge_min_distance_finished(self) -> None:
+        self._spin(
+            "lock_programmatic_update",
+            "lock_candidate_edge_min_distance",
+            self.owner.lock_candidate_edge_min_distance_spin,
+            self.owner.service.set_lock_candidate_edge_min_distance,
+            tolerance=0.5,
+        )
+
+    def _on_lock_candidate_top_of_fringe_low_pass_changed(self, checked: bool) -> None:
+        self._toggle(
+            "lock_programmatic_update",
+            "lock_candidate_top_of_fringe_low_pass",
+            self.owner.service.set_lock_candidate_top_of_fringe_low_pass,
+            checked,
+        )
+
+    def _on_pid1_gain_finished(self) -> None:
+        self._pid_spin("pid1_gain_all", self.owner.pid1_gain_spin, self.owner.service.set_pid1_gain_all)
+
+    def _on_pid1_p_finished(self) -> None:
+        self._pid_spin("pid1_gain_p", self.owner.pid1_p_spin, self.owner.service.set_pid1_gain_p)
+
+    def _on_pid1_i_finished(self) -> None:
+        self._pid_spin("pid1_gain_i", self.owner.pid1_i_spin, self.owner.service.set_pid1_gain_i)
+
+    def _on_pid1_d_finished(self) -> None:
+        self._pid_spin("pid1_gain_d", self.owner.pid1_d_spin, self.owner.service.set_pid1_gain_d)
+
+    def _on_pid1_output_channel_changed(self) -> None:
+        self._pid_combo("pid1_output_channel", self.owner.pid1_output_channel_combo, self.owner.service.set_pid1_output_channel)
+
+    def _on_pid1_sign_changed(self) -> None:
+        self._pid_check("pid1_sign", self.owner.pid1_sign_check, self.owner.service.set_pid1_sign)
+
+    def _on_pid1_i_cutoff_enabled_changed(self) -> None:
+        self._pid_check(
+            "pid1_i_cutoff_enabled",
+            self.owner.pid1_use_i_cutoff_check,
+            self.owner.service.set_pid1_i_cutoff_enabled,
+        )
+
+    def _on_pid1_i_cutoff_finished(self) -> None:
+        self._pid_spin("pid1_i_cutoff", self.owner.pid1_i_cutoff_spin, self.owner.service.set_pid1_i_cutoff)
+
+    def _on_pid1_limit_enabled_changed(self) -> None:
+        self._pid_check("pid1_limit_enabled", self.owner.pid1_use_limit_check, self.owner.service.set_pid1_limit_enabled)
+
+    def _on_pid1_limit_finished(self) -> None:
+        self._pid_spin("pid1_limit_max", self.owner.pid1_limit_spin, self.owner.service.set_pid1_limit_max)
+
+    def _on_pid1_enabled_changed(self) -> None:
+        self._pid_check("pid1_enabled", self.owner.pid1_enable_check, self.owner.service.set_pid1_enabled)
+
+    def _on_pid2_gain_finished(self) -> None:
+        self._pid_spin("pid2_gain_all", self.owner.pid2_gain_spin, self.owner.service.set_pid2_gain_all)
+
+    def _on_pid2_p_finished(self) -> None:
+        self._pid_spin("pid2_gain_p", self.owner.pid2_p_spin, self.owner.service.set_pid2_gain_p)
+
+    def _on_pid2_i_finished(self) -> None:
+        self._pid_spin("pid2_gain_i", self.owner.pid2_i_spin, self.owner.service.set_pid2_gain_i)
+
+    def _on_pid2_d_finished(self) -> None:
+        self._pid_spin("pid2_gain_d", self.owner.pid2_d_spin, self.owner.service.set_pid2_gain_d)
+
+    def _on_pid2_output_channel_changed(self) -> None:
+        self._pid_combo("pid2_output_channel", self.owner.pid2_output_channel_combo, self.owner.service.set_pid2_output_channel)
+
+    def _on_pid2_sign_changed(self) -> None:
+        self._pid_check("pid2_sign", self.owner.pid2_sign_check, self.owner.service.set_pid2_sign)
+
+    def _on_pid2_limit_enabled_changed(self) -> None:
+        self._pid_check("pid2_limit_enabled", self.owner.pid2_use_limit_check, self.owner.service.set_pid2_limit_enabled)
+
+    def _on_pid2_limit_finished(self) -> None:
+        self._pid_spin("pid2_limit_max", self.owner.pid2_limit_spin, self.owner.service.set_pid2_limit_max)
+
+    def _on_pid2_enabled_changed(self) -> None:
+        self._pid_check("pid2_enabled", self.owner.pid2_enable_check, self.owner.service.set_pid2_enabled)
+
+    def _pid_spin(self, snapshot_attr: str, spinbox, setter) -> None:
+        self._spin("lock_programmatic_update", snapshot_attr, spinbox, setter)
+
+    def _pid_combo(self, snapshot_attr: str, combo, setter) -> None:
+        self._combo("lock_programmatic_update", snapshot_attr, combo, setter)
+
+    def _pid_check(self, snapshot_attr: str, checkbox, setter) -> None:
+        self._check(snapshot_attr, checkbox, setter)
+
     def apply_texts(self) -> None:
         owner = self.owner
         t = TEXT[owner.language]
@@ -71,9 +348,9 @@ class ScanLockController:
         self._apply_pid_texts("pid2")
 
         if owner.snapshot is None:
-            owner._update_toggle_button(owner.sc_enable_button, False)
-            owner._update_toggle_button(owner.lock_enable_button, False)
-            owner._update_toggle_button(owner.lock_hold_button, False)
+            owner.update_toggle_button(owner.sc_enable_button, False)
+            owner.update_toggle_button(owner.lock_enable_button, False)
+            owner.update_toggle_button(owner.lock_hold_button, False)
             owner.lock_without_lockpoint_check.blockSignals(True)
             owner.lock_without_lockpoint_check.setChecked(False)
             owner.lock_without_lockpoint_check.blockSignals(False)
@@ -93,14 +370,14 @@ class ScanLockController:
 
         self._sync_combo(owner.scan_output_combo, snapshot.sc_output_channel)
         self._sync_combo(owner.scan_shape_combo, snapshot.sc_signal_type)
-        owner._update_toggle_button(owner.sc_enable_button, snapshot.sc_enabled)
+        owner.update_toggle_button(owner.sc_enable_button, snapshot.sc_enabled)
         self._sync_combo(owner.lock_input_signal_combo, snapshot.lock_input_channel)
         self._sync_combo(owner.lock_error_signal_combo, snapshot.lock_error_channel)
         self._sync_combo(owner.lock_type_combo, snapshot.lock_type)
         self._sync_combo(owner.lock_pid_selection_combo, snapshot.lock_pid_selection)
         self._sync_combo(owner.lock_falc_selection_combo, snapshot.lock_falc_selection)
-        owner._update_toggle_button(owner.lock_enable_button, snapshot.lock_enabled)
-        owner._update_toggle_button(owner.lock_hold_button, snapshot.lock_hold)
+        owner.update_toggle_button(owner.lock_enable_button, snapshot.lock_enabled)
+        owner.update_toggle_button(owner.lock_hold_button, snapshot.lock_hold)
         owner.lock_without_lockpoint_check.blockSignals(True)
         owner.lock_without_lockpoint_check.setChecked(snapshot.lock_without_lockpoint)
         owner.lock_without_lockpoint_check.blockSignals(False)

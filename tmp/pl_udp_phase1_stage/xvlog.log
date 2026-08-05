@@ -1,0 +1,15 @@
+INFO: [VRFC 10-2263] Analyzing SystemVerilog file "C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/pl_raw_udp_streamer.v" into library work
+INFO: [VRFC 10-311] analyzing module pl_raw_udp_streamer
+WARNING: [VRFC 10-8426] non-net output port 'tx_start_en' cannot be initialized at declaration in SystemVerilog mode [C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/pl_raw_udp_streamer.v:38]
+WARNING: [VRFC 10-8426] non-net output port 'tx_data' cannot be initialized at declaration in SystemVerilog mode [C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/pl_raw_udp_streamer.v:39]
+WARNING: [VRFC 10-8426] non-net output port 'tx_byte_num' cannot be initialized at declaration in SystemVerilog mode [C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/pl_raw_udp_streamer.v:40]
+WARNING: [VRFC 10-8426] non-net output port 'tx_src_port' cannot be initialized at declaration in SystemVerilog mode [C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/pl_raw_udp_streamer.v:41]
+WARNING: [VRFC 10-8426] non-net output port 'tx_dst_port' cannot be initialized at declaration in SystemVerilog mode [C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/pl_raw_udp_streamer.v:42]
+WARNING: [VRFC 10-8426] non-net output port 'monitor_drop_count' cannot be initialized at declaration in SystemVerilog mode [C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/pl_raw_udp_streamer.v:48]
+WARNING: [VRFC 10-8426] non-net output port 'packet_count' cannot be initialized at declaration in SystemVerilog mode [C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/pl_raw_udp_streamer.v:49]
+INFO: [VRFC 10-2263] Analyzing SystemVerilog file "C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/tb_pl_monitor_packetizer.sv" into library work
+INFO: [VRFC 10-311] analyzing module tb_pl_monitor_packetizer
+INFO: [VRFC 10-2263] Analyzing SystemVerilog file "C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/tb_pl_monitor_gap_index.sv" into library work
+INFO: [VRFC 10-311] analyzing module tb_pl_monitor_gap_index
+INFO: [VRFC 10-2263] Analyzing SystemVerilog file "C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/tb_pl_raw_udp_streamer.sv" into library work
+INFO: [VRFC 10-311] analyzing module tb_pl_raw_udp_streamer

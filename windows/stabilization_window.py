@@ -9,9 +9,10 @@ from windows.base_window import AuxiliaryWindow, set_scrollable_central_widget
 
 
 class StabilizationWindow(AuxiliaryWindow):
-    def __init__(self, owner) -> None:
+    def __init__(self, owner, controller=None) -> None:
         super().__init__()
         self.owner = owner
+        handler = controller or owner
         self.resize(920, 860)
 
         central = QWidget(self)
@@ -24,14 +25,14 @@ class StabilizationWindow(AuxiliaryWindow):
         self.status_hint.setWordWrap(True)
         root.addWidget(self.status_hint)
 
-        self.power_panel = PowerStabilizationPanel(owner)
+        self.power_panel = PowerStabilizationPanel(handler)
         self.power_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         root.addWidget(self.power_panel)
 
         detection_row = QHBoxLayout()
         detection_row.setContentsMargins(0, 0, 0, 0)
         detection_row.setSpacing(14)
-        self.detection_panel = StabilizationDetectionPanel(owner)
+        self.detection_panel = StabilizationDetectionPanel(handler)
         self.detection_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         detection_row.addWidget(self.detection_panel, 1)
         detection_row.addStretch(1)
@@ -198,7 +199,7 @@ class StabilizationWindow(AuxiliaryWindow):
     @staticmethod
     def _configure_combo(combo: QComboBox) -> None:
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
-        combo.setMinimumWidth(220)
+        combo.setMinimumWidth(0)
 
     def _restore_combo_value(self, combo: QComboBox, current, fallback: int) -> None:
         target = fallback if current is None else current
@@ -242,7 +243,7 @@ class StabilizationWindow(AuxiliaryWindow):
         combo.blockSignals(False)
 
     def _update_toggle_button(self, button, enabled: bool) -> None:
-        self.owner._update_toggle_button(button, enabled)
+        self.owner.update_toggle_button(button, enabled)
 
     @staticmethod
     def _output_label(language: str, output_channel: int) -> str:

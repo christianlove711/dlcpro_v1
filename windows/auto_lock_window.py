@@ -1,1078 +1,1112 @@
 from __future__ import annotations
 
-import json
-from datetime import datetime
-from pathlib import Path
-
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QAbstractItemView,
-    QFrame,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
-    QTableWidget,
-    QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
-    QMessageBox,
 )
 
-from dlcpro_service import AutoLockTelemetry, DeviceSnapshot, LockPointSnapshot
-from ui_text import (
-    AUTO_LOCK_STRATEGY_OPTIONS,
-    FALC_PATH_SELECTION_OPTIONS,
-    LOCK_ERROR_SIGNAL_OPTIONS,
-    LOCK_FALC_SELECTION_OPTIONS,
-    TEXT,
-)
-from ui_scaling import fit_window_to_screen
-from windows.auto_lock_scope_window import AutoLockScopeWindow
-from widgets.auto_lock import AutoLockConfigPanel, AutoLockStatusPanel
-from windows.base_window import AuxiliaryWindow
+from controllers.auto_lock_acquisition import AcquisitionFrame, FpgaAcquisitionConfig
+from controllers.auto_lock_settings import AutoLockSettings
+from preset_store import AUTO_LOCK_PRESET_FILENAME, LEGACY_AUTO_LOCK_PRESET_FILENAMES, PresetStore
+from ui_text import AUTO_LOCK_STRATEGY_OPTIONS, FALC_PATH_SELECTION_OPTIONS, TEXT
+from widgets.auto_lock import AutoLockSignalPlot
+from widgets.common_controls import PrecisionButtonRow, SafeComboBox, SafeDoubleSpinBox, SafeSpinBox
+from windows.base_window import AuxiliaryWindow, set_scrollable_central_widget
 
 
-class AutoLockWindow(AuxiliaryWindow):
-    PRESET_PATH = Path(__file__).resolve().parents[1] / "auto_lock_presets.json"
-
-    def __init__(self, owner, controller) -> None:
-        super().__init__()
-        self.owner = owner
-        self.controller = controller
-        self._live_telemetry_active = False
-        self._last_candidates: tuple[LockPointSnapshot, ...] = ()
-        self._preset_store: dict[str, dict[str, object]] = {}
-        self._selected_preset_name: str | None = None
-        self._loaded_preset_name: str | None = None
-        self._preset_buttons: dict[str, QPushButton] = {}
-        self._preset_button_columns = 0
-        self.scope_window = AutoLockScopeWindow(owner, controller)
-
-        self.resize(1120, 820)
-
+class AutoLockLogWindow(AuxiliaryWindow):
+    def __init__(self, owner) -> None:
+        super().__init__(owner)
+        self.resize(920, 620)
         central = QWidget(self)
-        outer = QVBoxLayout(central)
-        outer.setContentsMargins(0, 0, 0, 0)
-
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        outer.addWidget(scroll_area)
-
-        content = QWidget()
-        root = QVBoxLayout(content)
-        root.setContentsMargins(18, 18, 18, 18)
-        root.setSpacing(14)
-
-        self.status_hint = QLabel()
-        self.status_hint.setObjectName("SubtleHint")
-        self.status_hint.setWordWrap(True)
-        root.addWidget(self.status_hint)
-
-        self.status_panel = AutoLockStatusPanel()
-        self.status_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
-        root.addWidget(self.status_panel)
-
-        self.config_panel = AutoLockConfigPanel()
-        self.config_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
-        root.addWidget(self.config_panel)
-
-        self.scope_group = QGroupBox()
-        scope_layout = QVBoxLayout(self.scope_group)
-        scope_layout.setContentsMargins(12, 12, 12, 12)
-        scope_layout.setSpacing(10)
-
-        self.scope_hint_label = QLabel()
-        self.scope_hint_label.setObjectName("SubtleHint")
-        self.scope_hint_label.setWordWrap(True)
-        scope_layout.addWidget(self.scope_hint_label)
-
-        scope_summary_row = QHBoxLayout()
-        scope_summary_row.setSpacing(12)
-        self.scope_mode_label = QLabel()
-        self.scope_mode_value = QLabel()
-        self.scope_mode_value.setObjectName("ReadValue")
-        self.scope_window_button = QPushButton()
-        self.scope_window_button.setObjectName("ScopeOpenButton")
-        scope_summary_row.addWidget(self.scope_mode_label)
-        scope_summary_row.addWidget(self.scope_mode_value, 1)
-        scope_summary_row.addWidget(self.scope_window_button)
-        scope_layout.addLayout(scope_summary_row)
-
-        self.scope_status_label = QLabel()
-        self.scope_status_label.setObjectName("SubtleHint")
-        self.scope_status_label.setWordWrap(True)
-        scope_layout.addWidget(self.scope_status_label)
-        root.addWidget(self.scope_group)
-
-        lower_row = QHBoxLayout()
-        lower_row.setSpacing(14)
-
-        self.candidate_group = QGroupBox()
-        candidate_layout = QVBoxLayout(self.candidate_group)
-        candidate_layout.setContentsMargins(12, 12, 12, 12)
-        candidate_layout.setSpacing(10)
-        self.candidate_table = QTableWidget(0, 3)
-        self.candidate_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.candidate_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.candidate_table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.candidate_table.verticalHeader().setVisible(False)
-        self.candidate_table.horizontalHeader().setStretchLastSection(True)
-        self.candidate_table.setAlternatingRowColors(False)
-        candidate_layout.addWidget(self.candidate_table)
-        lower_row.addWidget(self.candidate_group, 2)
-
-        self.log_group = QGroupBox()
-        log_layout = QVBoxLayout(self.log_group)
-        log_layout.setContentsMargins(12, 12, 12, 12)
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
         self.log_edit = QTextEdit()
         self.log_edit.setReadOnly(True)
-        self.log_edit.setMinimumHeight(170)
-        log_layout.addWidget(self.log_edit)
-        lower_row.addWidget(self.log_group, 2)
-        root.addLayout(lower_row, 1)
-
-        scroll_area.setWidget(content)
+        self.clear_button = QPushButton()
+        self.clear_button.clicked.connect(self.log_edit.clear)
+        layout.addWidget(self.log_edit, 1)
+        layout.addWidget(self.clear_button, 0, Qt.AlignRight)
         self.setCentralWidget(central)
 
-        self.config_panel.start_button.clicked.connect(controller.start)
-        self.config_panel.pre_scan_button.clicked.connect(self._show_pre_scan_help_and_start)
-        self.config_panel.stop_button.clicked.connect(controller.stop)
-        self.config_panel.clear_log_button.clicked.connect(self.clear_log)
-        self.config_panel.preset_scope_button.clicked.connect(self._show_preset_scope_help)
-        self.config_panel.preset_new_button.clicked.connect(self.create_new_preset)
-        self.config_panel.preset_load_button.clicked.connect(self.load_selected_preset)
-        self.config_panel.preset_save_button.clicked.connect(self.save_current_preset)
-        self.config_panel.preset_delete_button.clicked.connect(self.delete_selected_preset)
-        self.config_panel.error_signal_combo.currentIndexChanged.connect(owner._on_auto_lock_error_signal_changed)
-        self.config_panel.falc_selection_combo.currentIndexChanged.connect(owner._on_auto_lock_falc_selection_changed)
-        self.config_panel.falc_path_combo.currentIndexChanged.connect(owner._on_auto_lock_falc_path_selection_changed)
-        self.config_panel.candidate_top_check.toggled.connect(owner._on_auto_lock_candidate_top_changed)
-        self.config_panel.candidate_bottom_check.toggled.connect(owner._on_auto_lock_candidate_bottom_changed)
-        self.config_panel.candidate_positive_edge_check.toggled.connect(
-            owner._on_auto_lock_candidate_positive_edge_changed
-        )
-        self.config_panel.candidate_negative_edge_check.toggled.connect(
-            owner._on_auto_lock_candidate_negative_edge_changed
-        )
-        self.config_panel.candidate_edge_level_spin.connect_live_apply(
-            owner._on_auto_lock_candidate_edge_level_finished
-        )
-        self.config_panel.candidate_peak_noise_tolerance_spin.connect_live_apply(
-            owner._on_auto_lock_candidate_peak_noise_tolerance_finished
-        )
-        self.config_panel.candidate_edge_min_distance_spin.connect_live_apply(
-            owner._on_auto_lock_candidate_edge_min_distance_finished
-        )
-        self.config_panel.candidate_top_of_fringe_low_pass_check.toggled.connect(
-            owner._on_auto_lock_candidate_top_of_fringe_low_pass_changed
-        )
-        self.scope_window_button.clicked.connect(self.open_scope_window)
-        self.candidate_table.cellClicked.connect(controller.on_candidate_row_clicked)
+    def apply_texts(self, language: str) -> None:
+        self._language = language
+        t = TEXT[language]
+        self.setWindowTitle(t["auto_lock_log_title"])
+        self.clear_button.setText(t["auto_lock_clear_log"])
 
-        self.reset_state(owner.language)
+    def append_log(self, line: str) -> None:
+        self.log_edit.append(line)
 
-    def showEvent(self, event) -> None:  # noqa: N802
-        super().showEvent(event)
-        self.controller.on_window_visibility_changed(True)
 
-    def hideEvent(self, event) -> None:  # noqa: N802
-        self.controller.on_window_visibility_changed(False)
-        super().hideEvent(event)
+class AutoLockWaveformWindow(AuxiliaryWindow):
+    def __init__(self, owner) -> None:
+        super().__init__(owner)
+        self.resize(1120, 700)
+        central = QWidget(self)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(10)
 
-    def request_shutdown(self) -> None:
-        self.scope_window.request_shutdown()
-        self.scope_window.close()
-        super().request_shutdown()
+        self.waveform_group = QGroupBox()
+        waveform_layout = QVBoxLayout(self.waveform_group)
+        waveform_layout.setContentsMargins(12, 12, 12, 12)
+        self.signal_plot = AutoLockSignalPlot()
+        self.signal_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        waveform_layout.addWidget(self.signal_plot, 1)
+        root.addWidget(self.waveform_group, 1)
 
-    def open_scope_window(self) -> None:
-        if self.scope_window.isHidden():
-            self.scope_window.move(self.x() + 100, self.y() + 80)
-        self.scope_window.showNormal()
-        self.scope_window.show()
-        fit_window_to_screen(self.scope_window)
-        self.scope_window.raise_()
-        self.scope_window.activateWindow()
+        self.setCentralWidget(central)
 
     def apply_texts(self, language: str) -> None:
         t = TEXT[language]
-        self.setWindowTitle(f"{t['window_title']} - {t['auto_lock']}")
-        self.status_hint.setText(t["auto_lock_status_hint"])
-
-        self.config_panel.title_label.setText(t["auto_lock_config"])
-        self.config_panel.overview_hint_label.setText(t["auto_lock_config_overview_hint"])
-        self.config_panel.set_section_titles(t["auto_lock_basic_section"], t["auto_lock_advanced_section"])
-        self.config_panel.quick_link_group.setTitle(t["auto_lock_quick_link"])
-        self.config_panel.preset_group.setTitle(t["auto_lock_preset_group"])
-        self.config_panel.basic_form_group.setTitle(t["auto_lock_basic_section"])
-        self.config_panel.candidate_filter_group.setTitle(t["lock_candidate_filter"])
-        self.config_panel.runtime_options_group.setTitle(t["auto_lock_advanced_section"])
-        self.config_panel.preset_scope_hint_label.setText(t["auto_lock_preset_scope_hint"])
-        self.config_panel.preset_button_list_label.setText(t["auto_lock_preset_select"])
-        self.config_panel.preset_selected_label.setText(t["auto_lock_preset_selected"])
-        self.config_panel.preset_name_label.setText(t["auto_lock_preset_name"])
-        self.config_panel.preset_scope_button.setText(t["auto_lock_preset_scope_button"])
-        self.config_panel.preset_new_button.setText(t["auto_lock_preset_new"])
-        self.config_panel.preset_load_button.setText(t["auto_lock_preset_load"])
-        self.config_panel.preset_save_button.setText(t["auto_lock_preset_save"])
-        self.config_panel.preset_delete_button.setText(t["auto_lock_preset_delete"])
-        self.config_panel.preset_details_label.setText(t["auto_lock_preset_details"])
-        self.config_panel.error_signal_label.setText(t["lock_error_input_signal"])
-        self.config_panel.falc_selection_label.setText(t["lock_falc_selection"])
-        self.config_panel.falc_path_label.setText(t["falc_path_selection"])
-        self.config_panel.candidate_top_check.setText(t["lock_candidate_top"])
-        self.config_panel.candidate_bottom_check.setText(t["lock_candidate_bottom"])
-        self.config_panel.candidate_positive_edge_check.setText(t["lock_candidate_positive_edge"])
-        self.config_panel.candidate_negative_edge_check.setText(t["lock_candidate_negative_edge"])
-        self.config_panel.candidate_edge_level_label.setText(t["lock_candidate_edge_level"])
-        self.config_panel.candidate_peak_noise_tolerance_label.setText(t["lock_candidate_peak_noise_tolerance"])
-        self.config_panel.candidate_edge_min_distance_label.setText(t["lock_candidate_edge_min_distance"])
-        self.config_panel.candidate_top_of_fringe_low_pass_label.setText(t["lock_candidate_top_of_fringe_low_pass"])
-        self.config_panel.strategy_label.setText(t["auto_lock_strategy"])
-        self.config_panel.search_interval_label.setText(t["auto_lock_search_interval"])
-        self.config_panel.settle_delay_label.setText(t["auto_lock_settle_delay"])
-        self.config_panel.lock_timeout_label.setText(t["auto_lock_lock_timeout"])
-        self.config_panel.monitor_interval_label.setText(t["auto_lock_monitor_interval"])
-        self.config_panel.reacquire_delay_label.setText(t["auto_lock_reacquire_delay"])
-        self.config_panel.pre_scan_duration_label.setText(t["auto_lock_pre_scan_duration"])
-        self.config_panel.pre_scan_shrink_percent_label.setText(t["auto_lock_pre_scan_shrink_percent"])
-        self.config_panel.pre_scan_usage_hint_label.setText(t["auto_lock_pre_scan_usage_hint"])
-        self.config_panel.runtime_hint_label.setText(t["auto_lock_runtime_hint"])
-        self.config_panel.auto_enable_scan_check.setText(t["auto_lock_auto_enable_scan"])
-        self.config_panel.watch_after_lock_check.setText(t["auto_lock_watch_after_lock"])
-        self.config_panel.pre_scan_button.setText(t["auto_lock_pre_scan_start"])
-        self.config_panel.start_button.setText(t["auto_lock_start"])
-        self.config_panel.stop_button.setText(t["auto_lock_stop"])
-        self.config_panel.clear_log_button.setText(t["auto_lock_clear_log"])
-        self.config_panel.pre_scan_button.setToolTip(t["auto_lock_pre_scan_usage_hint"])
-        self.config_panel.preset_scope_button.setToolTip(t["auto_lock_preset_scope_button_hint"])
-        self.config_panel.preset_save_button.setToolTip(t["auto_lock_preset_scope_hint"])
-        self.config_panel.preset_new_button.setToolTip(t["auto_lock_preset_new_hint"])
-        self.config_panel.preset_load_button.setToolTip(t["auto_lock_preset_load_hint"])
-        self.config_panel.preset_delete_button.setToolTip(t["auto_lock_preset_delete_hint"])
-        self.config_panel.preset_details_container.setToolTip(t["auto_lock_preset_scope_hint"])
-        self._refresh_loaded_preset_display()
-
-        for spin in (
-            self.config_panel.search_interval_spin,
-            self.config_panel.settle_delay_spin,
-            self.config_panel.lock_timeout_spin,
-            self.config_panel.monitor_interval_spin,
-            self.config_panel.reacquire_delay_spin,
-            self.config_panel.pre_scan_duration_spin,
-            self.config_panel.pre_scan_shrink_percent_spin,
-        ):
-            spin.setSuffix(" ms")
-        self.config_panel.pre_scan_shrink_percent_spin.setSuffix(" %")
-
-        self.status_panel.title_label.setText(t["auto_lock_runtime"])
-        self.status_panel.phase_label.setText(t["auto_lock_phase"])
-        self.status_panel.lock_state_label.setText(t["auto_lock_lock_state"])
-        self.status_panel.lock_enabled_label.setText(t["auto_lock_lock_enabled"])
-        self.status_panel.template_progress_label.setText(t["auto_lock_template_progress"])
-        self.status_panel.candidate_count_label.setText(t["auto_lock_candidate_count"])
-        self.status_panel.scan_offset_label.setText(t["auto_lock_scan_offset"])
-        self.status_panel.target_label.setText(t["auto_lock_target"])
-        self.status_panel.tracking_label.setText(t["auto_lock_tracking"])
-        self.status_panel.message_label.setText(t["auto_lock_message"])
-
-        self.scope_group.setTitle(t["auto_lock_scope"])
-        self.scope_hint_label.setText(t["auto_lock_scope_status_hint"])
-        self.scope_mode_label.setText(t["auto_lock_scope_mode"])
-        self.scope_window_button.setText(t["auto_lock_scope_open_window"])
-        self.scope_window.apply_texts(language)
-
-        self.candidate_group.setTitle(t["auto_lock_candidates"])
-        self.log_group.setTitle(t["auto_lock_log"])
-        self.candidate_table.setHorizontalHeaderLabels(
-            [t["auto_lock_table_index"], t["auto_lock_table_x"], t["auto_lock_table_y"]]
+        self.setWindowTitle(f"{t['auto_lock_title']} - {t['auto_lock_waveform']}")
+        self.waveform_group.setTitle(t["auto_lock_waveform"])
+        self.signal_plot.set_labels(
+            {
+                "transmission": t["auto_lock_transmission"],
+                "error": t["auto_lock_error"],
+                "empty": t["auto_lock_waiting_frame"],
+                "peak": t["auto_lock_peak"],
+                "zero": t["auto_lock_zero"],
+            }
         )
-        self._populate_strategy_options(language)
-        self._populate_saved_presets()
-        self._populate_combo_options(self.config_panel.error_signal_combo, LOCK_ERROR_SIGNAL_OPTIONS, language)
-        self._populate_combo_options(self.config_panel.falc_selection_combo, LOCK_FALC_SELECTION_OPTIONS, language)
-        self._populate_combo_options(self.config_panel.falc_path_combo, FALC_PATH_SELECTION_OPTIONS, language)
-        self._refresh_selected_preset_details()
+
+    def render_frame(self, frame: AcquisitionFrame, analysis) -> None:
+        self.signal_plot.set_frame(
+            frame,
+            analysis.message,
+            peak_fraction=analysis.peak_fraction,
+            zero_fraction=analysis.zero_fraction,
+        )
 
     def reset_state(self, language: str) -> None:
-        self._live_telemetry_active = False
-        self._last_candidates = ()
-        self.apply_texts(language)
-        t = TEXT[language]
-        self.status_panel.phase_value.setText(t["auto_lock_phase_idle"])
-        self.status_panel.lock_state_value.setText(t["auto_lock_value_waiting"])
-        self.status_panel.lock_enabled_value.setText(t["disabled_state"])
-        self.status_panel.template_progress_value.setText(t["auto_lock_value_waiting"])
-        self.status_panel.candidate_count_value.setText("0")
-        self.status_panel.scan_offset_value.setText(f"0.000000 {t['voltage_unit']}")
-        self.status_panel.target_value.setText(t["auto_lock_value_none"])
-        self.status_panel.tracking_value.setText(t["auto_lock_value_none"])
-        self.status_panel.message_value.setText(t["auto_lock_window_stopped"])
-        self.scope_mode_value.setText(t["auto_lock_value_waiting"])
-        self.scope_status_label.setText(t["auto_lock_scope_click_hint"])
-        self._selected_preset_name = None
-        self._loaded_preset_name = None
-        self.config_panel.preset_name_edit.clear()
-        self._render_preset_detail_cards(None, self._collect_preset_payload())
-        self.scope_window.reset_state(language)
-        self._refresh_loaded_preset_display()
-        self.candidate_table.setRowCount(0)
+        self.signal_plot.set_frame(None, TEXT[language]["auto_lock_waiting_frame"])
 
-    def render_snapshot(self, snapshot: DeviceSnapshot | None) -> None:
-        if snapshot is None:
-            self.reset_state(self.owner.language)
-            return
-        if self._live_telemetry_active:
-            return
-        t = TEXT[self.owner.language]
-        self.status_panel.lock_enabled_value.setText(
-            t["enabled_state"] if snapshot.lock_enabled else t["disabled_state"]
+
+class AutoLockConfigDialog(QDialog):
+    settingsApplied = Signal(object)
+    COMMON_PARAMETER_KEYS = {
+        "auto_lock_config_wide_amplitude",
+        "auto_lock_config_min_amplitude",
+        "auto_lock_config_shrink_factor",
+        "auto_lock_config_offset_step",
+        "auto_lock_config_stable_frames",
+        "auto_lock_config_max_attempts",
+        "auto_lock_config_correction_gain",
+    }
+    TRANSMISSION_PARAMETER_KEYS = {
+        "auto_lock_config_peak_center_tolerance",
+        "auto_lock_config_transmission_peak_sigma",
+        "auto_lock_config_min_transmission_prominence",
+    }
+    ERROR_PARAMETER_KEYS = {
+        "auto_lock_config_zero_center_tolerance",
+        "auto_lock_config_error_slope_sigma",
+        "auto_lock_config_min_error_slope",
+    }
+    PROTECTION_PARAMETER_KEYS = {
+        "auto_lock_config_transmission_guard_tolerance",
+    }
+    PRECISION_OPTIONS = (
+        ("step_100", 100.0),
+        ("step_10", 10.0),
+        ("step_1_int", 1.0),
+        ("step_1", 0.1),
+        ("step_2", 0.01),
+        ("step_3", 0.001),
+        ("step_4", 0.0001),
+        ("step_5", 0.00001),
+        ("step_6", 0.000001),
+    )
+
+    def __init__(self, settings: AutoLockSettings, language: str, parent=None) -> None:
+        super().__init__(parent)
+        self._language = language
+        self.setModal(False)
+        self.setWindowModality(Qt.NonModal)
+        self.setWindowFlags(
+            self.windowFlags()
+            | Qt.WindowSystemMenuHint
+            | Qt.WindowMinimizeButtonHint
+            | Qt.WindowMaximizeButtonHint
         )
-        self.status_panel.scan_offset_value.setText(f"{snapshot.sc_offset:.6f} {snapshot.sc_unit}")
-        self._sync_combo(self.config_panel.error_signal_combo, snapshot.lock_error_channel)
-        self._sync_combo(self.config_panel.falc_selection_combo, snapshot.lock_falc_selection)
-        if snapshot.falc1 is not None:
-            self._sync_combo(self.config_panel.falc_path_combo, snapshot.falc1.path_selection)
-        self._sync_check(self.config_panel.candidate_top_check, snapshot.lock_candidate_top_enabled)
-        self._sync_check(self.config_panel.candidate_bottom_check, snapshot.lock_candidate_bottom_enabled)
-        self._sync_check(
-            self.config_panel.candidate_positive_edge_check,
-            snapshot.lock_candidate_positive_edge_enabled,
+        self.setSizeGripEnabled(True)
+        self.setWindowTitle(TEXT[language]["auto_lock_algorithm_config"])
+        self._preset_store_service = PresetStore(
+            AUTO_LOCK_PRESET_FILENAME,
+            legacy_filenames=LEGACY_AUTO_LOCK_PRESET_FILENAMES,
         )
-        self._sync_check(
-            self.config_panel.candidate_negative_edge_check,
-            snapshot.lock_candidate_negative_edge_enabled,
+        self._preset_store: dict[str, dict[str, object]] = {}
+        self._selected_preset_name: str | None = None
+        self._loaded_preset_name: str | None = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
+
+        self.preset_group = QGroupBox()
+        preset_layout = QGridLayout(self.preset_group)
+        preset_layout.setHorizontalSpacing(12)
+        preset_layout.setVerticalSpacing(10)
+        self.preset_select_label = QLabel()
+        self.preset_combo = SafeComboBox()
+        self.preset_combo.currentIndexChanged.connect(self._on_preset_combo_changed)
+        self.preset_loaded_label = QLabel()
+        self.preset_loaded_value = QLabel()
+        self.preset_loaded_value.setObjectName("ReadValue")
+        self.preset_name_label = QLabel()
+        self.preset_name_edit = QLineEdit()
+        self.preset_new_button = QPushButton()
+        self.preset_new_button.clicked.connect(self._new_preset)
+        self.preset_load_button = QPushButton()
+        self.preset_load_button.clicked.connect(self._load_selected_preset)
+        self.preset_save_button = QPushButton()
+        self.preset_save_button.clicked.connect(self._save_current_preset)
+        self.preset_delete_button = QPushButton()
+        self.preset_delete_button.clicked.connect(self._delete_selected_preset)
+        preset_layout.addWidget(self.preset_select_label, 0, 0)
+        preset_layout.addWidget(self.preset_combo, 0, 1, 1, 2)
+        preset_layout.addWidget(self.preset_loaded_label, 0, 3)
+        preset_layout.addWidget(self.preset_loaded_value, 0, 4)
+        preset_layout.addWidget(self.preset_name_label, 1, 0)
+        preset_layout.addWidget(self.preset_name_edit, 1, 1, 1, 2)
+        preset_layout.addWidget(self.preset_new_button, 1, 3)
+        preset_layout.addWidget(self.preset_save_button, 1, 4)
+        preset_layout.addWidget(self.preset_load_button, 2, 1)
+        preset_layout.addWidget(self.preset_delete_button, 2, 2)
+        preset_layout.setColumnStretch(1, 1)
+        preset_layout.setColumnStretch(2, 1)
+        content_layout.addWidget(self.preset_group)
+
+        precision_row = QHBoxLayout()
+        precision_row.setContentsMargins(0, 0, 0, 0)
+        precision_row.setSpacing(12)
+        self.step_precision_label = QLabel()
+        self.precision_buttons = PrecisionButtonRow(
+            self.PRECISION_OPTIONS,
+            self._set_precision_step,
+            max_columns=5,
         )
-        self._sync_check(
-            self.config_panel.candidate_top_of_fringe_low_pass_check,
-            snapshot.lock_candidate_top_of_fringe_low_pass,
+        precision_row.addWidget(self.step_precision_label, 0, Qt.AlignTop)
+        precision_row.addWidget(self.precision_buttons, 1)
+        content_layout.addLayout(precision_row)
+
+        self.strategy_group = QGroupBox()
+        strategy_form = QFormLayout(self.strategy_group)
+        strategy_form.setHorizontalSpacing(16)
+        strategy_form.setVerticalSpacing(10)
+        self.strategy_label = QLabel()
+        self.strategy_combo = SafeComboBox()
+        self._populate_strategy_options(language)
+        self.strategy_help_button = QPushButton("!", self)
+        self.strategy_help_button.setObjectName("ParameterHelpButton")
+        self.strategy_help_button.setFixedWidth(28)
+        self.strategy_help_button.clicked.connect(lambda checked=False: self._show_parameter_help("auto_lock_config_strategy"))
+        strategy_row = QWidget(self)
+        strategy_layout = QHBoxLayout(strategy_row)
+        strategy_layout.setContentsMargins(0, 0, 0, 0)
+        strategy_layout.setSpacing(8)
+        strategy_layout.addWidget(self.strategy_combo, 1)
+        strategy_layout.addWidget(self.strategy_help_button, 0)
+        strategy_form.addRow(self.strategy_label, strategy_row)
+        content_layout.addWidget(self.strategy_group)
+
+        self.wide_amplitude = self._double(settings.wide_amplitude, 0.0, 1_000_000.0, 6)
+        self.min_amplitude = self._double(settings.min_amplitude, 0.0, 1_000_000.0, 6)
+        self.shrink_factor = self._double(settings.shrink_factor, 0.05, 0.99, 3)
+        self.offset_step = self._double(settings.offset_step, 0.000001, 1_000_000.0, 6)
+        self.peak_center_tolerance = self._double(settings.peak_center_tolerance, 0.001, 0.49, 3)
+        self.zero_center_tolerance = self._double(settings.zero_center_tolerance, 0.001, 0.49, 3)
+        self.transmission_guard_tolerance = self._double(settings.transmission_guard_tolerance, 0.001, 0.49, 3)
+        self.error_slope_sigma = self._double(settings.error_slope_sigma, 0.5, 100.0, 2)
+        self.min_error_slope = self._double(settings.min_error_slope, 0.0, 1_000_000.0, 6)
+        self.transmission_peak_sigma = self._double(settings.transmission_peak_sigma, 0.5, 100.0, 2)
+        self.min_transmission_prominence = self._double(settings.min_transmission_prominence, 0.0, 1_000_000.0, 6)
+        self.stable_frames = self._int(settings.stable_frames, 1, 100)
+        self.max_attempts = self._int(settings.max_offset_attempts, 1, 10_000)
+        self.correction_gain = self._double(settings.offset_correction_gain, 0.05, 2.0, 3)
+
+        self._current_step = 0.01
+        self._step_target = self.zero_center_tolerance
+        self._target_buttons: list[QPushButton] = []
+        self._role_labels: dict[str, QLabel] = {}
+        self._group_boxes: dict[str, QGroupBox] = {}
+        self._field_rows = (
+            ("auto_lock_config_wide_amplitude", self.wide_amplitude),
+            ("auto_lock_config_min_amplitude", self.min_amplitude),
+            ("auto_lock_config_shrink_factor", self.shrink_factor),
+            ("auto_lock_config_offset_step", self.offset_step),
+            ("auto_lock_config_peak_center_tolerance", self.peak_center_tolerance),
+            ("auto_lock_config_zero_center_tolerance", self.zero_center_tolerance),
+            ("auto_lock_config_transmission_guard_tolerance", self.transmission_guard_tolerance),
+            ("auto_lock_config_error_slope_sigma", self.error_slope_sigma),
+            ("auto_lock_config_min_error_slope", self.min_error_slope),
+            ("auto_lock_config_transmission_peak_sigma", self.transmission_peak_sigma),
+            ("auto_lock_config_min_transmission_prominence", self.min_transmission_prominence),
+            ("auto_lock_config_stable_frames", self.stable_frames),
+            ("auto_lock_config_max_attempts", self.max_attempts),
+            ("auto_lock_config_correction_gain", self.correction_gain),
         )
-        self._set_spin_if_idle(self.config_panel.candidate_edge_level_spin, snapshot.lock_candidate_edge_level)
-        self._set_spin_if_idle(
-            self.config_panel.candidate_peak_noise_tolerance_spin,
-            snapshot.lock_candidate_peak_noise_tolerance,
-        )
-        self._set_spin_if_idle(
-            self.config_panel.candidate_edge_min_distance_spin,
-            snapshot.lock_candidate_edge_min_distance,
-        )
-        self.config_panel.candidate_edge_level_spin.setSuffix(f" {t['voltage_unit']}")
-        self.config_panel.candidate_peak_noise_tolerance_spin.setSuffix(f" {t['voltage_unit']}")
-
-    def render_telemetry(self, telemetry: AutoLockTelemetry, language: str) -> None:
-        self._live_telemetry_active = True
-        self._last_candidates = telemetry.candidates
-        t = TEXT[language]
-        self.status_panel.lock_enabled_value.setText(
-            t["enabled_state"] if telemetry.lock_enabled else t["disabled_state"]
-        )
-        self.status_panel.lock_state_value.setText(self._lock_state_text(language, telemetry.lock_state))
-        self.status_panel.candidate_count_value.setText(str(len(telemetry.candidates)))
-        self.status_panel.scan_offset_value.setText(f"{telemetry.sc_offset:.6f} {telemetry.sc_unit}")
-        self.status_panel.target_value.setText(self._format_point(telemetry.selected, t))
-        self.status_panel.tracking_value.setText(self._format_point(telemetry.tracking, t))
-        self._render_candidates(telemetry.candidates)
-        self._render_scope_summary(telemetry, t)
-        self.scope_window.render_telemetry(telemetry, language, self.controller.target_for_display())
-
-    def set_phase(self, language: str, phase_key: str) -> None:
-        self.status_panel.phase_value.setText(TEXT[language][phase_key])
-
-    def set_status_message(self, text: str) -> None:
-        self.status_panel.message_value.setText(text)
-
-    def set_target_point(self, point: LockPointSnapshot | None, language: str) -> None:
-        t = TEXT[language]
-        self.status_panel.target_value.setText(self._format_point(point, t))
-        self._select_candidate_row(point)
-        self.scope_window.set_target_point(point, language)
-
-    def set_scope_status_message(self, text: str) -> None:
-        self.scope_status_label.setText(text)
-        self.scope_window.set_scope_status_message(text)
-
-    def set_writable(self, writable: bool, previewable: bool, running: bool) -> None:
-        editable = previewable and not running
-        for widget in (
-            self.config_panel.strategy_combo,
-            self.config_panel.preset_name_edit,
-            self.config_panel.error_signal_combo,
-            self.config_panel.falc_selection_combo,
-            self.config_panel.falc_path_combo,
-            self.config_panel.search_interval_spin,
-            self.config_panel.settle_delay_spin,
-            self.config_panel.lock_timeout_spin,
-            self.config_panel.monitor_interval_spin,
-            self.config_panel.reacquire_delay_spin,
-            self.config_panel.pre_scan_duration_spin,
-            self.config_panel.pre_scan_shrink_percent_spin,
-            self.config_panel.auto_enable_scan_check,
-            self.config_panel.watch_after_lock_check,
-        ):
-            widget.setEnabled(editable)
-        for button in self._preset_buttons.values():
-            button.setEnabled(editable)
-        self.config_panel.preset_new_button.setEnabled(not running)
-        self.config_panel.preset_load_button.setEnabled(not running and self._selected_preset_name is not None)
-        self.config_panel.preset_save_button.setEnabled(not running)
-        self.config_panel.preset_delete_button.setEnabled(not running and self._selected_preset_name is not None)
-        for widget in (
-            self.config_panel.candidate_top_check,
-            self.config_panel.candidate_bottom_check,
-            self.config_panel.candidate_positive_edge_check,
-            self.config_panel.candidate_negative_edge_check,
-            self.config_panel.candidate_edge_level_spin,
-            self.config_panel.candidate_peak_noise_tolerance_spin,
-            self.config_panel.candidate_edge_min_distance_spin,
-            self.config_panel.candidate_top_of_fringe_low_pass_check,
-        ):
-            widget.setEnabled(writable and not running)
-        self.config_panel.pre_scan_button.setEnabled(not running)
-        self.config_panel.start_button.setEnabled(not running)
-        self.config_panel.stop_button.setEnabled(running)
-        self.config_panel.clear_log_button.setEnabled(True)
-        self.scope_window_button.setEnabled(True)
-        self.scope_window.set_writable(writable, running)
-
-    def append_log(self, text: str) -> None:
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_edit.append(f"[{timestamp}] {text}")
-
-    def clear_log(self) -> None:
-        self.log_edit.clear()
-
-    def mark_live_telemetry_stopped(self) -> None:
-        self._live_telemetry_active = False
-
-    def set_template_progress(self, current: int | None, total: int, language: str) -> None:
-        t = TEXT[language]
-        if current is None or total <= 0:
-            self.status_panel.template_progress_value.setText(t["auto_lock_value_waiting"])
-            return
-        self.status_panel.template_progress_value.setText(
-            t["auto_lock_template_progress_value"].format(current=current, total=total)
-        )
-
-    def _show_pre_scan_help_and_start(self) -> None:
-        t = TEXT[self.owner.language]
-        result = QMessageBox.question(
-            self,
-            t["auto_lock_pre_scan_dialog_title"],
-            t["auto_lock_pre_scan_dialog_body"].format(
-                duration_ms=self.config_panel.pre_scan_duration_spin.value(),
-                shrink_percent=self.config_panel.pre_scan_shrink_percent_spin.value(),
-            ),
-            QMessageBox.Yes | QMessageBox.Cancel,
-            QMessageBox.Yes,
-        )
-        if result != QMessageBox.Yes:
-            return
-        self.controller.start_pre_scan_sequence()
-
-    def save_current_preset(self) -> None:
-        name = self.config_panel.preset_name_edit.text().strip()
-        if not name:
-            QMessageBox.warning(self, "Warning", TEXT[self.owner.language]["auto_lock_preset_name_required"])
-            return
-        self._load_preset_store(force=True)
-        if self._selected_preset_name is None:
-            QMessageBox.warning(
-                self,
-                "Warning",
-                TEXT[self.owner.language]["auto_lock_preset_save_requires_existing"],
-            )
-            return
-        old_name = self._selected_preset_name
-        if old_name != name and name in self._preset_store:
-            QMessageBox.warning(
-                self,
-                "Warning",
-                TEXT[self.owner.language]["auto_lock_preset_name_exists"].format(name=name),
-            )
-            return
-        if old_name and old_name != name and old_name in self._preset_store:
-            self._preset_store.pop(old_name, None)
-        if old_name == self._loaded_preset_name:
-            self._loaded_preset_name = name
-        self._preset_store[name] = self._collect_preset_payload()
-        try:
-            self.PRESET_PATH.write_text(
-                json.dumps(self._preset_store, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-        except OSError:
-            QMessageBox.warning(self, "Warning", TEXT[self.owner.language]["auto_lock_preset_save_failed"])
-            return
-        self._selected_preset_name = name
-        self._populate_saved_presets(selected_name=name)
-        self.append_log(TEXT[self.owner.language]["auto_lock_preset_saved"].format(name=name))
-        QMessageBox.information(
-            self,
-            TEXT[self.owner.language]["auto_lock_preset_save_success_title"],
-            TEXT[self.owner.language]["auto_lock_preset_saved"].format(name=name),
-        )
-
-    def create_new_preset(self) -> None:
-        self._load_preset_store(force=True)
-        name = self.config_panel.preset_name_edit.text().strip()
-        if not name:
-            index = 1
-            base_name = TEXT[self.owner.language]["auto_lock_preset_default_name"]
-            name = f"{base_name} {index}"
-            while name in self._preset_store:
-                index += 1
-                name = f"{base_name} {index}"
-            self.config_panel.preset_name_edit.setText(name)
-        elif name in self._preset_store:
-            QMessageBox.warning(
-                self,
-                "Warning",
-                TEXT[self.owner.language]["auto_lock_preset_name_exists"].format(name=name),
-            )
-            return
-        self._preset_store[name] = self._collect_preset_payload()
-        try:
-            self.PRESET_PATH.write_text(
-                json.dumps(self._preset_store, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-        except OSError:
-            QMessageBox.warning(self, "Warning", TEXT[self.owner.language]["auto_lock_preset_save_failed"])
-            return
-        self._selected_preset_name = name
-        self._populate_saved_presets(selected_name=name)
-        self.append_log(TEXT[self.owner.language]["auto_lock_preset_created"].format(name=name))
-        self._refresh_preset_button_states()
-        self._refresh_selected_preset_details()
-        QMessageBox.information(
-            self,
-            TEXT[self.owner.language]["auto_lock_preset_create_success_title"],
-            TEXT[self.owner.language]["auto_lock_preset_created"].format(name=name),
-        )
-
-    def delete_selected_preset(self) -> None:
-        name = (self._selected_preset_name or "").strip()
-        if not name:
-            QMessageBox.warning(
-                self,
-                "Warning",
-                TEXT[self.owner.language]["auto_lock_preset_delete_requires_selection"],
-            )
-            return
-        result = QMessageBox.question(
-            self,
-            TEXT[self.owner.language]["auto_lock_preset_delete_confirm_title"],
-            TEXT[self.owner.language]["auto_lock_preset_delete_confirm_body"].format(name=name),
-            QMessageBox.Yes | QMessageBox.Cancel,
-            QMessageBox.Cancel,
-        )
-        if result != QMessageBox.Yes:
-            return
-        self._load_preset_store(force=True)
-        self._preset_store.pop(name, None)
-        try:
-            self.PRESET_PATH.write_text(
-                json.dumps(self._preset_store, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-        except OSError:
-            QMessageBox.warning(self, "Warning", TEXT[self.owner.language]["auto_lock_preset_save_failed"])
-            return
-        self._selected_preset_name = None
-        if self._loaded_preset_name == name:
-            self._loaded_preset_name = None
-        self.config_panel.preset_name_edit.clear()
-        self._populate_saved_presets(selected_name=None)
-        self.append_log(TEXT[self.owner.language]["auto_lock_preset_deleted"].format(name=name))
-        QMessageBox.information(
-            self,
-            TEXT[self.owner.language]["auto_lock_preset_delete_success_title"],
-            TEXT[self.owner.language]["auto_lock_preset_deleted"].format(name=name),
-        )
-
-    def load_selected_preset(self, name: str | None = None) -> None:
-        selected = (name or self._selected_preset_name or "").strip()
-        name = selected
-        if not name:
-            return
-        self._load_preset_store(force=True)
-        payload = self._preset_store.get(name)
-        if not isinstance(payload, dict):
-            return
-        result = QMessageBox.question(
-            self,
-            TEXT[self.owner.language]["auto_lock_preset_switch_confirm_title"],
-            TEXT[self.owner.language]["auto_lock_preset_switch_confirm_body"].format(name=name),
-            QMessageBox.Yes | QMessageBox.Cancel,
-            QMessageBox.Cancel,
-        )
-        if result != QMessageBox.Yes:
-            return
-        self._selected_preset_name = name
-        self._apply_preset_payload(payload)
-        self.config_panel.preset_name_edit.setText(name)
-        if self.owner.service.is_connected and self.owner.pending_future is None:
-            queued = self.owner._run_task(
-                lambda preset_payload=payload: self.owner.service.apply_auto_lock_preset(preset_payload),
-                self.owner._on_snapshot_updated,
-            )
-            if not queued:
-                self.append_log(TEXT[self.owner.language]["auto_lock_preset_apply_busy"].format(name=name))
-                return
-        self.append_log(TEXT[self.owner.language]["auto_lock_preset_loaded"].format(name=name))
-        self._loaded_preset_name = name
-        self._refresh_preset_button_states()
-        self._refresh_selected_preset_details()
-        QMessageBox.information(
-            self,
-            TEXT[self.owner.language]["auto_lock_preset_load_success_title"],
-            TEXT[self.owner.language]["auto_lock_preset_loaded"].format(name=name),
-        )
-
-    def _show_preset_scope_help(self) -> None:
-        t = TEXT[self.owner.language]
-        body = "\n".join(
+        self._field_labels: dict[str, QLabel] = {}
+        self._parameter_groups = (
             (
-                t["auto_lock_preset_scope_hint"],
-                "",
-                t["auto_lock_preset_scope_saved_header"],
-                f"- {t['auto_lock_preset_scope_saved_item_links']}",
-                f"- {t['auto_lock_preset_scope_saved_item_workflow']}",
-                f"- {t['auto_lock_preset_scope_saved_item_candidate']}",
-                f"- {t['auto_lock_preset_scope_saved_item_runtime']}",
-                "",
-                t["auto_lock_preset_scope_not_saved_header"],
-                f"- {t['auto_lock_preset_scope_not_saved_item_runtime_status']}",
-                f"- {t['auto_lock_preset_scope_not_saved_item_scope']}",
-                f"- {t['auto_lock_preset_scope_not_saved_item_candidates']}",
-                f"- {t['auto_lock_preset_scope_not_saved_item_target']}",
-                f"- {t['auto_lock_preset_scope_not_saved_item_templates']}",
-            )
+                "auto_lock_config_group_common",
+                (
+                    ("auto_lock_config_wide_amplitude", self.wide_amplitude),
+                    ("auto_lock_config_min_amplitude", self.min_amplitude),
+                    ("auto_lock_config_shrink_factor", self.shrink_factor),
+                    ("auto_lock_config_offset_step", self.offset_step),
+                    ("auto_lock_config_stable_frames", self.stable_frames),
+                    ("auto_lock_config_max_attempts", self.max_attempts),
+                    ("auto_lock_config_correction_gain", self.correction_gain),
+                ),
+            ),
+            (
+                "auto_lock_config_group_transmission",
+                (
+                    ("auto_lock_config_peak_center_tolerance", self.peak_center_tolerance),
+                    ("auto_lock_config_transmission_peak_sigma", self.transmission_peak_sigma),
+                    ("auto_lock_config_min_transmission_prominence", self.min_transmission_prominence),
+                ),
+            ),
+            (
+                "auto_lock_config_group_error",
+                (
+                    ("auto_lock_config_zero_center_tolerance", self.zero_center_tolerance),
+                    ("auto_lock_config_error_slope_sigma", self.error_slope_sigma),
+                    ("auto_lock_config_min_error_slope", self.min_error_slope),
+                ),
+            ),
+            (
+                "auto_lock_config_group_protection",
+                (
+                    ("auto_lock_config_transmission_guard_tolerance", self.transmission_guard_tolerance),
+                ),
+            ),
         )
-        QMessageBox.information(self, t["auto_lock_preset_scope_title"], body)
+        for group_key, rows in self._parameter_groups:
+            group = QGroupBox(TEXT[language][group_key])
+            form = QFormLayout(group)
+            form.setHorizontalSpacing(16)
+            form.setVerticalSpacing(10)
+            for key, widget in rows:
+                label = QLabel(TEXT[language][key])
+                row = self._parameter_row(widget, key)
+                self._field_labels[key] = label
+                form.addRow(label, row)
+            self._group_boxes[group_key] = group
+            content_layout.addWidget(group)
+        content_layout.addStretch(1)
+        scroll_area.setWidget(content)
+        layout.addWidget(scroll_area, 1)
+
+        self.dialog_buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.dialog_buttons.accepted.connect(self.accept)
+        self.dialog_buttons.rejected.connect(self.reject)
+        layout.addWidget(self.dialog_buttons)
+        self._set_precision_step(self._current_step)
+        self._sync_target_buttons()
+        self._populate_presets()
+        self.strategy_combo.currentIndexChanged.connect(self._update_parameter_roles)
+        self._update_parameter_roles()
+
+    def apply_texts(self, language: str) -> None:
+        self._language = language
+        t = TEXT[language]
+        self.setWindowTitle(t["auto_lock_algorithm_config"])
+        self.strategy_group.setTitle(t["auto_lock_config_strategy_group"])
+        self.preset_group.setTitle(t["auto_lock_preset_group"])
+        self.preset_select_label.setText(t["auto_lock_preset_select"])
+        self.preset_loaded_label.setText(t["auto_lock_preset_loaded"])
+        self.preset_name_label.setText(t["auto_lock_preset_name"])
+        self.preset_new_button.setText(t["auto_lock_preset_new"])
+        self.preset_load_button.setText(t["auto_lock_preset_load"])
+        self.preset_save_button.setText(t["auto_lock_preset_save"])
+        self.preset_delete_button.setText(t["auto_lock_preset_delete"])
+        self.dialog_buttons.button(QDialogButtonBox.Ok).setText(t["dialog_ok"])
+        self.dialog_buttons.button(QDialogButtonBox.Cancel).setText(t["dialog_cancel"])
+        self._populate_presets(selected_name=self._selected_preset_name)
+        self.strategy_label.setText(t["auto_lock_config_strategy"])
+        self._populate_strategy_options(language)
+        self.step_precision_label.setText(t["step_precision"])
+        for button in self.precision_buttons.buttons:
+            button.setText(t[button._text_key])
+        for button in self._target_buttons:
+            button.setText(t["precision_target"])
+        for group_key, group in self._group_boxes.items():
+            group.setTitle(t[group_key])
+        for key, widget in self._field_rows:
+            label = self._field_labels.get(key)
+            if label is not None:
+                label.setText(t[key])
+        self._update_parameter_roles()
 
     def _populate_strategy_options(self, language: str) -> None:
-        combo = self.config_panel.strategy_combo
-        current = combo.currentData()
-        combo.blockSignals(True)
-        combo.clear()
+        current = self.strategy_combo.currentData() if hasattr(self, "strategy_combo") else None
+        self.strategy_combo.blockSignals(True)
+        self.strategy_combo.clear()
         for text_key, value in AUTO_LOCK_STRATEGY_OPTIONS:
-            combo.addItem(TEXT[language][text_key], value)
-        combo.blockSignals(False)
-        target = "nearest_center" if current is None else current
-        index = combo.findData(target)
-        if index >= 0:
-            combo.blockSignals(True)
-            combo.setCurrentIndex(index)
-            combo.blockSignals(False)
+            self.strategy_combo.addItem(TEXT[language][text_key], value)
+        target = current or "hybrid"
+        index = self.strategy_combo.findData(target)
+        self.strategy_combo.setCurrentIndex(index if index >= 0 else 0)
+        self.strategy_combo.blockSignals(False)
 
-    def _collect_preset_payload(self) -> dict[str, object]:
+    def _set_strategy(self, strategy: str) -> None:
+        index = self.strategy_combo.findData(strategy)
+        self.strategy_combo.blockSignals(True)
+        self.strategy_combo.setCurrentIndex(index if index >= 0 else 0)
+        self.strategy_combo.blockSignals(False)
+        self._update_parameter_roles()
+
+    def _role_for_parameter(self, key: str) -> str:
+        strategy = str(self.strategy_combo.currentData() or "hybrid")
+        if key in self.COMMON_PARAMETER_KEYS:
+            return "common"
+        if key in self.PROTECTION_PARAMETER_KEYS:
+            return "guard"
+        if strategy == "transmission_primary":
+            if key in self.TRANSMISSION_PARAMETER_KEYS:
+                return "primary"
+            if key in self.ERROR_PARAMETER_KEYS:
+                return "secondary"
+        if strategy == "error_primary":
+            if key in self.ERROR_PARAMETER_KEYS:
+                return "primary"
+            if key in {"auto_lock_config_transmission_peak_sigma", "auto_lock_config_min_transmission_prominence"}:
+                return "guard"
+            if key == "auto_lock_config_peak_center_tolerance":
+                return "unused"
+        if strategy == "hybrid":
+            if key in {"auto_lock_config_transmission_peak_sigma", "auto_lock_config_min_transmission_prominence"}:
+                return "primary"
+            if key in self.ERROR_PARAMETER_KEYS:
+                return "primary"
+            if key == "auto_lock_config_peak_center_tolerance":
+                return "secondary"
+        return "secondary"
+
+    def _update_parameter_roles(self, *_args) -> None:
+        t = TEXT[self._language]
+        for key, label in self._role_labels.items():
+            role = self._role_for_parameter(key)
+            label.setText(t[f"auto_lock_role_{role}"])
+            label.setToolTip(t[f"auto_lock_role_{role}_hint"])
+            label.setProperty("role", role)
+            label.style().unpolish(label)
+            label.style().polish(label)
+            label.update()
+
+    def load_settings(self, settings: AutoLockSettings) -> None:
+        self._set_strategy(settings.strategy)
+        values = (
+            (self.wide_amplitude, settings.wide_amplitude),
+            (self.min_amplitude, settings.min_amplitude),
+            (self.shrink_factor, settings.shrink_factor),
+            (self.offset_step, settings.offset_step),
+            (self.peak_center_tolerance, settings.peak_center_tolerance),
+            (self.zero_center_tolerance, settings.zero_center_tolerance),
+            (self.transmission_guard_tolerance, settings.transmission_guard_tolerance),
+            (self.error_slope_sigma, settings.error_slope_sigma),
+            (self.min_error_slope, settings.min_error_slope),
+            (self.transmission_peak_sigma, settings.transmission_peak_sigma),
+            (self.min_transmission_prominence, settings.min_transmission_prominence),
+            (self.stable_frames, settings.stable_frames),
+            (self.max_attempts, settings.max_offset_attempts),
+            (self.correction_gain, settings.offset_correction_gain),
+        )
+        for spin, value in values:
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
+
+    def settings(self) -> AutoLockSettings:
+        return AutoLockSettings(
+            strategy=str(self.strategy_combo.currentData() or "hybrid"),
+            wide_amplitude=self.wide_amplitude.value(),
+            min_amplitude=self.min_amplitude.value(),
+            shrink_factor=self.shrink_factor.value(),
+            offset_step=self.offset_step.value(),
+            peak_center_tolerance=self.peak_center_tolerance.value(),
+            zero_center_tolerance=self.zero_center_tolerance.value(),
+            transmission_guard_tolerance=self.transmission_guard_tolerance.value(),
+            error_slope_sigma=self.error_slope_sigma.value(),
+            min_error_slope=self.min_error_slope.value(),
+            transmission_peak_sigma=self.transmission_peak_sigma.value(),
+            min_transmission_prominence=self.min_transmission_prominence.value(),
+            stable_frames=self.stable_frames.value(),
+            max_offset_attempts=self.max_attempts.value(),
+            offset_correction_gain=self.correction_gain.value(),
+        )
+
+    def _settings_payload(self, settings: AutoLockSettings) -> dict[str, object]:
         return {
-            "strategy": self.config_panel.strategy_combo.currentData(),
-            "pre_scan_duration_ms": int(self.config_panel.pre_scan_duration_spin.value()),
-            "pre_scan_shrink_percent": int(self.config_panel.pre_scan_shrink_percent_spin.value()),
-            "search_interval_ms": int(self.config_panel.search_interval_spin.value()),
-            "settle_delay_ms": int(self.config_panel.settle_delay_spin.value()),
-            "lock_timeout_ms": int(self.config_panel.lock_timeout_spin.value()),
-            "monitor_interval_ms": int(self.config_panel.monitor_interval_spin.value()),
-            "reacquire_delay_ms": int(self.config_panel.reacquire_delay_spin.value()),
-            "auto_enable_scan": bool(self.config_panel.auto_enable_scan_check.isChecked()),
-            "watch_after_lock": bool(self.config_panel.watch_after_lock_check.isChecked()),
-            "error_signal": self.config_panel.error_signal_combo.currentData(),
-            "falc_selection": self.config_panel.falc_selection_combo.currentData(),
-            "falc_path": self.config_panel.falc_path_combo.currentData(),
-            "candidate_top": bool(self.config_panel.candidate_top_check.isChecked()),
-            "candidate_bottom": bool(self.config_panel.candidate_bottom_check.isChecked()),
-            "candidate_positive_edge": bool(self.config_panel.candidate_positive_edge_check.isChecked()),
-            "candidate_negative_edge": bool(self.config_panel.candidate_negative_edge_check.isChecked()),
-            "candidate_edge_level": float(self.config_panel.candidate_edge_level_spin.value()),
-            "candidate_peak_noise_tolerance": float(self.config_panel.candidate_peak_noise_tolerance_spin.value()),
-            "candidate_edge_min_distance": int(self.config_panel.candidate_edge_min_distance_spin.value()),
-            "candidate_top_of_fringe_low_pass": bool(
-                self.config_panel.candidate_top_of_fringe_low_pass_check.isChecked()
-            ),
+            "strategy": str(settings.strategy),
+            "wide_amplitude": float(settings.wide_amplitude),
+            "min_amplitude": float(settings.min_amplitude),
+            "shrink_factor": float(settings.shrink_factor),
+            "offset_step": float(settings.offset_step),
+            "peak_center_tolerance": float(settings.peak_center_tolerance),
+            "zero_center_tolerance": float(settings.zero_center_tolerance),
+            "transmission_guard_tolerance": float(settings.transmission_guard_tolerance),
+            "error_slope_sigma": float(settings.error_slope_sigma),
+            "min_error_slope": float(settings.min_error_slope),
+            "transmission_peak_sigma": float(settings.transmission_peak_sigma),
+            "min_transmission_prominence": float(settings.min_transmission_prominence),
+            "stable_frames": int(settings.stable_frames),
+            "max_offset_attempts": int(settings.max_offset_attempts),
+            "offset_correction_gain": float(settings.offset_correction_gain),
         }
 
-    def _apply_preset_payload(self, payload: dict[str, object]) -> None:
-        self._set_combo_by_data(self.config_panel.strategy_combo, payload.get("strategy"))
-        self.config_panel.pre_scan_duration_spin.setValue(int(payload.get("pre_scan_duration_ms", 10_000)))
-        self.config_panel.pre_scan_shrink_percent_spin.setValue(int(payload.get("pre_scan_shrink_percent", 20)))
-        self.config_panel.search_interval_spin.setValue(int(payload.get("search_interval_ms", 400)))
-        self.config_panel.settle_delay_spin.setValue(int(payload.get("settle_delay_ms", 250)))
-        self.config_panel.lock_timeout_spin.setValue(int(payload.get("lock_timeout_ms", 4_000)))
-        self.config_panel.monitor_interval_spin.setValue(int(payload.get("monitor_interval_ms", 500)))
-        self.config_panel.reacquire_delay_spin.setValue(int(payload.get("reacquire_delay_ms", 800)))
-        self.config_panel.auto_enable_scan_check.setChecked(bool(payload.get("auto_enable_scan", True)))
-        self.config_panel.watch_after_lock_check.setChecked(bool(payload.get("watch_after_lock", True)))
-        self._set_combo_by_data(self.config_panel.error_signal_combo, payload.get("error_signal"))
-        self._set_combo_by_data(self.config_panel.falc_selection_combo, payload.get("falc_selection"))
-        self._set_combo_by_data(self.config_panel.falc_path_combo, payload.get("falc_path"))
-        self.config_panel.candidate_top_check.setChecked(bool(payload.get("candidate_top", True)))
-        self.config_panel.candidate_bottom_check.setChecked(bool(payload.get("candidate_bottom", False)))
-        self.config_panel.candidate_positive_edge_check.setChecked(bool(payload.get("candidate_positive_edge", True)))
-        self.config_panel.candidate_negative_edge_check.setChecked(bool(payload.get("candidate_negative_edge", False)))
-        self.config_panel.candidate_edge_level_spin.setValue(float(payload.get("candidate_edge_level", 0.0)))
-        self.config_panel.candidate_peak_noise_tolerance_spin.setValue(
-            float(payload.get("candidate_peak_noise_tolerance", 0.0))
-        )
-        self.config_panel.candidate_edge_min_distance_spin.setValue(
-            int(payload.get("candidate_edge_min_distance", 0))
-        )
-        self.config_panel.candidate_top_of_fringe_low_pass_check.setChecked(
-            bool(payload.get("candidate_top_of_fringe_low_pass", False))
+    def _settings_from_payload(self, payload: dict[str, object]) -> AutoLockSettings:
+        defaults = AutoLockSettings()
+        return AutoLockSettings(
+            strategy=str(payload.get("strategy", defaults.strategy)),
+            wide_amplitude=float(payload.get("wide_amplitude", defaults.wide_amplitude)),
+            min_amplitude=float(payload.get("min_amplitude", defaults.min_amplitude)),
+            shrink_factor=float(payload.get("shrink_factor", defaults.shrink_factor)),
+            offset_step=float(payload.get("offset_step", defaults.offset_step)),
+            peak_center_tolerance=float(payload.get("peak_center_tolerance", defaults.peak_center_tolerance)),
+            zero_center_tolerance=float(payload.get("zero_center_tolerance", defaults.zero_center_tolerance)),
+            transmission_guard_tolerance=float(
+                payload.get("transmission_guard_tolerance", defaults.transmission_guard_tolerance)
+            ),
+            error_slope_sigma=float(payload.get("error_slope_sigma", defaults.error_slope_sigma)),
+            min_error_slope=float(payload.get("min_error_slope", defaults.min_error_slope)),
+            transmission_peak_sigma=float(payload.get("transmission_peak_sigma", defaults.transmission_peak_sigma)),
+            min_transmission_prominence=float(
+                payload.get("min_transmission_prominence", defaults.min_transmission_prominence)
+            ),
+            stable_frames=int(payload.get("stable_frames", defaults.stable_frames)),
+            max_offset_attempts=int(payload.get("max_offset_attempts", defaults.max_offset_attempts)),
+            offset_correction_gain=float(payload.get("offset_correction_gain", defaults.offset_correction_gain)),
         )
 
-    def _load_preset_store(self, force: bool = False) -> None:
-        if self._preset_store and not force:
-            return
-        if not self.PRESET_PATH.exists():
-            self._preset_store = {}
-            return
+    def _load_preset_store(self) -> None:
+        self._preset_store = self._preset_store_service.load()
+
+    def _write_preset_store(self) -> bool:
         try:
-            data = json.loads(self.PRESET_PATH.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            self._preset_store = {}
-            return
-        self._preset_store = data if isinstance(data, dict) else {}
+            self._preset_store_service.save(self._preset_store)
+        except OSError:
+            t = TEXT[self._language]
+            QMessageBox.warning(self, t["warning_title"], t["auto_lock_preset_save_failed"])
+            return False
+        return True
 
-    def _populate_saved_presets(self, selected_name: str | None = None) -> None:
-        self._load_preset_store(force=True)
+    def _populate_presets(self, selected_name: str | None = None) -> None:
+        t = TEXT[self._language]
+        self._load_preset_store()
         current = selected_name if selected_name is not None else self._selected_preset_name
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.clear()
+        self.preset_combo.addItem(t["auto_lock_preset_none"], "")
+        for name in sorted(self._preset_store):
+            self.preset_combo.addItem(name, name)
+        index = self.preset_combo.findData(current or "")
+        self.preset_combo.setCurrentIndex(index if index >= 0 else 0)
+        self.preset_combo.blockSignals(False)
         self._selected_preset_name = current if current in self._preset_store else None
-        self._rebuild_preset_buttons()
-        self._refresh_selected_preset_details()
+        if self._selected_preset_name:
+            self.preset_name_edit.setText(self._selected_preset_name)
+        self._refresh_preset_buttons()
 
-    def _rebuild_preset_buttons(self) -> None:
-        layout = self.config_panel.preset_button_grid
-        while layout.count():
-            item = layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        self._preset_buttons.clear()
+    def _on_preset_combo_changed(self) -> None:
+        name = str(self.preset_combo.currentData() or "").strip()
+        self._selected_preset_name = name or None
+        if name:
+            self.preset_name_edit.setText(name)
+        self._refresh_preset_buttons()
 
-        column_count = self._preset_button_column_count()
-        self._preset_button_columns = column_count
-        for index, name in enumerate(sorted(self._preset_store)):
-            button = QPushButton(name)
-            button.setCheckable(True)
-            button.clicked.connect(lambda _checked=False, preset_name=name: self._on_preset_button_clicked(preset_name))
-            row = index // column_count
-            col = index % column_count
-            layout.addWidget(button, row, col)
-            self._preset_buttons[name] = button
-        self._refresh_preset_button_states()
+    def _refresh_preset_buttons(self) -> None:
+        selected = self._selected_preset_name is not None
+        self.preset_load_button.setEnabled(selected)
+        self.preset_delete_button.setEnabled(selected)
+        self._refresh_loaded_preset_text()
 
-    def _on_preset_button_clicked(self, name: str) -> None:
-        current_name = self._selected_preset_name
-        if current_name == name:
-            self._refresh_preset_button_states()
+    def _refresh_loaded_preset_text(self) -> None:
+        t = TEXT[self._language]
+        self.preset_loaded_value.setText(self._loaded_preset_name or t["auto_lock_preset_none"])
+
+    def _new_preset(self) -> None:
+        self._load_preset_store()
+        base_name = TEXT[self._language]["auto_lock_preset_default_name"]
+        index = 1
+        name = f"{base_name} {index}"
+        while name in self._preset_store:
+            index += 1
+            name = f"{base_name} {index}"
+        self._selected_preset_name = None
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.setCurrentIndex(0)
+        self.preset_combo.blockSignals(False)
+        self.preset_name_edit.setText(name)
+        self._refresh_preset_buttons()
+
+    def _save_current_preset(self) -> None:
+        t = TEXT[self._language]
+        self._load_preset_store()
+        name = self.preset_name_edit.text().strip()
+        if not name:
+            QMessageBox.warning(self, t["warning_title"], t["auto_lock_preset_name_required"])
+            return
+        if name in self._preset_store and name != self._selected_preset_name:
+            QMessageBox.warning(self, t["warning_title"], t["auto_lock_preset_name_exists"].format(name=name))
+            return
+        self._preset_store[name] = self._settings_payload(self.settings())
+        if not self._write_preset_store():
             return
         self._selected_preset_name = name
-        self.config_panel.preset_name_edit.setText(name)
-        self._refresh_preset_button_states()
-        self._refresh_selected_preset_details()
+        self._populate_presets(selected_name=name)
+        QMessageBox.information(self, t["auto_lock_preset_saved_title"], t["auto_lock_preset_saved"].format(name=name))
 
-    def _refresh_preset_button_states(self) -> None:
-        for name, button in self._preset_buttons.items():
-            checked = name == self._selected_preset_name
-            button.blockSignals(True)
-            button.setChecked(checked)
-            button.blockSignals(False)
-        self.config_panel.preset_load_button.setEnabled(self._selected_preset_name is not None)
-        self.config_panel.preset_delete_button.setEnabled(self._selected_preset_name is not None)
-        self._refresh_loaded_preset_display()
-
-    def _refresh_loaded_preset_display(self) -> None:
-        t = TEXT[self.owner.language]
-        name = (self._loaded_preset_name or "").strip()
-        self.config_panel.preset_selected_value.setText(name or t["auto_lock_preset_selected_none"])
-
-    def _refresh_selected_preset_details(self) -> None:
+    def _load_selected_preset(self) -> None:
+        t = TEXT[self._language]
         name = (self._selected_preset_name or "").strip()
         if not name:
-            self._render_preset_detail_cards(None, self._collect_preset_payload())
             return
-        self._load_preset_store(force=True)
+        self._load_preset_store()
         payload = self._preset_store.get(name)
         if not isinstance(payload, dict):
-            self._render_preset_detail_cards(None, self._collect_preset_payload())
             return
-        self._render_preset_detail_cards(name, payload)
-
-    def _build_preset_detail_sections(self, name: str | None, payload: dict[str, object]) -> list[tuple[str, list[str]]]:
-        t = TEXT[self.owner.language]
-        strategy_text = self._combo_label_for_data(self.config_panel.strategy_combo, payload.get("strategy"))
-        error_signal_text = self._combo_label_for_data(self.config_panel.error_signal_combo, payload.get("error_signal"))
-        falc_selection_text = self._combo_label_for_data(
-            self.config_panel.falc_selection_combo,
-            payload.get("falc_selection"),
+        result = QMessageBox.question(
+            self,
+            t["auto_lock_preset_load_confirm_title"],
+            t["auto_lock_preset_load_confirm_body"].format(name=name),
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel,
         )
-        falc_path_text = self._combo_label_for_data(self.config_panel.falc_path_combo, payload.get("falc_path"))
-        title = f"{t['auto_lock_preset_name']}: {name}" if name else t["auto_lock_preset_scope_current_title"]
-        return [
-            (
-                title,
-                [
-                    t["auto_lock_preset_scope_hint"],
-                ],
-            ),
-            (
-                t["auto_lock_preset_saved_values_header"],
-                [
-                    f"{t['auto_lock_strategy']}: {strategy_text}",
-                    f"{t['auto_lock_pre_scan_duration']}: {int(payload.get('pre_scan_duration_ms', 10000))} ms",
-                    f"{t['auto_lock_pre_scan_shrink_percent']}: {int(payload.get('pre_scan_shrink_percent', 20))} %",
-                    f"{t['lock_error_input_signal']}: {error_signal_text}",
-                    f"{t['lock_falc_selection']}: {falc_selection_text}",
-                    f"{t['falc_path_selection']}: {falc_path_text}",
-                ],
-            ),
-            (
-                t["auto_lock_basic_section"],
-                [
-                    f"{t['auto_lock_search_interval']}: {int(payload.get('search_interval_ms', 400))} ms",
-                    f"{t['auto_lock_settle_delay']}: {int(payload.get('settle_delay_ms', 250))} ms",
-                    f"{t['auto_lock_lock_timeout']}: {int(payload.get('lock_timeout_ms', 4000))} ms",
-                    f"{t['auto_lock_monitor_interval']}: {int(payload.get('monitor_interval_ms', 500))} ms",
-                    f"{t['auto_lock_reacquire_delay']}: {int(payload.get('reacquire_delay_ms', 800))} ms",
-                ],
-            ),
-            (
-                t["lock_candidate_filter"],
-                [
-                    (
-                        f"Top={self._bool_text(bool(payload.get('candidate_top', False)))}  "
-                        f"Bottom={self._bool_text(bool(payload.get('candidate_bottom', False)))}"
-                    ),
-                    (
-                        f"+Edge={self._bool_text(bool(payload.get('candidate_positive_edge', False)))}  "
-                        f"-Edge={self._bool_text(bool(payload.get('candidate_negative_edge', False)))}"
-                    ),
-                    f"{t['lock_candidate_edge_level']}={float(payload.get('candidate_edge_level', 0.0)):.6f}",
-                    (
-                        f"{t['lock_candidate_peak_noise_tolerance']}"
-                        f"={float(payload.get('candidate_peak_noise_tolerance', 0.0)):.6f}"
-                    ),
-                    f"{t['lock_candidate_edge_min_distance']}={int(payload.get('candidate_edge_min_distance', 0))}",
-                    (
-                        f"{t['lock_candidate_top_of_fringe_low_pass']}"
-                        f"={self._bool_text(bool(payload.get('candidate_top_of_fringe_low_pass', False)))}"
-                    ),
-                ],
-            ),
-            (
-                t["auto_lock_advanced_section"],
-                [
-                    f"{t['auto_lock_auto_enable_scan']}: {self._bool_text(bool(payload.get('auto_enable_scan', True)))}",
-                    f"{t['auto_lock_watch_after_lock']}: {self._bool_text(bool(payload.get('watch_after_lock', True)))}",
-                ],
-            ),
-        ]
+        if result != QMessageBox.Yes:
+            return
+        settings = self._settings_from_payload(payload)
+        self.load_settings(settings)
+        self._loaded_preset_name = name
+        self._refresh_loaded_preset_text()
+        self.settingsApplied.emit(settings)
+        QMessageBox.information(self, t["auto_lock_preset_loaded_title"], t["auto_lock_preset_loaded"].format(name=name))
 
-    def _render_preset_detail_cards(self, name: str | None, payload: dict[str, object]) -> None:
-        layout = self.config_panel.preset_details_layout
-        while layout.count():
-            item = layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+    def _delete_selected_preset(self) -> None:
+        t = TEXT[self._language]
+        name = (self._selected_preset_name or "").strip()
+        if not name:
+            return
+        result = QMessageBox.question(
+            self,
+            t["auto_lock_preset_delete_confirm_title"],
+            t["auto_lock_preset_delete_confirm_body"].format(name=name),
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if result != QMessageBox.Yes:
+            return
+        self._load_preset_store()
+        self._preset_store.pop(name, None)
+        if not self._write_preset_store():
+            return
+        if self._loaded_preset_name == name:
+            self._loaded_preset_name = None
+        self._selected_preset_name = None
+        self.preset_name_edit.clear()
+        self._populate_presets()
+        QMessageBox.information(self, t["auto_lock_preset_deleted_title"], t["auto_lock_preset_deleted"].format(name=name))
 
-        sections = self._build_preset_detail_sections(name, payload)
-        column_count = self._preset_detail_column_count()
-        scale = self._ui_scale()
-        for index, (title, lines) in enumerate(sections):
-            card = QFrame()
-            card.setObjectName("LaserPanel")
-            card_layout = QVBoxLayout(card)
-            card_margin = round(10 * scale)
-            card_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
-            card_layout.setSpacing(round(6 * scale))
+    def _parameter_row(self, spinbox, key: str) -> QWidget:
+        row = QWidget(self)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(spinbox, 1)
 
-            title_label = QLabel(title)
-            title_label.setObjectName("SectionTitle")
-            card_layout.addWidget(title_label)
+        role_label = QLabel(self)
+        role_label.setObjectName("ParameterRoleBadge")
+        role_label.setAlignment(Qt.AlignCenter)
+        role_label.setMinimumWidth(64)
+        self._role_labels[key] = role_label
+        layout.addWidget(role_label, 0)
 
-            for line in lines:
-                value_label = QLabel(line)
-                value_label.setWordWrap(True)
-                value_label.setObjectName("SubtleHint")
-                card_layout.addWidget(value_label)
+        target_button = QPushButton(self)
+        target_button.setObjectName("StepTargetButton")
+        target_button.setCheckable(True)
+        target_button._step_target = spinbox
+        target_button.clicked.connect(lambda checked=False, s=spinbox: self._select_step_target(s))
+        self._target_buttons.append(target_button)
+        layout.addWidget(target_button, 0)
 
-            row = index // column_count
-            col = index % column_count
-            layout.addWidget(card, row, col)
+        help_button = QPushButton("!", self)
+        help_button.setObjectName("ParameterHelpButton")
+        help_button.setFixedWidth(28)
+        help_button.clicked.connect(lambda checked=False, k=key: self._show_parameter_help(k))
+        layout.addWidget(help_button, 0)
+        return row
 
-        for col in range(column_count):
-            layout.setColumnStretch(col, 1)
+    def _select_step_target(self, spinbox) -> None:
+        self._step_target = spinbox
+        self._apply_step_to_target()
+        self._sync_target_buttons()
+
+    def _set_precision_step(self, step: float) -> None:
+        self._current_step = step
+        self._apply_step_to_target()
+        for button in self.precision_buttons.buttons:
+            button.setChecked(abs(button._precision_step - step) < 1e-12)
+
+    def _apply_step_to_target(self) -> None:
+        if isinstance(self._step_target, SafeSpinBox):
+            self._step_target.setSingleStep(max(1, int(round(self._current_step))))
+            return
+        self._step_target.setSingleStep(self._current_step)
+
+    def _sync_target_buttons(self) -> None:
+        for button in self._target_buttons:
+            button.blockSignals(True)
+            button.setChecked(getattr(button, "_step_target", None) is self._step_target)
+            button.blockSignals(False)
+
+    def _show_parameter_help(self, key: str) -> None:
+        t = TEXT[self._language]
+        body = t.get(f"{key}_help", key)
+        if key in self._role_labels:
+            role = self._role_for_parameter(key)
+            role_name = t.get(f"auto_lock_role_{role}", role)
+            role_hint = t.get(f"auto_lock_role_{role}_hint", "")
+            role_header = t.get("auto_lock_help_current_role", "Current role")
+            body = f"{role_header}: {role_name}\n{role_hint}\n\n{body}"
+        QMessageBox.information(
+            self,
+            t["auto_lock_config_help_title"],
+            body,
+        )
+
+    def _double(self, value: float, minimum: float, maximum: float, decimals: int) -> SafeDoubleSpinBox:
+        spin = SafeDoubleSpinBox()
+        spin.setRange(minimum, maximum)
+        spin.setDecimals(decimals)
+        spin.setValue(value)
+        return spin
+
+    def _int(self, value: int, minimum: int, maximum: int) -> SafeSpinBox:
+        spin = SafeSpinBox()
+        spin.setRange(minimum, maximum)
+        spin.setValue(value)
+        return spin
+
+
+class AutoLockWindow(AuxiliaryWindow):
+    def __init__(self, owner, controller) -> None:
+        super().__init__(owner)
+        self.owner = owner
+        self.controller = controller
+        self._algorithm_settings = AutoLockSettings()
+        self.resize(1180, 620)
+
+        self.log_window = AutoLockLogWindow(self)
+        self.waveform_window = AutoLockWaveformWindow(self)
+        self.config_window = AutoLockConfigDialog(self._algorithm_settings, owner.language, self)
+        self.config_window.accepted.connect(self._on_algorithm_config_accepted)
+        self.config_window.settingsApplied.connect(self._apply_algorithm_settings)
+        central = QWidget(self)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
+
+        self.header_layout = QGridLayout()
+        self.title_label = QLabel()
+        self.title_label.setObjectName("PageTitle")
+        self.algorithm_button = QPushButton()
+        self.algorithm_button.clicked.connect(controller.show_algorithm_config)
+        self.falc_button = QPushButton()
+        self.falc_button.clicked.connect(controller.open_falc_window)
+        self.waveform_button = QPushButton()
+        self.waveform_button.clicked.connect(self.open_waveform_window)
+        self.log_button = QPushButton()
+        self.log_button.clicked.connect(controller.show_log_window)
+        self._header_stacked: bool | None = None
+        self._reflow_header()
+        root.addLayout(self.header_layout)
+
+        self.top_layout = QGridLayout()
+        self.top_layout.setSpacing(12)
+        self.status_group = self._build_status_group()
+        self.control_group = self._build_control_group()
+        self._top_stacked: bool | None = None
+        self._reflow_top()
+        root.addLayout(self.top_layout)
+
+        self.acquisition_group = self._build_acquisition_group()
+        root.addWidget(self.acquisition_group)
+
+        self.scroll_area = set_scrollable_central_widget(self, central)
+        self.apply_texts(owner.language)
+        self.reset_state(owner.language)
+
+    def request_shutdown(self) -> None:
+        self.log_window.request_shutdown()
+        self.log_window.close()
+        self.waveform_window.request_shutdown()
+        self.waveform_window.close()
+        self.config_window.close()
+        self.controller.shutdown()
+        super().request_shutdown()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        if self._shutdown_requested:
+            self.log_window.request_shutdown()
+            self.log_window.close()
+            self.waveform_window.request_shutdown()
+            self.waveform_window.close()
+            self.config_window.close()
+        super().closeEvent(event)
+
+    def _build_status_group(self) -> QGroupBox:
+        group = QGroupBox()
+        layout = QGridLayout(group)
+        layout.setHorizontalSpacing(12)
+        layout.setVerticalSpacing(10)
+
+        self.phase_name = QLabel()
+        self.phase_value = QLabel()
+        self.phase_value.setObjectName("ReadValue")
+        self.acq_status_name = QLabel()
+        self.acq_status_value = QLabel()
+        self.acq_status_value.setObjectName("ReadValue")
+        self.offset_name = QLabel()
+        self.offset_value = QLabel()
+        self.offset_value.setObjectName("ReadValue")
+        self.amplitude_name = QLabel()
+        self.amplitude_value = QLabel()
+        self.amplitude_value.setObjectName("ReadValue")
+        self.falc_path_name = QLabel()
+        self.falc_path_value = QLabel()
+        self.falc_path_value.setObjectName("ReadValue")
+        self.confidence_name = QLabel()
+        self.confidence_value = QLabel()
+        self.confidence_value.setObjectName("ReadValue")
+        self.confidence_value.setWordWrap(True)
+
+        rows = (
+            (self.phase_name, self.phase_value),
+            (self.acq_status_name, self.acq_status_value),
+            (self.offset_name, self.offset_value),
+            (self.amplitude_name, self.amplitude_value),
+            (self.falc_path_name, self.falc_path_value),
+            (self.confidence_name, self.confidence_value),
+        )
+        for row, (name, value) in enumerate(rows):
+            layout.addWidget(name, row, 0)
+            layout.addWidget(value, row, 1)
+        return group
+
+    def _build_control_group(self) -> QGroupBox:
+        group = QGroupBox()
+        layout = QGridLayout(group)
+        layout.setHorizontalSpacing(10)
+        layout.setVerticalSpacing(10)
+        self.one_click_button = QPushButton()
+        self.one_click_button.clicked.connect(self.controller.start)
+        self.stop_button = QPushButton()
+        self.stop_button.clicked.connect(self.controller.stop)
+        self.start_preview_button = QPushButton()
+        self.start_preview_button.clicked.connect(self.controller.start_preview)
+        self.stop_preview_button = QPushButton()
+        self.stop_preview_button.clicked.connect(self.controller.stop_preview)
+        layout.addWidget(self.one_click_button, 0, 0, 1, 2)
+        layout.addWidget(self.stop_button, 1, 0, 1, 2)
+        layout.addWidget(self.start_preview_button, 2, 0)
+        layout.addWidget(self.stop_preview_button, 2, 1)
+        return group
+
+    def _build_acquisition_group(self) -> QGroupBox:
+        group = QGroupBox()
+        self.acquisition_layout = QGridLayout(group)
+        self.acquisition_layout.setHorizontalSpacing(12)
+        self.acquisition_layout.setVerticalSpacing(10)
+
+        self.source_label = QLabel()
+        self.source_value = QLabel()
+        self.source_value.setObjectName("ReadValue")
+        self.host_label = QLabel()
+        self.host_edit = QLineEdit("192.168.1.10")
+        self.control_port_label = QLabel()
+        self.control_port_spin = SafeSpinBox()
+        self.control_port_spin.setRange(1, 65535)
+        self.control_port_spin.setValue(5001)
+        self.data_port_label = QLabel()
+        self.data_port_spin = SafeSpinBox()
+        self.data_port_spin.setRange(1, 65535)
+        self.data_port_spin.setValue(5002)
+        self.transmission_label = QLabel()
+        self.transmission_channel = SafeSpinBox()
+        self.transmission_channel.setRange(1, 4)
+        self.transmission_channel.setValue(1)
+        self.error_label = QLabel()
+        self.error_channel = SafeSpinBox()
+        self.error_channel.setRange(1, 4)
+        self.error_channel.setValue(2)
+        self.timeout_label = QLabel()
+        self.timeout_spin = SafeSpinBox()
+        self.timeout_spin.setRange(500, 120_000)
+        self.timeout_spin.setValue(1000)
+        self.connect_acq_button = QPushButton()
+        self.connect_acq_button.clicked.connect(self.controller.connect_acquisition)
+        self.disconnect_acq_button = QPushButton()
+        self.disconnect_acq_button.clicked.connect(self.controller.disconnect_acquisition)
+
+        self._acquisition_fields = (
+            (self.source_label, self.source_value),
+            (self.host_label, self.host_edit),
+            (self.control_port_label, self.control_port_spin),
+            (self.data_port_label, self.data_port_spin),
+            (self.transmission_label, self.transmission_channel),
+            (self.error_label, self.error_channel),
+            (self.timeout_label, self.timeout_spin),
+        )
+        self._acquisition_stacked: bool | None = None
+        self._reflow_acquisition()
+        return group
+
+    def _reflow_header(self) -> None:
+        if not hasattr(self, "algorithm_button"):
+            return
+        stacked = self.width() < 900
+        if stacked == self._header_stacked:
+            return
+        widgets = (self.title_label, self.algorithm_button, self.falc_button, self.waveform_button, self.log_button)
+        for widget in widgets:
+            self.header_layout.removeWidget(widget)
+        if stacked:
+            self.header_layout.addWidget(self.title_label, 0, 0, 1, 2)
+            for index, button in enumerate(widgets[1:]):
+                self.header_layout.addWidget(button, 1 + index // 2, index % 2)
+        else:
+            self.header_layout.addWidget(self.title_label, 0, 0)
+            for index, button in enumerate(widgets[1:], start=1):
+                self.header_layout.addWidget(button, 0, index)
+            self.header_layout.setColumnStretch(0, 1)
+        self._header_stacked = stacked
+
+    def _reflow_top(self) -> None:
+        if not hasattr(self, "status_group"):
+            return
+        stacked = self.width() < 900
+        if stacked == self._top_stacked:
+            return
+        self.top_layout.removeWidget(self.status_group)
+        self.top_layout.removeWidget(self.control_group)
+        if stacked:
+            self.top_layout.addWidget(self.status_group, 0, 0)
+            self.top_layout.addWidget(self.control_group, 1, 0)
+        else:
+            self.top_layout.addWidget(self.status_group, 0, 0)
+            self.top_layout.addWidget(self.control_group, 0, 1)
+            self.top_layout.setColumnStretch(0, 1)
+        self._top_stacked = stacked
+
+    def _reflow_acquisition(self) -> None:
+        if not hasattr(self, "_acquisition_fields"):
+            return
+        stacked = self.width() < 900
+        if stacked == self._acquisition_stacked:
+            return
+        for label, field in self._acquisition_fields:
+            self.acquisition_layout.removeWidget(label)
+            self.acquisition_layout.removeWidget(field)
+        self.acquisition_layout.removeWidget(self.connect_acq_button)
+        self.acquisition_layout.removeWidget(self.disconnect_acq_button)
+        if stacked:
+            for row, (label, field) in enumerate(self._acquisition_fields):
+                self.acquisition_layout.addWidget(label, row, 0)
+                self.acquisition_layout.addWidget(field, row, 1)
+            button_row = len(self._acquisition_fields)
+            self.acquisition_layout.addWidget(self.connect_acq_button, button_row, 0)
+            self.acquisition_layout.addWidget(self.disconnect_acq_button, button_row, 1)
+            self.acquisition_layout.setColumnStretch(1, 1)
+        else:
+            for index, (label, field) in enumerate(self._acquisition_fields):
+                row, pair = divmod(index, 2)
+                column = pair * 2
+                self.acquisition_layout.addWidget(label, row, column)
+                self.acquisition_layout.addWidget(field, row, column + 1)
+            button_row = (len(self._acquisition_fields) + 1) // 2
+            self.acquisition_layout.addWidget(self.connect_acq_button, button_row, 0, 1, 2)
+            self.acquisition_layout.addWidget(self.disconnect_acq_button, button_row, 2, 1, 2)
+            self.acquisition_layout.setColumnStretch(1, 1)
+            self.acquisition_layout.setColumnStretch(3, 1)
+        self._acquisition_stacked = stacked
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        if self._preset_buttons and self._preset_button_columns != self._preset_button_column_count():
-            self._rebuild_preset_buttons()
-        self._refresh_selected_preset_details()
+        self._reflow_header()
+        self._reflow_top()
+        self._reflow_acquisition()
 
-    def _preset_detail_column_count(self) -> int:
-        scale = self._ui_scale()
-        side_offset = round(220 * scale)
-        available_width = max(self.config_panel.preset_details_container.width(), self.width() - side_offset) / scale
-        if available_width >= 1500:
-            return 4
-        if available_width >= 1120:
-            return 3
-        if available_width >= 760:
-            return 2
-        return 1
-
-    def _preset_button_column_count(self) -> int:
-        scale = self._ui_scale()
-        available_width = max(self.config_panel.preset_button_container.width(), self.width() - round(220 * scale)) / scale
-        if available_width >= 900:
-            return 4
-        if available_width >= 640:
-            return 3
-        if available_width >= 420:
-            return 2
-        return 1
-
-    def _ui_scale(self) -> float:
-        manager = getattr(self.owner, "scale_manager", None)
-        if manager is None:
-            return 1.0
-        return max(float(manager.scale), 0.01)
-
-    @staticmethod
-    def _set_combo_by_data(combo, value) -> None:
-        index = combo.findData(value)
-        if index >= 0:
-            combo.blockSignals(True)
-            combo.setCurrentIndex(index)
-            combo.blockSignals(False)
-
-    def _populate_combo_options(self, combo, options, language: str) -> None:
-        current = combo.currentData()
-        combo.blockSignals(True)
-        combo.clear()
-        for text_key, value in options:
-            combo.addItem(TEXT[language][text_key], value)
-        if current is not None:
-            index = combo.findData(current)
-            if index >= 0:
-                combo.setCurrentIndex(index)
-        combo.blockSignals(False)
-        self._fit_combo_popup_width(combo)
-
-    @staticmethod
-    def _sync_combo(combo, value: int) -> None:
-        index = combo.findData(value)
-        if index >= 0:
-            combo.blockSignals(True)
-            combo.setCurrentIndex(index)
-            combo.blockSignals(False)
-
-    @staticmethod
-    def _sync_check(widget, value: bool) -> None:
-        widget.blockSignals(True)
-        widget.setChecked(value)
-        widget.blockSignals(False)
-
-    @staticmethod
-    def _set_spin_if_idle(spinbox, value: float) -> None:
-        sync_from_device = getattr(spinbox, "sync_from_device", None)
-        if callable(sync_from_device):
-            sync_from_device(value)
-            return
-        if spinbox.hasFocus():
-            return
-        spinbox.blockSignals(True)
-        spinbox.setValue(value)
-        spinbox.blockSignals(False)
-
-    @staticmethod
-    def _fit_combo_popup_width(combo) -> None:
-        metrics = combo.fontMetrics()
-        widths = [metrics.horizontalAdvance(combo.itemText(i)) for i in range(combo.count())]
-        current_width = metrics.horizontalAdvance(combo.currentText()) if combo.currentText() else 0
-        content_width = max(widths + [current_width, 180])
-        popup_width = content_width + 56
-        combo.view().setMinimumWidth(popup_width)
-        combo.setMinimumWidth(min(max(popup_width, 220), 360))
-
-    @staticmethod
-    def _combo_label_for_data(combo, value) -> str:
-        index = combo.findData(value)
-        if index >= 0:
-            return combo.itemText(index)
-        return str(value)
-
-    def _bool_text(self, value: bool) -> str:
-        t = TEXT[self.owner.language]
-        return t["enabled_state"] if value else t["disabled_state"]
-
-    def _render_candidates(self, candidates: tuple[LockPointSnapshot, ...]) -> None:
-        self.candidate_table.setRowCount(len(candidates))
-        for row, point in enumerate(candidates):
-            self.candidate_table.setItem(row, 0, self._create_table_item(str(row + 1)))
-            self.candidate_table.setItem(row, 1, self._create_table_item(f"{point.x:.6f}"))
-            self.candidate_table.setItem(row, 2, self._create_table_item(f"{point.y:.6f}"))
-
-    def _render_scope_summary(self, telemetry: AutoLockTelemetry, text_map: dict[str, str]) -> None:
-        if telemetry.scope is not None:
-            self.scope_mode_value.setText(self._scope_mode_text(text_map, telemetry.scope.variant))
-            status_text = text_map["auto_lock_scope_click_hint"]
-            if telemetry.scope_error:
-                status_text = f"{text_map['auto_lock_scope_error_prefix']}{telemetry.scope_error}"
-            self.scope_status_label.setText(status_text)
-            return
-
-        self.scope_mode_value.setText(text_map["auto_lock_value_waiting"])
-        if telemetry.scope_error:
-            self.scope_status_label.setText(f"{text_map['auto_lock_scope_error_prefix']}{telemetry.scope_error}")
-            return
-        self.scope_status_label.setText(text_map["auto_lock_scope_click_hint"])
-
-    def _select_candidate_row(self, point: LockPointSnapshot | None) -> None:
-        self.candidate_table.clearSelection()
-        if point is None:
-            return
-        for row, candidate in enumerate(self._last_candidates):
-            if abs(candidate.x - point.x) < 1e-9 and abs(candidate.y - point.y) < 1e-9:
-                self.candidate_table.selectRow(row)
-                return
-
-    @staticmethod
-    def _create_table_item(text: str) -> QTableWidgetItem:
-        item = QTableWidgetItem(text)
-        item.setTextAlignment(Qt.AlignCenter)
-        return item
-
-    @classmethod
-    def _format_point(cls, point: LockPointSnapshot | None, text_map: dict[str, str]) -> str:
-        if point is None:
-            return text_map["auto_lock_value_none"]
-        return f"{point.x:.6f} / {point.y:.6f}"
-
-    @staticmethod
-    def _lock_state_text(language: str, state: int | None) -> str:
+    def apply_texts(self, language: str) -> None:
         t = TEXT[language]
-        if state is None:
-            return t["auto_lock_value_waiting"]
-        if state == 3:
-            return f"{t['auto_lock_state_selected']} (3)"
-        if state == 5:
-            return f"{t['auto_lock_state_locked']} (5)"
-        return t["auto_lock_state_unknown"].format(value=state)
+        self.setWindowTitle(t["auto_lock_title"])
+        self.title_label.setText(t["auto_lock_title"])
+        self.algorithm_button.setText(t["auto_lock_algorithm_config"])
+        self.falc_button.setText(t["auto_lock_falc_settings"])
+        self.waveform_button.setText(t["auto_lock_waveform"])
+        self.log_button.setText(t["auto_lock_log"])
+        self.acquisition_group.setTitle(t["auto_lock_acquisition"])
+        self.source_label.setText(t["auto_lock_source"])
+        self.source_value.setText(t["auto_lock_source_fpga"])
+        self.host_label.setText(t["auto_lock_fpga_ip"])
+        self.control_port_label.setText(t["auto_lock_fpga_control_port"])
+        self.data_port_label.setText(t["auto_lock_fpga_data_port"])
+        self.transmission_label.setText(t["auto_lock_transmission_channel"])
+        self.error_label.setText(t["auto_lock_error_channel"])
+        self.timeout_label.setText(t["auto_lock_timeout"])
+        self.connect_acq_button.setText(t["auto_lock_connect_acq"])
+        self.disconnect_acq_button.setText(t["auto_lock_disconnect_acq"])
+        self.one_click_button.setText(t["auto_lock_one_click"])
+        self.stop_button.setText(t["auto_lock_stop"])
+        self.start_preview_button.setText(t["auto_lock_start_preview"])
+        self.stop_preview_button.setText(t["auto_lock_stop_preview"])
+        self.phase_name.setText(t["auto_lock_phase"])
+        self.acq_status_name.setText(t["auto_lock_acq_status"])
+        self.offset_name.setText(t["auto_lock_scan_offset"])
+        self.amplitude_name.setText(t["auto_lock_scan_amplitude"])
+        self.falc_path_name.setText(t["auto_lock_falc_path"])
+        self.confidence_name.setText(t["auto_lock_confidence"])
+        self.log_window.apply_texts(language)
+        self.waveform_window.apply_texts(language)
+        self.config_window.apply_texts(language)
+        self.set_phase(getattr(self.controller, "_phase", "idle"))
+
+    def acquisition_config(self) -> FpgaAcquisitionConfig:
+        return FpgaAcquisitionConfig(
+            host=self.host_edit.text().strip(),
+            control_port=self.control_port_spin.value(),
+            data_port=self.data_port_spin.value(),
+            transmission_channel=self.transmission_channel.value(),
+            error_channel=self.error_channel.value(),
+            timeout_ms=self.timeout_spin.value(),
+        )
+
+    def current_algorithm_settings(self) -> AutoLockSettings:
+        return self._algorithm_settings
+
+    def open_algorithm_config_window(self, settings: AutoLockSettings) -> None:
+        if self.config_window.isHidden():
+            self.config_window.load_settings(settings)
+        self._show_managed_window(self.config_window)
 
     @staticmethod
-    def _scope_mode_text(text_map: dict[str, str], variant: int) -> str:
-        if variant == 0:
-            return text_map["auto_lock_scope_mode_xy"]
-        if variant == 1:
-            return text_map["auto_lock_scope_mode_time"]
-        if variant == 2:
-            return text_map["auto_lock_scope_mode_frequency"]
-        return str(variant)
+    def _show_managed_window(window: QWidget) -> None:
+        manager = getattr(window, "_window_layout_manager", None)
+        if manager is not None:
+            manager.prepare_show(window)
+        window.showNormal()
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
+    def _on_algorithm_config_accepted(self) -> None:
+        self._apply_algorithm_settings(self.config_window.settings())
+
+    def _apply_algorithm_settings(self, settings: AutoLockSettings) -> None:
+        self._algorithm_settings = settings
+        self.controller.apply_algorithm_settings(self._algorithm_settings)
+
+    def open_log_window(self) -> None:
+        self._show_managed_window(self.log_window)
+
+    def open_waveform_window(self) -> None:
+        self._show_managed_window(self.waveform_window)
+
+    def append_log(self, line: str) -> None:
+        self.log_window.append_log(line)
+        self.confidence_value.setText(line)
+
+    def set_acquisition_status(self, connected: bool, identity: str) -> None:
+        t = TEXT[self.owner.language]
+        text = t["auto_lock_connected"] if connected else t["auto_lock_disconnected"]
+        if identity:
+            text = f"{text}: {identity}"
+        self.acq_status_value.setText(text)
+
+    def set_acquisition_error(self, message: str) -> None:
+        self.acq_status_value.setText(message)
+
+    def set_phase(self, phase: str) -> None:
+        t = TEXT[self.owner.language]
+        self.phase_value.setText(t.get(f"auto_lock_phase_{phase}", phase))
+
+    def render_snapshot(self, snapshot) -> None:
+        t = TEXT[self.owner.language]
+        unit = snapshot.sc_unit or t["voltage_unit"]
+        amplitude_unit = t["scan_amplitude_unit"]
+        if unit != t["voltage_unit"]:
+            amplitude_unit = f"{unit} pp"
+        self.offset_value.setText(f"{snapshot.sc_offset:.6f} {unit}")
+        self.amplitude_value.setText(f"{snapshot.sc_amplitude:.6f} {amplitude_unit}")
+        path_text = t["not_available"]
+        if snapshot.falc1 is not None:
+            path_text = self._option_text(FALC_PATH_SELECTION_OPTIONS, snapshot.falc1.path_selection, self.owner.language)
+        self.falc_path_value.setText(path_text)
+
+    def render_frame(self, frame: AcquisitionFrame, analysis) -> None:
+        self.waveform_window.render_frame(frame, analysis)
+        self.confidence_value.setText(analysis.message)
+
+    def reset_state(self, language: str) -> None:
+        t = TEXT[language]
+        self.set_acquisition_status(False, "")
+        self.phase_value.setText(t["auto_lock_phase_idle"])
+        self.offset_value.setText(f"0.000000 {t['voltage_unit']}")
+        self.amplitude_value.setText(f"0.000000 {t['scan_amplitude_unit']}")
+        self.falc_path_value.setText(t["not_available"])
+        self.confidence_value.setText(t["auto_lock_waiting_frame"])
+        self.waveform_window.reset_state(language)
+
+    def set_writable(self, writable: bool, previewable: bool, running: bool) -> None:
+        self.one_click_button.setEnabled(False)
+        self.stop_button.setEnabled(False)
+        self.algorithm_button.setEnabled(not running)
+        self.config_window.setEnabled(not running)
+        self.falc_button.setEnabled(previewable)
+        self.waveform_button.setEnabled(True)
+        self.log_button.setEnabled(True)
+        self.connect_acq_button.setEnabled(previewable and not running)
+        self.disconnect_acq_button.setEnabled(False)
+        self.start_preview_button.setEnabled(False)
+        self.stop_preview_button.setEnabled(False)
+        for widget in (
+            self.host_edit,
+            self.control_port_spin,
+            self.data_port_spin,
+            self.transmission_channel,
+            self.error_channel,
+            self.timeout_spin,
+        ):
+            widget.setEnabled(previewable and not running)
+
+    def _option_text(self, options: list[tuple[str, object]], value: object, language: str) -> str:
+        for key, item_value in options:
+            if item_value == value:
+                return TEXT[language].get(key, str(value))
+        return str(value)

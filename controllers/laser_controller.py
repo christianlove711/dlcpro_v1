@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QTableWidgetItem
 
 from dlcpro_service import DeviceSnapshot
@@ -11,6 +12,209 @@ from ui_text import ARC_SIGNAL_OPTIONS, PARAMETER_LABELS, PID_OUTPUT_CHANNEL_OPT
 class LaserController:
     def __init__(self, owner) -> None:
         self.owner = owner
+        self.current_apply_timer = QTimer(owner)
+        self.current_apply_timer.setSingleShot(True)
+        self.current_apply_timer.setInterval(150)
+        self.current_apply_timer.timeout.connect(self._apply_current_if_needed)
+
+    def shutdown(self) -> None:
+        self.current_apply_timer.stop()
+
+    def _snapshot(self):
+        if not self.owner.service.is_connected:
+            return None
+        return self.owner.snapshot
+
+    def _submit(self, fn, *, coalesce_key: str | None = None) -> bool:
+        return self.owner.submit_device_task(fn, coalesce_key=coalesce_key)
+
+    def _toggle(self, guard_attr: str, snapshot_attr: str, setter, checked: bool) -> None:
+        snapshot = self._snapshot()
+        if snapshot is None or getattr(self.owner, guard_attr) or checked == getattr(snapshot, snapshot_attr):
+            return
+        self._submit(lambda: setter(checked))
+
+    def _spin(self, guard_attr: str, snapshot_attr: str, widget, setter) -> None:
+        snapshot = self._snapshot()
+        if snapshot is None or getattr(self.owner, guard_attr):
+            return
+        value = widget.value()
+        if abs(value - getattr(snapshot, snapshot_attr)) < 1e-9:
+            return
+        self._submit(lambda: setter(value))
+
+    def _combo(self, guard_attr: str, snapshot_attr: str, combo, setter) -> None:
+        snapshot = self._snapshot()
+        if snapshot is None or getattr(self.owner, guard_attr):
+            return
+        value = int(combo.currentData())
+        if value == getattr(snapshot, snapshot_attr):
+            return
+        self._submit(lambda: setter(value))
+
+    def _on_current_set_changed(self) -> None:
+        owner = self.owner
+        if owner.current_set_programmatic_update:
+            return
+        owner.current_set_dirty = True
+        if owner.service.is_connected:
+            self.current_apply_timer.start()
+
+    def _on_current_set_step_applied(self) -> None:
+        owner = self.owner
+        if owner.current_set_programmatic_update:
+            return
+        owner.current_set_dirty = True
+        self.current_apply_timer.stop()
+        if not owner.service.is_connected:
+            return
+        if owner.busy or owner.task_coordinator.has_user_work:
+            self.current_apply_timer.start(20)
+            return
+        self._apply_current_if_needed()
+
+    def _apply_current_if_needed(self) -> None:
+        owner = self.owner
+        if not owner.service.is_connected or not owner.current_set_dirty:
+            return
+        if owner.busy or owner.task_coordinator.has_user_work:
+            self.current_apply_timer.start(20)
+            return
+        value = owner.current_set_spin.value()
+        owner.current_set_dirty = False
+        if not self._submit(lambda: owner.service.set_current(value), coalesce_key="current_set"):
+            owner.current_set_dirty = True
+            self.current_apply_timer.start()
+
+    def _on_current_clip_finished(self) -> None:
+        owner = self.owner
+        snapshot = self._snapshot()
+        if snapshot is None or owner.cc_programmatic_update:
+            return
+        value = owner.current_clip_spin.value()
+        if abs(value - snapshot.current_clip) < 1e-9:
+            return
+        if owner.notifier.confirm_parameter_write(
+            TEXT[owner.language]["maximum_current"],
+            f"{snapshot.current_clip:.5f}",
+            f"{value:.5f}",
+        ):
+            self._submit(lambda: owner.service.set_current_clip(value))
+
+    def _on_cc_enable_toggled(self, checked: bool) -> None:
+        self._toggle("cc_programmatic_update", "cc_enabled", self.owner.service.set_cc_enabled, checked)
+
+    def _on_feedforward_enable_toggled(self, checked: bool) -> None:
+        self._toggle(
+            "feedforward_programmatic_update",
+            "feedforward_enabled",
+            self.owner.service.set_feedforward_enabled,
+            checked,
+        )
+
+    def _on_feedforward_factor_finished(self) -> None:
+        self._spin(
+            "feedforward_programmatic_update",
+            "feedforward_factor",
+            self.owner.feedforward_factor_spin,
+            self.owner.service.set_feedforward_factor,
+        )
+
+    def _on_arc_enable_toggled(self, checked: bool) -> None:
+        self._toggle("arc_programmatic_update", "arc_enabled", self.owner.service.set_arc_enabled, checked)
+
+    def _on_arc_signal_changed(self) -> None:
+        self._combo("arc_programmatic_update", "arc_signal", self.owner.arc_signal_combo, self.owner.service.set_arc_signal)
+
+    def _on_arc_factor_finished(self) -> None:
+        self._spin("arc_programmatic_update", "arc_factor", self.owner.arc_factor_spin, self.owner.service.set_arc_factor)
+
+    def _on_tc_enable_toggled(self, checked: bool) -> None:
+        self._toggle("tc_programmatic_update", "tc_enabled", self.owner.service.set_tc_enabled, checked)
+
+    def _on_temp_set_finished(self) -> None:
+        self._spin("tc_programmatic_update", "temp_set", self.owner.temp_set_spin, self.owner.service.set_temp_set)
+
+    def _on_tc_arc_enable_toggled(self, checked: bool) -> None:
+        self._toggle("tc_programmatic_update", "tc_arc_enabled", self.owner.service.set_tc_arc_enabled, checked)
+
+    def _on_tc_arc_signal_changed(self) -> None:
+        self._combo(
+            "tc_programmatic_update",
+            "tc_arc_signal",
+            self.owner.tc_arc_signal_combo,
+            self.owner.service.set_tc_arc_signal,
+        )
+
+    def _on_tc_arc_factor_finished(self) -> None:
+        self._spin(
+            "tc_programmatic_update",
+            "tc_arc_factor",
+            self.owner.tc_arc_factor_spin,
+            self.owner.service.set_tc_arc_factor,
+        )
+
+    def _on_pc_enable_toggled(self, checked: bool) -> None:
+        self._toggle("pc_programmatic_update", "pc_enabled", self.owner.service.set_pc_enabled, checked)
+
+    def _on_pc_voltage_set_finished(self) -> None:
+        self._spin(
+            "pc_programmatic_update",
+            "pc_voltage_set",
+            self.owner.pc_voltage_set_spin,
+            self.owner.service.set_pc_voltage_set,
+        )
+
+    def _on_pc_slew_rate_enable_toggled(self, checked: bool) -> None:
+        self._toggle(
+            "pc_programmatic_update",
+            "pc_slew_rate_enabled",
+            self.owner.service.set_pc_slew_rate_enabled,
+            checked,
+        )
+
+    def _on_pc_slew_rate_finished(self) -> None:
+        self._spin(
+            "pc_programmatic_update",
+            "pc_slew_rate",
+            self.owner.pc_slew_rate_spin,
+            self.owner.service.set_pc_slew_rate,
+        )
+
+    def _on_pc_arc_enable_toggled(self, checked: bool) -> None:
+        self._toggle("pc_programmatic_update", "pc_arc_enabled", self.owner.service.set_pc_arc_enabled, checked)
+
+    def _on_pc_arc_signal_changed(self) -> None:
+        self._combo(
+            "pc_programmatic_update",
+            "pc_arc_signal",
+            self.owner.pc_arc_signal_combo,
+            self.owner.service.set_pc_arc_signal,
+        )
+
+    def _on_pc_arc_factor_finished(self) -> None:
+        self._spin(
+            "pc_programmatic_update",
+            "pc_arc_factor",
+            self.owner.pc_arc_factor_spin,
+            self.owner.service.set_pc_arc_factor,
+        )
+
+    def _on_pressure_comp_enable_toggled(self, checked: bool) -> None:
+        self._toggle(
+            "pc_programmatic_update",
+            "pressure_comp_enabled",
+            self.owner.service.set_pressure_comp_enabled,
+            checked,
+        )
+
+    def _on_pressure_comp_factor_finished(self) -> None:
+        self._spin(
+            "pc_programmatic_update",
+            "pressure_comp_factor",
+            self.owner.pressure_comp_factor_spin,
+            self.owner.service.set_pressure_comp_factor,
+        )
 
     def apply_texts(self) -> None:
         owner = self.owner
@@ -75,30 +279,30 @@ class LaserController:
         for buttons in (owner.precision_buttons, owner.tc_precision_buttons, owner.pc_precision_buttons):
             for button in buttons:
                 button.setText(t[button._text_key])
-        owner._update_all_precision_buttons()
+        owner.update_all_precision_buttons()
         for module in owner.module_precision_target_buttons:
-            owner._sync_precision_target_buttons(module)
+            owner.sync_precision_target_buttons(module)
 
         if owner.snapshot is None:
             self.reset_readbacks()
-            owner._update_toggle_button(owner.cc_enable_button, False)
-            owner._update_toggle_button(owner.feedforward_enable_button, False)
-            owner._update_toggle_button(owner.arc_enable_button, False)
-            owner._update_toggle_button(owner.tc_enable_button, False)
-            owner._update_toggle_button(owner.tc_arc_enable_button, False)
-            owner._update_toggle_button(owner.pc_enable_button, False)
-            owner._update_toggle_button(owner.pc_slew_rate_enable_button, False)
-            owner._update_toggle_button(owner.pc_arc_enable_button, False)
-            owner._update_toggle_button(owner.pressure_comp_enable_button, False)
+            owner.update_toggle_button(owner.cc_enable_button, False)
+            owner.update_toggle_button(owner.feedforward_enable_button, False)
+            owner.update_toggle_button(owner.arc_enable_button, False)
+            owner.update_toggle_button(owner.tc_enable_button, False)
+            owner.update_toggle_button(owner.tc_arc_enable_button, False)
+            owner.update_toggle_button(owner.pc_enable_button, False)
+            owner.update_toggle_button(owner.pc_slew_rate_enable_button, False)
+            owner.update_toggle_button(owner.pc_arc_enable_button, False)
+            owner.update_toggle_button(owner.pressure_comp_enable_button, False)
 
     def reset_readbacks(self) -> None:
         owner = self.owner
         t = TEXT[owner.language]
-        owner.current_act_value.setText(owner._unit_only_text("mA"))
-        owner.temp_act_value.setText(owner._unit_only_text(t["temperature_unit"]))
-        owner.pc_voltage_act_value.setText(owner._unit_only_text(t["voltage_unit"]))
-        owner.pressure_comp_air_pressure_value.setText(owner._unit_only_text(t["air_pressure_unit"]))
-        owner.pressure_comp_voltage_value.setText(owner._unit_only_text(t["voltage_unit"]))
+        owner.current_act_value.setText(owner.unit_only_text("mA"))
+        owner.temp_act_value.setText(owner.unit_only_text(t["temperature_unit"]))
+        owner.pc_voltage_act_value.setText(owner.unit_only_text(t["voltage_unit"]))
+        owner.pressure_comp_air_pressure_value.setText(owner.unit_only_text(t["air_pressure_unit"]))
+        owner.pressure_comp_voltage_value.setText(owner.unit_only_text(t["voltage_unit"]))
 
     def render_snapshot(self, snapshot: DeviceSnapshot) -> None:
         owner = self.owner
@@ -226,40 +430,40 @@ class LaserController:
         self._set_spin_if_idle(owner.current_clip_spin, snapshot.current_clip)
         owner.current_clip_spin.setMaximum(max(snapshot.current_clip_writable_limit, owner.current_clip_spin.minimum()))
 
-        owner.current_act_value.setText(owner._format_value_with_unit(snapshot.current_act, 5, "mA"))
+        owner.current_act_value.setText(owner.format_value_with_unit(snapshot.current_act, 5, "mA"))
         self._set_spin_if_idle(owner.feedforward_factor_spin, snapshot.feedforward_factor)
         self._set_spin_if_idle(owner.arc_factor_spin, snapshot.arc_factor)
         self._set_spin_if_idle(owner.temp_set_spin, snapshot.temp_set)
         owner.temp_act_value.setText(
-            owner._format_value_with_unit(snapshot.temp_act, 3, TEXT[owner.language]["temperature_unit"])
+            owner.format_value_with_unit(snapshot.temp_act, 3, TEXT[owner.language]["temperature_unit"])
         )
         self._set_spin_if_idle(owner.tc_arc_factor_spin, snapshot.tc_arc_factor)
         self._set_spin_if_idle(owner.pc_voltage_set_spin, snapshot.pc_voltage_set)
         owner.pc_voltage_act_value.setText(
-            owner._format_value_with_unit(snapshot.pc_voltage_act, 6, TEXT[owner.language]["voltage_unit"])
+            owner.format_value_with_unit(snapshot.pc_voltage_act, 6, TEXT[owner.language]["voltage_unit"])
         )
         self._set_spin_if_idle(owner.pc_slew_rate_spin, snapshot.pc_slew_rate)
         self._set_spin_if_idle(owner.pc_arc_factor_spin, snapshot.pc_arc_factor)
         owner.pressure_comp_air_pressure_value.setText(
-            owner._format_value_with_unit(snapshot.pressure_comp_air_pressure, 3, TEXT[owner.language]["air_pressure_unit"])
+            owner.format_value_with_unit(snapshot.pressure_comp_air_pressure, 3, TEXT[owner.language]["air_pressure_unit"])
         )
         self._set_spin_if_idle(owner.pressure_comp_factor_spin, snapshot.pressure_comp_factor)
         owner.pressure_comp_voltage_value.setText(
-            owner._format_value_with_unit(snapshot.pressure_comp_voltage, 3, TEXT[owner.language]["voltage_unit"])
+            owner.format_value_with_unit(snapshot.pressure_comp_voltage, 3, TEXT[owner.language]["voltage_unit"])
         )
         self._sync_combo(owner.arc_signal_combo, snapshot.arc_signal)
         self._sync_combo(owner.tc_arc_signal_combo, snapshot.tc_arc_signal)
         self._sync_combo(owner.pc_arc_signal_combo, snapshot.pc_arc_signal)
 
-        owner._update_toggle_button(owner.cc_enable_button, snapshot.cc_enabled)
-        owner._update_toggle_button(owner.feedforward_enable_button, snapshot.feedforward_enabled)
-        owner._update_toggle_button(owner.arc_enable_button, snapshot.arc_enabled)
-        owner._update_toggle_button(owner.tc_enable_button, snapshot.tc_enabled)
-        owner._update_toggle_button(owner.tc_arc_enable_button, snapshot.tc_arc_enabled)
-        owner._update_toggle_button(owner.pc_enable_button, snapshot.pc_enabled)
-        owner._update_toggle_button(owner.pc_slew_rate_enable_button, snapshot.pc_slew_rate_enabled)
-        owner._update_toggle_button(owner.pc_arc_enable_button, snapshot.pc_arc_enabled)
-        owner._update_toggle_button(owner.pressure_comp_enable_button, snapshot.pressure_comp_enabled)
+        owner.update_toggle_button(owner.cc_enable_button, snapshot.cc_enabled)
+        owner.update_toggle_button(owner.feedforward_enable_button, snapshot.feedforward_enabled)
+        owner.update_toggle_button(owner.arc_enable_button, snapshot.arc_enabled)
+        owner.update_toggle_button(owner.tc_enable_button, snapshot.tc_enabled)
+        owner.update_toggle_button(owner.tc_arc_enable_button, snapshot.tc_arc_enabled)
+        owner.update_toggle_button(owner.pc_enable_button, snapshot.pc_enabled)
+        owner.update_toggle_button(owner.pc_slew_rate_enable_button, snapshot.pc_slew_rate_enabled)
+        owner.update_toggle_button(owner.pc_arc_enable_button, snapshot.pc_arc_enabled)
+        owner.update_toggle_button(owner.pressure_comp_enable_button, snapshot.pressure_comp_enabled)
 
         owner.current_meta_hint.setText(
             f"{TEXT[owner.language]['current_clip_tuning']}: {snapshot.current_clip_tuning:.5f} mA   |   "

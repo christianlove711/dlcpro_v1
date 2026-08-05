@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QMessageBox, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QGridLayout, QLabel, QMessageBox, QSizePolicy, QVBoxLayout, QWidget
 
 from dlcpro_service import DeviceSnapshot
 from ui_text import LOCK_INPUT_SIGNAL_OPTIONS, RELOCK_OUTPUT_CHANNEL_OPTIONS, TEXT
@@ -9,9 +9,10 @@ from windows.base_window import AuxiliaryWindow, set_scrollable_central_widget
 
 
 class RelockWindow(AuxiliaryWindow):
-    def __init__(self, owner) -> None:
+    def __init__(self, owner, controller=None) -> None:
         super().__init__()
         self.owner = owner
+        handler = controller or owner
         self.resize(1180, 480)
 
         central = QWidget(self)
@@ -24,24 +25,45 @@ class RelockWindow(AuxiliaryWindow):
         self.status_hint.setWordWrap(True)
         root.addWidget(self.status_hint)
 
-        panels = QHBoxLayout()
-        panels.setSpacing(14)
+        self.panels_layout = QGridLayout()
+        self.panels_layout.setSpacing(14)
 
-        self.lock_detection_panel = LockDetectionPanel(owner)
+        self.lock_detection_panel = LockDetectionPanel(handler)
         self.lock_detection_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        panels.addWidget(self.lock_detection_panel, 3)
 
-        self.relock_panel = RelockPanel(owner)
+        self.relock_panel = RelockPanel(handler)
         self.relock_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        panels.addWidget(self.relock_panel, 2)
-        panels.addStretch(1)
+        self._panels_stacked: bool | None = None
+        self._reflow_panels()
 
-        root.addLayout(panels)
+        root.addLayout(self.panels_layout)
         root.addStretch(1)
         self.scroll_area = set_scrollable_central_widget(self, central)
 
         self._configure_combo(self.lock_detection_panel.input_signal_combo)
         self._configure_combo(self.relock_panel.output_channel_combo)
+
+    def _reflow_panels(self) -> None:
+        if not hasattr(self, "lock_detection_panel"):
+            return
+        stacked = self.width() < 900
+        if stacked == self._panels_stacked:
+            return
+        self.panels_layout.removeWidget(self.lock_detection_panel)
+        self.panels_layout.removeWidget(self.relock_panel)
+        if stacked:
+            self.panels_layout.addWidget(self.lock_detection_panel, 0, 0)
+            self.panels_layout.addWidget(self.relock_panel, 1, 0)
+        else:
+            self.panels_layout.addWidget(self.lock_detection_panel, 0, 0)
+            self.panels_layout.addWidget(self.relock_panel, 0, 1)
+            self.panels_layout.setColumnStretch(0, 3)
+            self.panels_layout.setColumnStretch(1, 2)
+        self._panels_stacked = stacked
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._reflow_panels()
 
     def apply_texts(self, language: str) -> None:
         t = TEXT[language]
@@ -153,7 +175,7 @@ class RelockWindow(AuxiliaryWindow):
             return True
         QMessageBox.warning(
             self,
-            "Warning",
+            TEXT[self.owner.language]["warning_title"],
             TEXT[self.owner.language]["relock_window_rule_warning"],
         )
         if self.owner.snapshot is not None:
@@ -228,4 +250,4 @@ class RelockWindow(AuxiliaryWindow):
             combo.blockSignals(False)
 
     def _update_toggle_button(self, button, enabled: bool) -> None:
-        self.owner._update_toggle_button(button, enabled)
+        self.owner.update_toggle_button(button, enabled)

@@ -1,86 +1,85 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
+from dataclasses import dataclass
 
-from PySide6.QtCore import QMargins, QSize
+from PySide6.QtCore import QByteArray, QEvent, QMargins, QObject, QSettings, QSize
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
+
+SETTINGS_ORGANIZATION = "DLCProControl"
+SETTINGS_APPLICATION = "DLCProControl"
 
 SCALE_OPTIONS: tuple[tuple[str, float | None], ...] = (
     ("auto", None),
-    ("50%", 0.50),
-    ("60%", 0.60),
-    ("75%", 0.75),
-    ("90%", 0.90),
+    ("80%", 0.80),
     ("100%", 1.00),
-    ("110%", 1.10),
-    ("125%", 1.25),
-    ("150%", 1.50),
+    ("120%", 1.20),
+    ("140%", 1.40),
 )
 
 
-_PX_PATTERN = re.compile(r"(?P<value>\d+(?:\.\d+)?)px")
+def _screen_for_window(window: QWidget):
+    center = window.frameGeometry().center()
+    screen = QGuiApplication.screenAt(center)
+    if screen is not None:
+        return screen
+    parent = window.parentWidget()
+    if parent is not None and parent.screen() is not None:
+        return parent.screen()
+    return window.screen() or QGuiApplication.primaryScreen()
 
 
-def screen_fit_scale(reference_size: QSize | None = None) -> float:
-    screen = QGuiApplication.primaryScreen()
+def screen_fit_scale(window: QWidget | None = None) -> float:
+    screen = _screen_for_window(window) if window is not None else QGuiApplication.primaryScreen()
     if screen is None:
         return 1.0
     available = screen.availableGeometry().size()
-    reference = reference_size or QSize(1120, 900)
-    width_scale = available.width() / max(reference.width(), 1)
-    height_scale = available.height() / max(reference.height(), 1)
-    return max(0.50, min(1.25, min(width_scale, height_scale, 1.0)))
+    logical_scale = min(available.width() / 1440.0, available.height() / 900.0)
+    return max(0.80, min(1.20, logical_scale))
 
 
-def scaled_size(width: int, height: int, scale: float) -> QSize:
-    return QSize(max(1, round(width * scale)), max(1, round(height * scale)))
-
-
-def fit_size_to_screen(size: QSize, margin: int = 48) -> QSize:
-    screen = QGuiApplication.primaryScreen()
+def fit_size_to_screen(size: QSize, window: QWidget | None = None, margin: int = 32) -> QSize:
+    screen = _screen_for_window(window) if window is not None else QGuiApplication.primaryScreen()
     if screen is None:
         return size
     available = screen.availableGeometry()
     return QSize(
-        min(size.width(), max(320, available.width() - margin)),
-        min(size.height(), max(240, available.height() - margin)),
+        min(size.width(), max(360, available.width() - margin * 2)),
+        min(size.height(), max(280, available.height() - margin * 2)),
     )
 
 
-def fit_window_to_screen(window: QWidget, margin: int = 48) -> None:
-    screen = window.screen() or QGuiApplication.primaryScreen()
+def fit_window_to_screen(window: QWidget, margin: int = 16, *, center: bool = False) -> None:
+    """Keep a window visible without changing its position unless it is off-screen."""
+
+    screen = _screen_for_window(window)
     if screen is None:
         return
-    available = screen.availableGeometry()
-    geometry = window.frameGeometry()
-    if geometry.width() > available.width() - margin or geometry.height() > available.height() - margin:
+    available = screen.availableGeometry().adjusted(margin, margin, -margin, -margin)
+    target = window.frameGeometry()
+    if target.width() > available.width() or target.height() > available.height():
         window.resize(
-            min(geometry.width(), max(320, available.width() - margin)),
-            min(geometry.height(), max(240, available.height() - margin)),
+            min(target.width(), available.width()),
+            min(target.height(), available.height()),
         )
-        geometry = window.frameGeometry()
-    geometry.moveCenter(available.center())
-    if geometry.left() < available.left():
-        geometry.moveLeft(available.left())
-    if geometry.top() < available.top():
-        geometry.moveTop(available.top())
-    if geometry.right() > available.right():
-        geometry.moveRight(available.right())
-    if geometry.bottom() > available.bottom():
-        geometry.moveBottom(available.bottom())
-    window.move(geometry.topLeft())
-
-
-def scale_stylesheet(stylesheet: str, scale: float) -> str:
-    def replace(match: re.Match[str]) -> str:
-        value = float(match.group("value"))
-        scaled = max(1, round(value * scale))
-        return f"{scaled}px"
-
-    return _PX_PATTERN.sub(replace, stylesheet)
+        target = window.frameGeometry()
+    if center:
+        target.moveCenter(available.center())
+    if target.right() < available.left() or target.left() > available.right():
+        target.moveLeft(available.left())
+    if target.bottom() < available.top() or target.top() > available.bottom():
+        target.moveTop(available.top())
+    if target.left() < available.left():
+        target.moveLeft(available.left())
+    if target.top() < available.top():
+        target.moveTop(available.top())
+    if target.right() > available.right():
+        target.moveRight(available.right())
+    if target.bottom() > available.bottom():
+        target.moveBottom(available.bottom())
+    window.move(target.topLeft())
 
 
 def apply_font_scale(app: QApplication, scale: float) -> None:
@@ -90,6 +89,7 @@ def apply_font_scale(app: QApplication, scale: float) -> None:
         base_size = font.pointSizeF()
         if base_size <= 0:
             base_size = 9.0
+        base_size = max(10.5, base_size)
         app.setProperty("basePointSize", base_size)
     font.setPointSizeF(max(7.0, float(base_size) * scale))
     app.setFont(font)
@@ -104,8 +104,14 @@ def _scaled_margins(margins: QMargins, scale: float) -> QMargins:
     )
 
 
+def _scaled_size(size: QSize, scale: float) -> QSize:
+    return QSize(max(1, round(size.width() * scale)), max(1, round(size.height() * scale)))
+
+
 def scale_widget_metrics(root: QWidget, scale: float) -> None:
     for widget in (root, *root.findChildren(QWidget)):
+        if isinstance(widget, QLabel):
+            widget.setWordWrap(True)
         layout = widget.layout()
         if layout is not None:
             base_margins = layout.property("baseContentsMargins")
@@ -128,41 +134,149 @@ def scale_widget_metrics(root: QWidget, scale: float) -> None:
             if base_fixed_size is None:
                 base_fixed_size = QSize(minimum.width(), minimum.height())
                 widget.setProperty("baseFixedSize", base_fixed_size)
-            widget.setFixedSize(scaled_size(base_fixed_size.width(), base_fixed_size.height(), scale))
+            widget.setFixedSize(_scaled_size(base_fixed_size, scale))
+
+        if hasattr(widget, "icon") and not widget.icon().isNull():
+            base_icon_size = widget.property("baseIconSize")
+            if base_icon_size is None:
+                base_icon_size = widget.iconSize()
+                widget.setProperty("baseIconSize", base_icon_size)
+            widget.setIconSize(_scaled_size(base_icon_size, scale))
+
+
+def _metric_stylesheet(scale: float) -> str:
+    control_height = round(28 * scale)
+    horizontal_padding = round(8 * scale)
+    vertical_padding = round(4 * scale)
+    tab_padding_x = round(10 * scale)
+    tab_padding_y = round(6 * scale)
+    page_title_size = round(19 * scale)
+    section_title_size = round(17 * scale)
+    return f"""
+        QPushButton, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
+            min-height: {control_height}px;
+            padding: {vertical_padding}px {horizontal_padding}px;
+        }}
+        QTabBar::tab {{
+            padding: {tab_padding_y}px {tab_padding_x}px;
+        }}
+        QLabel#PageTitle {{ font-size: {page_title_size}px; }}
+        QLabel#SectionTitle {{ font-size: {section_title_size}px; }}
+    """
 
 
 class UiScaleManager:
-    def __init__(self, app: QApplication, base_stylesheet: str, scale: float | None = None) -> None:
+    def __init__(
+        self,
+        app: QApplication,
+        base_stylesheet: str,
+        settings: QSettings | None = None,
+    ) -> None:
         self.app = app
         self.base_stylesheet = base_stylesheet
-        self._manual_scale = scale
-        self.windows: list[tuple[QMainWindow, QSize]] = []
+        self.settings = settings or QSettings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION)
+        self._manual_scale = self._load_scale()
+        self.windows: list[QWidget] = []
 
     @property
     def scale(self) -> float:
-        return self._manual_scale if self._manual_scale is not None else screen_fit_scale()
+        reference = self.windows[0] if self.windows else None
+        return self._manual_scale if self._manual_scale is not None else screen_fit_scale(reference)
+
+    @property
+    def selected_scale(self) -> float | None:
+        return self._manual_scale
+
+    def _load_scale(self) -> float | None:
+        value = self.settings.value("ui/scale", "auto")
+        if value in (None, "", "auto"):
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed in {0.8, 1.0, 1.2, 1.4} else None
 
     def set_scale(self, scale: float | None) -> None:
         self._manual_scale = scale
+        self.settings.setValue("ui/scale", "auto" if scale is None else scale)
         self.apply()
 
-    def register_window(self, window: QMainWindow, width: int, height: int) -> None:
-        size = QSize(width, height)
-        self.windows.append((window, size))
-        self._resize_window(window, size)
+    def register_window(self, window: QWidget) -> None:
+        if window not in self.windows:
+            self.windows.append(window)
 
-    def register_windows(self, windows: Iterable[tuple[QMainWindow, int, int]]) -> None:
-        for window, width, height in windows:
-            self.register_window(window, width, height)
+    def register_windows(self, windows: Iterable[QWidget]) -> None:
+        for window in windows:
+            self.register_window(window)
 
     def apply(self) -> None:
         scale = self.scale
         apply_font_scale(self.app, scale)
-        self.app.setStyleSheet(scale_stylesheet(self.base_stylesheet, scale))
-        for window, base_size in self.windows:
-            self._resize_window(window, base_size)
+        self.app.setStyleSheet(self.base_stylesheet + _metric_stylesheet(scale))
+        for window in self.windows:
+            scale_widget_metrics(window, scale)
 
-    def _resize_window(self, window: QMainWindow, base_size: QSize) -> None:
-        scale_widget_metrics(window, self.scale)
-        window.resize(fit_size_to_screen(scaled_size(base_size.width(), base_size.height(), self.scale)))
-        fit_window_to_screen(window)
+
+@dataclass(frozen=True, slots=True)
+class WindowRegistration:
+    window_id: str
+    default_size: QSize
+
+
+class WindowLayoutManager(QObject):
+    def __init__(self, settings: QSettings | None = None) -> None:
+        super().__init__()
+        self.settings = settings or QSettings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION)
+        self._registrations: dict[QWidget, WindowRegistration] = {}
+        self._restored: set[QWidget] = set()
+
+    def register_window(self, window: QWidget, window_id: str, width: int, height: int) -> None:
+        self._registrations[window] = WindowRegistration(window_id, QSize(width, height))
+        window.installEventFilter(self)
+        window._window_layout_manager = self
+
+    def register_windows(self, windows: Iterable[tuple[QWidget, str, int, int]]) -> None:
+        for window, window_id, width, height in windows:
+            self.register_window(window, window_id, width, height)
+
+    def prepare_show(self, window: QWidget) -> None:
+        if window not in self._registrations:
+            return
+        if window not in self._restored:
+            self.restore_window(window)
+        else:
+            fit_window_to_screen(window)
+
+    def restore_window(self, window: QWidget) -> None:
+        registration = self._registrations.get(window)
+        if registration is None:
+            return
+        raw = self.settings.value(f"windows/{registration.window_id}/geometry")
+        restored = isinstance(raw, QByteArray) and not raw.isEmpty() and window.restoreGeometry(raw)
+        if not restored:
+            window.resize(fit_size_to_screen(registration.default_size, window))
+            fit_window_to_screen(window, center=True)
+        else:
+            fit_window_to_screen(window)
+        self._restored.add(window)
+
+    def save_window(self, window: QWidget) -> None:
+        registration = self._registrations.get(window)
+        if registration is None or window not in self._restored:
+            return
+        self.settings.setValue(f"windows/{registration.window_id}/geometry", window.saveGeometry())
+
+    def save_all(self) -> None:
+        for window in self._registrations:
+            self.save_window(window)
+        self.settings.sync()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        registrations = getattr(self, "_registrations", {})
+        if isinstance(watched, QWidget) and watched in registrations:
+            if event.type() == QEvent.Type.Show:
+                self.prepare_show(watched)
+            elif event.type() in {QEvent.Type.Hide, QEvent.Type.Close}:
+                self.save_window(watched)
+        return super().eventFilter(watched, event)

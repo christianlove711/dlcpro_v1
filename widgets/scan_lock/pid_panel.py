@@ -41,7 +41,7 @@ class PidPanel(QFrame):
         gain_spin.setRange(-1000000.0, 1000000.0)
         gain_spin.setDecimals(2)
         gain_spin.setKeyboardTracking(False)
-        gain_spin.connect_live_apply(getattr(owner, f"_on_{pid_name}_gain_finished"))
+        gain_spin.connect_live_apply(getattr(owner.scan_lock_controller, f"_on_{pid_name}_gain_finished"))
         gain_spin.set_button_only_mode()
 
         p_label = QLabel()
@@ -49,7 +49,7 @@ class PidPanel(QFrame):
         p_spin.setRange(-1000000.0, 1000000.0)
         p_spin.setDecimals(4)
         p_spin.setKeyboardTracking(False)
-        p_spin.connect_live_apply(getattr(owner, f"_on_{pid_name}_p_finished"))
+        p_spin.connect_live_apply(getattr(owner.scan_lock_controller, f"_on_{pid_name}_p_finished"))
         p_spin.set_button_only_mode()
 
         i_label = QLabel()
@@ -57,7 +57,7 @@ class PidPanel(QFrame):
         i_spin.setRange(-1000000.0, 1000000.0)
         i_spin.setDecimals(4)
         i_spin.setKeyboardTracking(False)
-        i_spin.connect_live_apply(getattr(owner, f"_on_{pid_name}_i_finished"))
+        i_spin.connect_live_apply(getattr(owner.scan_lock_controller, f"_on_{pid_name}_i_finished"))
         i_spin.set_button_only_mode()
 
         d_label = QLabel()
@@ -65,7 +65,7 @@ class PidPanel(QFrame):
         d_spin.setRange(-1000000.0, 1000000.0)
         d_spin.setDecimals(4)
         d_spin.setKeyboardTracking(False)
-        d_spin.connect_live_apply(getattr(owner, f"_on_{pid_name}_d_finished"))
+        d_spin.connect_live_apply(getattr(owner.scan_lock_controller, f"_on_{pid_name}_d_finished"))
         d_spin.set_button_only_mode()
 
         grid.addWidget(gain_label, 0, 0)
@@ -86,16 +86,18 @@ class PidPanel(QFrame):
 
         output_label = QLabel()
         output_combo = SafeComboBox()
-        output_combo.currentIndexChanged.connect(getattr(owner, f"_on_{pid_name}_output_channel_changed"))
+        output_combo.currentIndexChanged.connect(
+            getattr(owner.scan_lock_controller, f"_on_{pid_name}_output_channel_changed")
+        )
 
         sign_check = QCheckBox()
-        sign_check.stateChanged.connect(getattr(owner, f"_on_{pid_name}_sign_changed"))
+        sign_check.stateChanged.connect(getattr(owner.scan_lock_controller, f"_on_{pid_name}_sign_changed"))
         sign_label = QLabel()
 
         use_i_cutoff_label = QLabel()
         use_i_cutoff_check = QCheckBox()
         if pid_name == "pid1":
-            use_i_cutoff_check.stateChanged.connect(owner._on_pid1_i_cutoff_enabled_changed)
+            use_i_cutoff_check.stateChanged.connect(owner.scan_lock_controller._on_pid1_i_cutoff_enabled_changed)
         else:
             use_i_cutoff_check.setEnabled(False)
             use_i_cutoff_label.setEnabled(False)
@@ -106,24 +108,26 @@ class PidPanel(QFrame):
         i_cutoff_spin.setKeyboardTracking(False)
         i_cutoff_spin.set_button_only_mode()
         if pid_name == "pid1":
-            i_cutoff_spin.connect_live_apply(owner._on_pid1_i_cutoff_finished)
+            i_cutoff_spin.connect_live_apply(owner.scan_lock_controller._on_pid1_i_cutoff_finished)
         else:
             i_cutoff_spin.setEnabled(False)
 
         use_limit_label = QLabel()
         use_limit_check = QCheckBox()
-        use_limit_check.stateChanged.connect(getattr(owner, f"_on_{pid_name}_limit_enabled_changed"))
+        use_limit_check.stateChanged.connect(
+            getattr(owner.scan_lock_controller, f"_on_{pid_name}_limit_enabled_changed")
+        )
 
         limit_spin = SafeDoubleSpinBox()
         limit_spin.setRange(0.0, 1000000.0)
         limit_spin.setDecimals(2)
         limit_spin.setKeyboardTracking(False)
-        limit_spin.connect_live_apply(getattr(owner, f"_on_{pid_name}_limit_finished"))
+        limit_spin.connect_live_apply(getattr(owner.scan_lock_controller, f"_on_{pid_name}_limit_finished"))
         limit_spin.set_button_only_mode(False)
 
         enable_label = QLabel()
         enable_check = QCheckBox()
-        enable_check.stateChanged.connect(getattr(owner, f"_on_{pid_name}_enabled_changed"))
+        enable_check.stateChanged.connect(getattr(owner.scan_lock_controller, f"_on_{pid_name}_enabled_changed"))
 
         form.addRow(output_label, output_combo)
         form.addRow(sign_label, sign_check)

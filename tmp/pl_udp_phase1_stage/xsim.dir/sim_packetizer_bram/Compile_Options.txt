@@ -1,0 +1,1 @@
+-L "xpm" "tb_pl_monitor_packetizer" "work.glbl" -s "sim_packetizer_bram" 

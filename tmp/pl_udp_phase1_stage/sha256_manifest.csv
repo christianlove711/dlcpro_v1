@@ -1,0 +1,12 @@
+"sha256","path"
+"0DFD4E251B5E6FCB8D3B3ABA06AAE42B844DB8331D74B8C46FDC686468CEBCA3","C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\AXI_DMA.srcs\constrs_1\new\dual_adc_pl_io.xdc"
+"6829CD3272A2676FE43AB6A0291B75950279573A1083326DEE1DCF6562CD353F","C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\AXI_DMA.srcs\sources_1\new\pl_rgmii_clock.v"
+"17DFB495EEED139B90010AFAECB75F34D8A255EB9CD942E32B835E3377331D4C","C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\AXI_DMA.srcs\sources_1\new\rgmii_tx.v"
+"E35EEDA3536D8F170996335D744183298BC0E3DA9254398B77FC294AD1F475C6","C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\AXI_DMA.srcs\sim_1\new\tb_rgmii_ddr_mapping.sv"
+"7E6D237D68DFC16DE142B2EC06A4080784C1976E118C9554704DB037B4B4619D","C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\freeze_pl_udp_baseline.tcl"
+"6B79B4EC0AA47D306D7E8FD1CEC855B2C451CF12E8B9EB8C21340EE75B7E45AB","C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\run_pl_udp_phase1.tcl"
+"74C45A12471BF9E8A44E414DEB4E2008FEF67E4EDED233FD066F7D4D0109B34B","C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\run_pl_udp_phase1_sims.tcl"
+"E4DEFE4CC7A758A0EA3654E5A6107D938F831C79758BEA6542AC47371DA63221","C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\sweep_rgmii_phase.tcl"
+"A26BC5B8E3343AD825E69C6A3A72871ECC396E71D15ABDB38608DF97900EB413","C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\reports\pl_udp_pc_v2\phase1\top_pl_udp_v2_test.bit"
+"BC2AF12F3DB72E1E2EFAF7B15774167F6C63925A0F9AB82C7F83BF6B3D157F66","C:\Users\chris\Desktop\采集卡项目_最终版\02_最终硬件\top.bit"
+

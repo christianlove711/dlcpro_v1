@@ -1,0 +1,1256 @@
+#-----------------------------------------------------------
+# Vivado v2020.2 (64-bit)
+# SW Build 3064766 on Wed Nov 18 09:12:45 MST 2020
+# IP Build 3064653 on Wed Nov 18 14:17:31 MST 2020
+# Start of session at: Wed Jul 29 21:35:28 2026
+# Process ID: 28432
+# Current directory: C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main
+# Command line: vivado.exe -mode batch -source C:\Users\chris\dlcpro_v1\tmp\pl_udp_phase1_stage\run_pl_udp_phase2_sims_only.tcl -nojournal -log C:\Users\chris\dlcpro_v1\tmp\pl_udp_phase1_stage\vivado_phase2_sims.log
+# Log file: C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/vivado_phase2_sims.log
+# Journal file: 
+#-----------------------------------------------------------
+source {C:\Users\chris\dlcpro_v1\tmp\pl_udp_phase1_stage\run_pl_udp_phase2_sims_only.tcl}
+# set root {C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main}
+# set out_dir [file join $root reports pl_udp_pc_v2 phase2]
+# file mkdir $out_dir
+# open_project [file join $root AXI_DMA.xpr]
+Scanning sources...
+Finished scanning sources
+INFO: [IP_Flow 19-234] Refreshing IP repositories
+INFO: [IP_Flow 19-1700] Loaded user IP repository 'c:/Users/chris/FPGA_Projects/ip_repo/myip_1.0'.
+INFO: [IP_Flow 19-2313] Loaded Vivado IP repository 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/ip'.
+open_project: Time (s): cpu = 00:00:06 ; elapsed = 00:00:08 . Memory (MB): peak = 1121.031 ; gain = 0.000
+# foreach sim_file [list \
+#     [file join $root AXI_DMA.srcs sim_1 new tb_pl_monitor_packetizer.sv] \
+#     [file join $root AXI_DMA.srcs sim_1 new tb_pl_monitor_gap_index.sv]] {
+#   if {![llength [get_files -quiet $sim_file]]} {
+#     add_files -fileset sim_1 -norecurse $sim_file
+#   }
+# }
+# update_compile_order -fileset sim_1
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+update_compile_order: Time (s): cpu = 00:00:00 ; elapsed = 00:00:29 . Memory (MB): peak = 1121.031 ; gain = 0.000
+# set tests {
+#   tb_phy_reset_sequencer tb_ad9269_spi tb_ad9269_frontend_t9
+#   tb_native_fifo_to_axis_fwft tb_adc_fifo_axis tb_pl_daq_control
+#   tb_pl_daq_control_cdc tb_iterative_math tb_peak_feature_engine
+#   tb_peak_scenarios tb_daq_acq_manager tb_daq_control_regs_v3
+#   tb_udp_rx tb_udp_tx_sync_reset tb_udp_control_integration
+#   tb_rgmii_ddr_mapping tb_pl_raw_udp_streamer
+#   tb_pl_monitor_packetizer tb_pl_monitor_gap_index
+# }
+# set summary [open [file join $out_dir rtl_simulation_summary.txt] w]
+# puts $summary "Phase 2 RTL self-check summary"
+# puts $summary "Generated: [clock format [clock seconds] -format {%Y-%m-%d %H:%M:%S}]"
+# foreach test $tests {
+#   set_property top $test [get_filesets sim_1]
+#   set_property xsim.simulate.runtime all [get_filesets sim_1]
+#   launch_simulation -mode behavioral
+#   close_sim
+#   set log_path [file join $root AXI_DMA.sim sim_1 behav xsim simulate.log]
+#   set handle [open $log_path r]
+#   set text [read $handle]
+#   close $handle
+#   if {[string first "Fatal:" $text] >= 0 ||
+#       [string first "PASS:" $text] < 0} {
+#     puts $summary "FAIL $test"
+#     close $summary
+#     error "Simulation failed or did not report PASS: $test"
+#   }
+#   puts $summary "PASS $test"
+#   puts "VERIFIED PASS: $test"
+# }
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_phy_reset_sequencer' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_phy_reset_sequencer_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '2' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_phy_reset_sequencer_behav xil_defaultlib.tb_phy_reset_sequencer xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_phy_reset_sequencer_behav xil_defaultlib.tb_phy_reset_sequencer xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+INFO: [XSIM 43-4323] No Change in HDL. Linking previously generated obj files to create kernel
+INFO: [USF-XSim-69] 'elaborate' step finished in '1' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_phy_reset_sequencer_behav -key {Behavioral:sim_1:Functional:tb_phy_reset_sequencer} -tclbatch {tb_phy_reset_sequencer.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_phy_reset_sequencer.tcl
+## current_wave_config
+PASS: PHY reset release is RXC-independent and correctly delayed
+$finish called at time : 199 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_phy_reset_sequencer.sv" Line 48
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_phy_reset_sequencer_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:03 ; elapsed = 00:00:18 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_phy_reset_sequencer
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_ad9269_spi' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_ad9269_spi_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '1' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_ad9269_spi_behav xil_defaultlib.tb_ad9269_spi xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_ad9269_spi_behav xil_defaultlib.tb_ad9269_spi xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+INFO: [XSIM 43-4323] No Change in HDL. Linking previously generated obj files to create kernel
+INFO: [USF-XSim-69] 'elaborate' step finished in '2' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_ad9269_spi_behav -key {Behavioral:sim_1:Functional:tb_ad9269_spi} -tclbatch {tb_ad9269_spi.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_ad9269_spi.tcl
+## current_wave_config
+PASS: AD9269 SPI readback, retry, failure and recovery
+$finish called at time : 121390 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_ad9269_spi.sv" Line 129
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_ad9269_spi_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:02 ; elapsed = 00:00:09 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_ad9269_spi
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_ad9269_frontend_t9' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_ad9269_frontend_t9_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '2' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_ad9269_frontend_t9_behav xil_defaultlib.tb_ad9269_frontend_t9 xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_ad9269_frontend_t9_behav xil_defaultlib.tb_ad9269_frontend_t9 xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+INFO: [XSIM 43-4323] No Change in HDL. Linking previously generated obj files to create kernel
+INFO: [USF-XSim-69] 'elaborate' step finished in '1' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_ad9269_frontend_t9_behav -key {Behavioral:sim_1:Functional:tb_ad9269_frontend_t9} -tclbatch {tb_ad9269_frontend_t9.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_ad9269_frontend_t9.tcl
+## current_wave_config
+PASS: T9 fixed/checker/increment, OTR and A/B swap at 80 MHz
+$finish called at time : 1043750 ps : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_ad9269_frontend_t9.sv" Line 102
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_ad9269_frontend_t9_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:02 ; elapsed = 00:00:09 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_ad9269_frontend_t9
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_native_fifo_to_axis_fwft' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_native_fifo_to_axis_fwft_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '1' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_native_fifo_to_axis_fwft_behav xil_defaultlib.tb_native_fifo_to_axis_fwft xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_native_fifo_to_axis_fwft_behav xil_defaultlib.tb_native_fifo_to_axis_fwft xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+INFO: [XSIM 43-4323] No Change in HDL. Linking previously generated obj files to create kernel
+INFO: [USF-XSim-69] 'elaborate' step finished in '2' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_native_fifo_to_axis_fwft_behav -key {Behavioral:sim_1:Functional:tb_native_fifo_to_axis_fwft} -tclbatch {tb_native_fifo_to_axis_fwft.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_native_fifo_to_axis_fwft.tcl
+## current_wave_config
+PASS: FWFT AXIS backpressure and TLAST continuity
+$finish called at time : 345 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_native_fifo_to_axis_fwft.sv" Line 76
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_native_fifo_to_axis_fwft_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:01 ; elapsed = 00:00:09 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_native_fifo_to_axis_fwft
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_adc_fifo_axis' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_adc_fifo_axis_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '2' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_adc_fifo_axis_behav xil_defaultlib.tb_adc_fifo_axis xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_adc_fifo_axis_behav xil_defaultlib.tb_adc_fifo_axis xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+INFO: [XSIM 43-4323] No Change in HDL. Linking previously generated obj files to create kernel
+INFO: [USF-XSim-69] 'elaborate' step finished in '1' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_adc_fifo_axis_behav -key {Behavioral:sim_1:Functional:tb_adc_fifo_axis} -tclbatch {tb_adc_fifo_axis.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_adc_fifo_axis.tcl
+## current_wave_config
+PASS: 8-to-32 packing, backpressure, TLAST, overflow and reset
+$finish called at time : 7306 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_adc_fifo_axis.sv" Line 223
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_adc_fifo_axis_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:02 ; elapsed = 00:00:09 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_adc_fifo_axis
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_pl_daq_control' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_pl_daq_control_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '1' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_pl_daq_control_behav xil_defaultlib.tb_pl_daq_control xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_pl_daq_control_behav xil_defaultlib.tb_pl_daq_control xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+INFO: [XSIM 43-4323] No Change in HDL. Linking previously generated obj files to create kernel
+INFO: [USF-XSim-69] 'elaborate' step finished in '2' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_pl_daq_control_behav -key {Behavioral:sim_1:Functional:tb_pl_daq_control} -tclbatch {tb_pl_daq_control.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_pl_daq_control.tcl
+## current_wave_config
+PASS: all PLDQ commands plus invalid rate/magic/version/length/command
+$finish called at time : 1052 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_pl_daq_control.sv" Line 58
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_pl_daq_control_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:02 ; elapsed = 00:00:09 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_pl_daq_control
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_pl_daq_control_cdc' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_pl_daq_control_cdc_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '2' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_pl_daq_control_cdc_behav xil_defaultlib.tb_pl_daq_control_cdc xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_pl_daq_control_cdc_behav xil_defaultlib.tb_pl_daq_control_cdc xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+INFO: [XSIM 43-4323] No Change in HDL. Linking previously generated obj files to create kernel
+INFO: [USF-XSim-69] 'elaborate' step finished in '1' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_pl_daq_control_cdc_behav -key {Behavioral:sim_1:Functional:tb_pl_daq_control_cdc} -tclbatch {tb_pl_daq_control_cdc.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_pl_daq_control_cdc.tcl
+## current_wave_config
+PASS: control toggle CDC and atomic multi-bit configuration capture
+$finish called at time : 276 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_pl_daq_control_cdc.sv" Line 51
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_pl_daq_control_cdc_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:02 ; elapsed = 00:00:09 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_pl_daq_control_cdc
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_iterative_math' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_iterative_math_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '1' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_iterative_math_behav xil_defaultlib.tb_iterative_math xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_iterative_math_behav xil_defaultlib.tb_iterative_math xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+INFO: [XSIM 43-4323] No Change in HDL. Linking previously generated obj files to create kernel
+INFO: [USF-XSim-69] 'elaborate' step finished in '2' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_iterative_math_behav -key {Behavioral:sim_1:Functional:tb_iterative_math} -tclbatch {tb_iterative_math.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_iterative_math.tcl
+## current_wave_config
+PASS: tb_iterative_math
+$finish called at time : 6565 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_iterative_math.sv" Line 95
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_iterative_math_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:02 ; elapsed = 00:00:09 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_iterative_math
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_peak_feature_engine' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_peak_feature_engine_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '1' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_peak_feature_engine_behav xil_defaultlib.tb_peak_feature_engine xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_peak_feature_engine_behav xil_defaultlib.tb_peak_feature_engine xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+INFO: [XSIM 43-4323] No Change in HDL. Linking previously generated obj files to create kernel
+INFO: [USF-XSim-69] 'elaborate' step finished in '2' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_peak_feature_engine_behav -key {Behavioral:sim_1:Functional:tb_peak_feature_engine} -tclbatch {tb_peak_feature_engine.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_peak_feature_engine.tcl
+## current_wave_config
+PASS: DMA-arm suppression and peak feature 8320-byte frame
+$finish called at time : 32225 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_peak_feature_engine.sv" Line 40
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_peak_feature_engine_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:02 ; elapsed = 00:00:09 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_peak_feature_engine
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_peak_scenarios' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_peak_scenarios_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '2' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_peak_scenarios_behav xil_defaultlib.tb_peak_scenarios xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_peak_scenarios_behav xil_defaultlib.tb_peak_scenarios xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+INFO: [XSIM 43-4323] No Change in HDL. Linking previously generated obj files to create kernel
+INFO: [USF-XSim-69] 'elaborate' step finished in '1' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_peak_scenarios_behav -key {Behavioral:sim_1:Functional:tb_peak_scenarios} -tclbatch {tb_peak_scenarios.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_peak_scenarios.tcl
+## current_wave_config
+PASS: drift/noise, positive/negative/absolute, hysteresis, OTR/saturation and backpressure
+$finish called at time : 3175 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_peak_scenarios.sv" Line 94
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_peak_scenarios_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:01 ; elapsed = 00:00:09 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_peak_scenarios
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_daq_acq_manager' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_daq_acq_manager_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '1' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_daq_acq_manager_behav xil_defaultlib.tb_daq_acq_manager xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_daq_acq_manager_behav xil_defaultlib.tb_daq_acq_manager xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+INFO: [XSIM 43-4323] No Change in HDL. Linking previously generated obj files to create kernel
+INFO: [USF-XSim-69] 'elaborate' step finished in '2' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_daq_acq_manager_behav -key {Behavioral:sim_1:Functional:tb_daq_acq_manager} -tclbatch {tb_daq_acq_manager.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_daq_acq_manager.tcl
+## current_wave_config
+PASS: dual control arbitration and 100 START/STOP cycles
+$finish called at time : 12175 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_daq_acq_manager.sv" Line 103
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_daq_acq_manager_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:02 ; elapsed = 00:00:09 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_daq_acq_manager
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_daq_control_regs_v3' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_daq_control_regs_v3_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '1' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_daq_control_regs_v3_behav xil_defaultlib.tb_daq_control_regs_v3 xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_daq_control_regs_v3_behav xil_defaultlib.tb_daq_control_regs_v3 xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+INFO: [XSIM 43-4323] No Change in HDL. Linking previously generated obj files to create kernel
+INFO: [USF-XSim-69] 'elaborate' step finished in '2' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_daq_control_regs_v3_behav -key {Behavioral:sim_1:Functional:tb_daq_control_regs_v3} -tclbatch {tb_daq_control_regs_v3.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_daq_control_regs_v3.tcl
+## current_wave_config
+PASS: AXI-Lite control, DMA arm and separated event status map
+$finish called at time : 1150 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_daq_control_regs_v3.sv" Line 110
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_daq_control_regs_v3_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:02 ; elapsed = 00:00:09 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_daq_control_regs_v3
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_udp_rx' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_udp_rx_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '1' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_udp_rx_behav xil_defaultlib.tb_udp_rx xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_udp_rx_behav xil_defaultlib.tb_udp_rx xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+INFO: [XSIM 43-4323] No Change in HDL. Linking previously generated obj files to create kernel
+INFO: [USF-XSim-69] 'elaborate' step finished in '2' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_udp_rx_behav -key {Behavioral:sim_1:Functional:tb_udp_rx} -tclbatch {tb_udp_rx.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_udp_rx.tcl
+## current_wave_config
+PASS: UDP RX registered payload path and PLDQ byte order
+$finish called at time : 724 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_udp_rx.sv" Line 68
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_udp_rx_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:02 ; elapsed = 00:00:09 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_udp_rx
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_udp_tx_sync_reset' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_udp_tx_sync_reset_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '1' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_udp_tx_sync_reset_behav xil_defaultlib.tb_udp_tx_sync_reset xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_udp_tx_sync_reset_behav xil_defaultlib.tb_udp_tx_sync_reset xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+INFO: [XSIM 43-4323] No Change in HDL. Linking previously generated obj files to create kernel
+INFO: [USF-XSim-69] 'elaborate' step finished in '2' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_udp_tx_sync_reset_behav -key {Behavioral:sim_1:Functional:tb_udp_tx_sync_reset} -tclbatch {tb_udp_tx_sync_reset.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_udp_tx_sync_reset.tcl
+## current_wave_config
+PASS: udp_tx synchronous datapath reset and packet request sequence
+$finish called at time : 725 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_udp_tx_sync_reset.sv" Line 103
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_udp_tx_sync_reset_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:02 ; elapsed = 00:00:09 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_udp_tx_sync_reset
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_udp_control_integration' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_udp_control_integration_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '2' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_udp_control_integration_behav xil_defaultlib.tb_udp_control_integration xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_udp_control_integration_behav xil_defaultlib.tb_udp_control_integration xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+INFO: [XSIM 43-4323] No Change in HDL. Linking previously generated obj files to create kernel
+INFO: [USF-XSim-69] 'elaborate' step finished in '1' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_udp_control_integration_behav -key {Behavioral:sim_1:Functional:tb_udp_control_integration} -tclbatch {tb_udp_control_integration.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_udp_control_integration.tcl
+## current_wave_config
+PASS: broadcast UDP DISCOVER reaches PL control and requests status
+$finish called at time : 756 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_udp_control_integration.sv" Line 136
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_udp_control_integration_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:02 ; elapsed = 00:00:09 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_udp_control_integration
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_rgmii_ddr_mapping' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_rgmii_ddr_mapping_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '1' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_rgmii_ddr_mapping_behav xil_defaultlib.tb_rgmii_ddr_mapping xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_rgmii_ddr_mapping_behav xil_defaultlib.tb_rgmii_ddr_mapping xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+INFO: [XSIM 43-4323] No Change in HDL. Linking previously generated obj files to create kernel
+INFO: [USF-XSim-69] 'elaborate' step finished in '2' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_rgmii_ddr_mapping_behav -key {Behavioral:sim_1:Functional:tb_rgmii_ddr_mapping} -tclbatch {tb_rgmii_ddr_mapping.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_rgmii_ddr_mapping.tcl
+## current_wave_config
+PASS: RGMII DDR nibble mapping, phase, RX_CTL and MMCM recovery
+$finish called at time : 908 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_rgmii_ddr_mapping.sv" Line 156
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_rgmii_ddr_mapping_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:02 ; elapsed = 00:00:09 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_rgmii_ddr_mapping
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_pl_raw_udp_streamer' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_pl_raw_udp_streamer_vlog.prj"
+INFO: [VRFC 10-2263] Analyzing Verilog file "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/new/pl_raw_udp_streamer.v" into library xil_defaultlib
+INFO: [VRFC 10-311] analyzing module pl_raw_udp_streamer
+INFO: [USF-XSim-69] 'compile' step finished in '1' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_pl_raw_udp_streamer_behav xil_defaultlib.tb_pl_raw_udp_streamer xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_pl_raw_udp_streamer_behav xil_defaultlib.tb_pl_raw_udp_streamer xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+Starting simulation data flow analysis
+Completed simulation data flow analysis
+Time Resolution for simulation is 1ps
+Compiling module xpm.xpm_cdc_sync_rst(DEST_SYNC_FF=2,...
+Compiling module xpm.xpm_fifo_rst(COMMON_CLOCK=0)
+Compiling module xpm.xpm_fifo_reg_bit
+Compiling module xpm.xpm_counter_updn(COUNTER_WIDTH=1...
+Compiling module xpm.xpm_counter_updn(COUNTER_WIDTH=1...
+Compiling module xpm.xpm_memory_base(MEMORY_TYPE=1,ME...
+Compiling module xpm.xpm_cdc_gray(DEST_SYNC_FF=2,INIT...
+Compiling module xpm.xpm_fifo_reg_vec(REG_WIDTH=12)
+Compiling module xpm.xpm_cdc_gray(INIT_SYNC_FF=1,WIDT...
+Compiling module xpm.xpm_fifo_reg_vec(REG_WIDTH=13)
+Compiling module xpm.xpm_cdc_gray(DEST_SYNC_FF=2,INIT...
+Compiling module xpm.xpm_counter_updn(COUNTER_WIDTH=2...
+Compiling module xpm.xpm_fifo_base(COMMON_CLOCK=0,FIF...
+Compiling module xpm.xpm_fifo_async(FIFO_MEMORY_TYPE=...
+Compiling module xpm.xpm_memory_base(MEMORY_TYPE=1,ME...
+Compiling module xpm.xpm_memory_sdpram(MEMORY_SIZE=65...
+Compiling module xil_defaultlib.pl_raw_udp_streamer(SIM_ASSERT_C...
+Compiling module xil_defaultlib.tb_pl_raw_udp_streamer
+Compiling module xil_defaultlib.glbl
+Built simulation snapshot tb_pl_raw_udp_streamer_behav
+INFO: [USF-XSim-69] 'elaborate' step finished in '4' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_pl_raw_udp_streamer_behav -key {Behavioral:sim_1:Functional:tb_pl_raw_udp_streamer} -tclbatch {tb_pl_raw_udp_streamer.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_pl_raw_udp_streamer.tcl
+## current_wave_config
+WARNING: [Wavedata 42-489] Can't add object "/tb_pl_raw_udp_streamer/packet" to the wave window because it has 65856 bits, which exceeds the display limit of 65536 bits.  To change the display limit, use the command "set_property display_limit <new limit> [current_wave_config]".
+WAIT packet bytes=80 time=875000 fifo=0 stream=1
+GOT packet bytes=80 time=901000 fifo=0
+mono pushed time=15180000 fifo=0
+WAIT packet bytes=1448 time=15180000 fifo=0 stream=1
+GOT packet bytes=1448 time=15253000 fifo=0
+dual pushed time=21900000 fifo=1
+WAIT packet bytes=1448 time=21900000 fifo=1 stream=2
+GOT packet bytes=1448 time=21973000 fifo=0
+jumbo pushed time=45580000 fifo=1
+WAIT packet bytes=8232 time=45580000 fifo=1 stream=3
+GOT packet bytes=8232 time=45653000 fifo=0
+PASS: DAQS extension, U8/S16 payload order, standard/jumbo MTU, stream and sequence
+$finish called at time : 62148 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_pl_raw_udp_streamer.sv" Line 123
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_pl_raw_udp_streamer_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:02 ; elapsed = 00:00:12 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_pl_raw_udp_streamer
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_pl_monitor_packetizer' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_pl_monitor_packetizer_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '1' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_pl_monitor_packetizer_behav xil_defaultlib.tb_pl_monitor_packetizer xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_pl_monitor_packetizer_behav xil_defaultlib.tb_pl_monitor_packetizer xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+Starting simulation data flow analysis
+Completed simulation data flow analysis
+Time Resolution for simulation is 1ps
+Compiling module xpm.xpm_cdc_sync_rst(DEST_SYNC_FF=2,...
+Compiling module xpm.xpm_fifo_rst(COMMON_CLOCK=0)
+Compiling module xpm.xpm_fifo_reg_bit
+Compiling module xpm.xpm_counter_updn(COUNTER_WIDTH=1...
+Compiling module xpm.xpm_counter_updn(COUNTER_WIDTH=1...
+Compiling module xpm.xpm_memory_base(MEMORY_TYPE=1,ME...
+Compiling module xpm.xpm_cdc_gray(DEST_SYNC_FF=2,INIT...
+Compiling module xpm.xpm_fifo_reg_vec(REG_WIDTH=12)
+Compiling module xpm.xpm_cdc_gray(INIT_SYNC_FF=1,WIDT...
+Compiling module xpm.xpm_fifo_reg_vec(REG_WIDTH=13)
+Compiling module xpm.xpm_cdc_gray(DEST_SYNC_FF=2,INIT...
+Compiling module xpm.xpm_counter_updn(COUNTER_WIDTH=2...
+Compiling module xpm.xpm_fifo_base(COMMON_CLOCK=0,FIF...
+Compiling module xpm.xpm_fifo_async(FIFO_MEMORY_TYPE=...
+Compiling module xpm.xpm_memory_base(MEMORY_TYPE=1,ME...
+Compiling module xpm.xpm_memory_sdpram(MEMORY_SIZE=65...
+Compiling module xil_defaultlib.pl_raw_udp_streamer(SIM_ASSERT_C...
+Compiling module xil_defaultlib.tb_pl_monitor_packetizer
+Compiling module xil_defaultlib.glbl
+Built simulation snapshot tb_pl_monitor_packetizer_behav
+INFO: [USF-XSim-69] 'elaborate' step finished in '4' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_pl_monitor_packetizer_behav -key {Behavioral:sim_1:Functional:tb_pl_monitor_packetizer} -tclbatch {tb_pl_monitor_packetizer.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_pl_monitor_packetizer.tcl
+## current_wave_config
+WARNING: [Wavedata 42-489] Can't add object "/tb_pl_monitor_packetizer/packet" to the wave window because it has 65856 bits, which exceeds the display limit of 65536 bits.  To change the display limit, use the command "set_property display_limit <new limit> [current_wave_config]".
+PASS: complete standard/jumbo packets, true 64-bit index, stream reset, and TX backpressure
+$finish called at time : 54116 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_pl_monitor_packetizer.sv" Line 106
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_pl_monitor_packetizer_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:02 ; elapsed = 00:00:11 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_pl_monitor_packetizer
+Command: launch_simulation -mode behavioral
+INFO: [Vivado 12-5698] Checking validity of IPs in the design for the 'XSim' simulator...
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+WARNING: [HDL 9-3756] overwriting previous definition of module 'System_daq_control_0_15' [c:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sources_1/bd/System/ip/System_daq_control_0_15/System_daq_control_0_15_sim_netlist.v:18]
+INFO: [Vivado 12-5682] Launching behavioral simulation in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [Vivado 12-4795] Using compiled simulation libraries for IPs
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [USF-XSim-7] Finding pre-compiled libraries...
+INFO: [USF-XSim-11] File 'C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/data/xsim/xsim.ini' copied to run dir:'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [SIM-utils-54] Inspecting design source files for 'tb_pl_monitor_gap_index' in fileset 'sim_1'...
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_axi_smc_1.mem'
+INFO: [SIM-utils-43] Exported 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim/sc_xtlm_System_scope_smc_0.mem'
+INFO: [USF-XSim-97] Finding global include files...
+INFO: [USF-XSim-98] Fetching design files from 'sim_1'...
+INFO: [USF-XSim-2] XSim::Compile design
+INFO: [USF-XSim-61] Executing 'COMPILE and ANALYZE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xvlog --incr --relax -L uvm -L axi_vip_v1_1_8 -L smartconnect_v1_0 -L processing_system7_vip_v1_0_10 -L xilinx_vip -prj tb_pl_monitor_gap_index_vlog.prj"
+INFO: [USF-XSim-69] 'compile' step finished in '2' seconds
+INFO: [USF-XSim-3] XSim::Elaborate design
+INFO: [USF-XSim-61] Executing 'ELABORATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+"xelab -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_pl_monitor_gap_index_behav xil_defaultlib.tb_pl_monitor_gap_index xil_defaultlib.glbl -log elaborate.log"
+Vivado Simulator 2020.2
+Copyright 1986-1999, 2001-2020 Xilinx, Inc. All Rights Reserved.
+Running: C:/baidunetdiskdownload/Vivado2020_2/Vivado/2020.2/bin/unwrapped/win64.o/xelab.exe -wto 0783afc713564b0f9c078ffdade6f908 --incr --debug typical --relax --mt 2 -L xil_defaultlib -L uvm -L xilinx_vip -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot tb_pl_monitor_gap_index_behav xil_defaultlib.tb_pl_monitor_gap_index xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+Completed static elaboration
+Starting simulation data flow analysis
+Completed simulation data flow analysis
+Time Resolution for simulation is 1ps
+Compiling module xpm.xpm_cdc_sync_rst(DEST_SYNC_FF=2,...
+Compiling module xpm.xpm_fifo_rst(COMMON_CLOCK=0)
+Compiling module xpm.xpm_fifo_reg_bit
+Compiling module xpm.xpm_counter_updn(COUNTER_WIDTH=7...
+Compiling module xpm.xpm_counter_updn(COUNTER_WIDTH=6...
+Compiling module xpm.xpm_memory_base(MEMORY_TYPE=1,ME...
+Compiling module xpm.xpm_cdc_gray(DEST_SYNC_FF=2,INIT...
+Compiling module xpm.xpm_fifo_reg_vec(REG_WIDTH=6)
+Compiling module xpm.xpm_cdc_gray(INIT_SYNC_FF=1,WIDT...
+Compiling module xpm.xpm_fifo_reg_vec(REG_WIDTH=7)
+Compiling module xpm.xpm_cdc_gray(DEST_SYNC_FF=2,INIT...
+Compiling module xpm.xpm_counter_updn(COUNTER_WIDTH=2...
+Compiling module xpm.xpm_fifo_base(COMMON_CLOCK=0,FIF...
+Compiling module xpm.xpm_fifo_async(FIFO_MEMORY_TYPE=...
+Compiling module xpm.xpm_memory_base(MEMORY_TYPE=1,ME...
+Compiling module xpm.xpm_memory_sdpram(MEMORY_SIZE=65...
+Compiling module xil_defaultlib.pl_raw_udp_streamer(FIFO_DEPTH=6...
+Compiling module xil_defaultlib.tb_pl_monitor_gap_index
+Compiling module xil_defaultlib.glbl
+Built simulation snapshot tb_pl_monitor_gap_index_behav
+INFO: [USF-XSim-69] 'elaborate' step finished in '3' seconds
+INFO: [USF-XSim-4] XSim::Simulate design
+INFO: [USF-XSim-61] Executing 'SIMULATE' step in 'C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.sim/sim_1/behav/xsim'
+INFO: [USF-XSim-98] *** Running xsim
+   with args "tb_pl_monitor_gap_index_behav -key {Behavioral:sim_1:Functional:tb_pl_monitor_gap_index} -tclbatch {tb_pl_monitor_gap_index.tcl} -protoinst "protoinst_files/bd_5c3b.protoinst" -protoinst "protoinst_files/bd_6471.protoinst" -protoinst "protoinst_files/System.protoinst" -log {simulate.log}"
+INFO: [USF-XSim-8] Loading simulator feature
+Vivado Simulator 2020.2
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_5c3b.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_5c3b.protoinst for the following reason(s):
+There are no instances of module "bd_5c3b" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/bd_6471.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/bd_6471.protoinst for the following reason(s):
+There are no instances of module "bd_6471" in the design.
+
+INFO: [Wavedata 42-565] Reading protoinst file protoinst_files/System.protoinst
+WARNING: [Wavedata 42-558] Couldn't load one or more protocol instances from protoinst file protoinst_files/System.protoinst for the following reason(s):
+There are no instances of module "System" in the design.
+
+Time resolution is 1 ps
+source tb_pl_monitor_gap_index.tcl
+## current_wave_config
+PASS: FIFO-full gap position, packet continuity, 64-bit wrap, and STOP/START flush
+$finish called at time : 32428 ns : File "C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/AXI_DMA.srcs/sim_1/new/tb_pl_monitor_gap_index.sv" Line 116
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_pl_monitor_gap_index_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for all
+launch_simulation: Time (s): cpu = 00:00:02 ; elapsed = 00:00:11 . Memory (MB): peak = 1121.031 ; gain = 0.000
+INFO: [Simtcl 6-16] Simulation closed
+VERIFIED PASS: tb_pl_monitor_gap_index
+# close $summary
+# close_project
+# puts "PL_UDP_PHASE2_SIMS_COMPLETE=$out_dir"
+PL_UDP_PHASE2_SIMS_COMPLETE=C:/Users/chris/FPGA_Projects/A-high-speed-data-acquisition-framework-main/reports/pl_udp_pc_v2/phase2
+# exit
+INFO: [Common 17-206] Exiting Vivado at Wed Jul 29 21:39:45 2026...

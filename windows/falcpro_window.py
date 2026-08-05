@@ -30,9 +30,10 @@ class FalcProWindow(AuxiliaryWindow):
     # match the official GUI, but we always keep the original raw integer as data.
     DISPLAY_SCALE_HZ = 10.0
 
-    def __init__(self, owner) -> None:
+    def __init__(self, owner, controller=None) -> None:
         super().__init__()
         self.owner = owner
+        self.handler = controller or owner
         self.resize(760, 760)
 
         central = QWidget(self)
@@ -56,13 +57,13 @@ class FalcProWindow(AuxiliaryWindow):
 
         self.path_selection_label = QLabel()
         self.path_selection_combo = SafeComboBox()
-        self.path_selection_combo.currentIndexChanged.connect(owner._on_falc_path_selection_changed)
+        self.path_selection_combo.currentIndexChanged.connect(self.handler._on_falc_path_selection_changed)
         self._configure_combo(self.path_selection_combo, minimum=170, maximum=220)
         link_layout.addRow(self.path_selection_label, self.path_selection_combo)
 
         self.mon_config_label = QLabel()
         self.mon_config_combo = SafeComboBox()
-        self.mon_config_combo.currentIndexChanged.connect(owner._on_falc_mon_config_changed)
+        self.mon_config_combo.currentIndexChanged.connect(self.handler._on_falc_mon_config_changed)
         self._configure_combo(self.mon_config_combo, minimum=170, maximum=220)
         link_layout.addRow(self.mon_config_label, self.mon_config_combo)
 
@@ -81,7 +82,7 @@ class FalcProWindow(AuxiliaryWindow):
         self.input_gain_combo = SafeComboBox()
         self.input_gain_combo.addItem("x1", 1)
         self.input_gain_combo.addItem("x5", 5)
-        self.input_gain_combo.currentIndexChanged.connect(owner._on_falc_input_gain_changed)
+        self.input_gain_combo.currentIndexChanged.connect(self.handler._on_falc_input_gain_changed)
         self._configure_combo(self.input_gain_combo, minimum=150, maximum=190)
         input_layout.addRow(self.input_gain_label, self.input_gain_combo)
 
@@ -90,7 +91,7 @@ class FalcProWindow(AuxiliaryWindow):
         self.input_offset_spin.setDecimals(5)
         self.input_offset_spin.setRange(-1_000_000_000.0, 1_000_000_000.0)
         self.input_offset_spin.setSingleStep(0.0001)
-        self.input_offset_spin.connect_live_apply(owner._on_falc_input_offset_finished)
+        self.input_offset_spin.connect_live_apply(self.handler._on_falc_input_offset_finished)
         self.input_offset_spin.set_button_only_mode()
         input_layout.addRow(self.input_offset_label, self.input_offset_spin)
         root.addWidget(self.input_group)
@@ -104,7 +105,7 @@ class FalcProWindow(AuxiliaryWindow):
         self.main_enable_label = QLabel()
         self.main_enable_button = QPushButton()
         self.main_enable_button.setCheckable(True)
-        self.main_enable_button.clicked.connect(owner._on_falc_main_enabled_toggled)
+        self.main_enable_button.clicked.connect(self.handler._on_falc_main_enabled_toggled)
         self.main_indicator = QFrame()
         self.main_indicator.setFixedSize(16, 16)
         self.main_indicator.setStyleSheet("border-radius: 8px; background: #4d4d4d; border: 1px solid #6a6a6a;")
@@ -125,7 +126,7 @@ class FalcProWindow(AuxiliaryWindow):
             label = QLabel(name.upper())
             combo = self._create_preset_combo(name)
             check = QCheckBox()
-            check.toggled.connect(lambda checked, filter_name=name: owner._on_falc_filter_enabled_toggled(filter_name, checked))
+            check.toggled.connect(lambda checked, filter_name=name: self.handler._on_falc_filter_enabled_toggled(filter_name, checked))
             self.filter_labels[name] = label
             self.filter_combos[name] = combo
             self.filter_checks[name] = check
@@ -140,7 +141,7 @@ class FalcProWindow(AuxiliaryWindow):
         self.main_gain_spin.setDecimals(2)
         self.main_gain_spin.setRange(-1_000_000_000.0, 1_000_000_000.0)
         self.main_gain_spin.setSingleStep(0.1)
-        self.main_gain_spin.connect_live_apply(owner._on_falc_main_gain_finished)
+        self.main_gain_spin.connect_live_apply(self.handler._on_falc_main_gain_finished)
         self.main_gain_spin.set_button_only_mode()
         gain_row.addWidget(self.main_gain_label)
         gain_row.addStretch(1)
@@ -149,7 +150,7 @@ class FalcProWindow(AuxiliaryWindow):
 
         self.main_use_external_input_label = QLabel()
         self.main_use_external_input_check = QCheckBox()
-        self.main_use_external_input_check.toggled.connect(owner._on_falc_main_use_external_input_toggled)
+        self.main_use_external_input_check.toggled.connect(self.handler._on_falc_main_use_external_input_toggled)
         main_layout.addLayout(self._create_toggle_row(self.main_use_external_input_label, self.main_use_external_input_check))
 
         self.main_lock_state_label = QLabel()
@@ -167,7 +168,7 @@ class FalcProWindow(AuxiliaryWindow):
         self.unlim_enable_label = QLabel()
         self.unlim_enable_button = QPushButton()
         self.unlim_enable_button.setCheckable(True)
-        self.unlim_enable_button.clicked.connect(owner._on_falc_unlim_enabled_toggled)
+        self.unlim_enable_button.clicked.connect(self.handler._on_falc_unlim_enabled_toggled)
         self.unlim_enable_indicator = QFrame()
         self.unlim_enable_indicator.setFixedSize(16, 16)
         self.unlim_enable_indicator.setStyleSheet(
@@ -175,7 +176,7 @@ class FalcProWindow(AuxiliaryWindow):
         )
         self.unlim_hold_button = QPushButton()
         self.unlim_hold_button.setCheckable(True)
-        self.unlim_hold_button.clicked.connect(owner._on_falc_unlim_hold_toggled)
+        self.unlim_hold_button.clicked.connect(self.handler._on_falc_unlim_hold_toggled)
         self.unlim_hold_indicator = QFrame()
         self.unlim_hold_indicator.setFixedSize(16, 16)
         self.unlim_hold_indicator.setStyleSheet(
@@ -199,7 +200,7 @@ class FalcProWindow(AuxiliaryWindow):
         self.unlim_input_offset_spin.setDecimals(2)
         self.unlim_input_offset_spin.setRange(-1_000_000_000.0, 1_000_000_000.0)
         self.unlim_input_offset_spin.setSingleStep(0.01)
-        self.unlim_input_offset_spin.connect_live_apply(owner._on_falc_unlim_input_offset_finished)
+        self.unlim_input_offset_spin.connect_live_apply(self.handler._on_falc_unlim_input_offset_finished)
         self.unlim_input_offset_spin.set_button_only_mode()
         unlim_form.addRow(self.unlim_input_offset_label, self.unlim_input_offset_spin)
 
@@ -208,7 +209,7 @@ class FalcProWindow(AuxiliaryWindow):
         self.unlim_output_range_spin.setDecimals(2)
         self.unlim_output_range_spin.setRange(0.0, 1_000_000_000.0)
         self.unlim_output_range_spin.setSingleStep(0.01)
-        self.unlim_output_range_spin.connect_live_apply(owner._on_falc_unlim_output_range_finished)
+        self.unlim_output_range_spin.connect_live_apply(self.handler._on_falc_unlim_output_range_finished)
         unlim_form.addRow(self.unlim_output_range_label, self.unlim_output_range_spin)
 
         self.unlim_slew_rate_label = QLabel()
@@ -216,7 +217,7 @@ class FalcProWindow(AuxiliaryWindow):
         self.unlim_slew_rate_spin.setDecimals(0)
         self.unlim_slew_rate_spin.setRange(1.0, 12.0)
         self.unlim_slew_rate_spin.setSingleStep(1.0)
-        self.unlim_slew_rate_spin.connect_live_apply(owner._on_falc_unlim_slew_rate_finished)
+        self.unlim_slew_rate_spin.connect_live_apply(self.handler._on_falc_unlim_slew_rate_finished)
         self.unlim_slew_rate_spin.set_button_only_mode()
         unlim_form.addRow(self.unlim_slew_rate_label, self.unlim_slew_rate_spin)
 
@@ -227,7 +228,7 @@ class FalcProWindow(AuxiliaryWindow):
 
         self.unlim_sign_positive_label = QLabel()
         self.unlim_sign_positive_check = QCheckBox()
-        self.unlim_sign_positive_check.toggled.connect(owner._on_falc_unlim_sign_toggled)
+        self.unlim_sign_positive_check.toggled.connect(self.handler._on_falc_unlim_sign_toggled)
         sign_row = QHBoxLayout()
         sign_row.setContentsMargins(0, 0, 0, 0)
         sign_row.addWidget(self.unlim_sign_positive_label)
@@ -262,9 +263,9 @@ class FalcProWindow(AuxiliaryWindow):
         combo.lineEdit().setAlignment(Qt.AlignLeft)
         self._configure_combo(combo, minimum=170, maximum=220)
         combo.lineEdit().editingFinished.connect(
-            lambda filter_key=filter_name: self.owner._on_falc_filter_value_changed(filter_key)
+            lambda filter_key=filter_name: self.handler._on_falc_filter_value_changed(filter_key)
         )
-        combo.activated.connect(lambda _index, filter_key=filter_name: self.owner._on_falc_filter_value_changed(filter_key))
+        combo.activated.connect(lambda _index, filter_key=filter_name: self.handler._on_falc_filter_value_changed(filter_key))
         return combo
 
     def apply_texts(self, language: str) -> None:
@@ -516,6 +517,8 @@ class FalcProWindow(AuxiliaryWindow):
         )
 
     def _sync_combo_data(self, combo: SafeComboBox, value: int, label: str) -> None:
+        if combo.view().isVisible() or combo.hasFocus():
+            return
         index = combo.findData(value)
         if index < 0:
             combo.addItem(label, value)

@@ -1,0 +1,27 @@
+# PL UDP基线回退验证
+
+日期：2026-07-27
+
+状态：**PASS**
+
+- 3个候选文件已恢复到冻结基线 SHA-256。
+- Python：27/27 PASS。
+- RTL：冻结的13项测试及RGMII映射自检，共14项 PASS。
+- 综合：Complete。
+- 实现及bitstream：Complete。
+- WNS = +0.140156 ns，TNS = 0。
+- WHS = +0.029204 ns，THS = 0。
+- DRC：0 Error、13 Warning、2 Advisory；0 Critical Warning。
+- 桌面权威 `top.bit` 未修改。
+- 回退验证bit仅位于本目录，未覆盖任何正式交付。
+
+注意：这是原冻结基线状态，因此仍有7个输入、10个输出未设置外部I/O delay，其中包括RGMII数据/控制端口。报告“timing met”不等于RGMII外部时序已经最终签核。
+
+## SHA-256
+
+- 回退验证bit：`670BB5065C5AF7D0EA28D6CDC037755DC80C09488342B97BE362A87577AF79C1`
+- 桌面权威bit：`BC2AF12F3DB72E1E2EFAF7B15774167F6C63925A0F9AB82C7F83BF6B3D157F66`
+- `dual_adc_pl_io.xdc`：`2934D25F3C88E72987D4F92E9B8319AB79D1226F11263C610CF1E33AD222C48E`
+- `pl_rgmii_clock.v`：`20D2A0AEBC78448D96D2DCCD0742B3A10405531452DC45F36EC0802BF4248E90`
+- `rgmii_tx.v`：`5F570C2B421CE5B883C93E2B21F89A9EF6F24D154FA293B0FC33F6EFA69F52DB`
+

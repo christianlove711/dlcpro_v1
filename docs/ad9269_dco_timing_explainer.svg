@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100">
+  <defs>
+    <style>
+      .bg { fill: #f4f7fb; }
+      .panel { fill: #ffffff; stroke: #cbd5e1; stroke-width: 2; }
+      .title { font: 700 42px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #102a43; }
+      .h2 { font: 700 28px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #16324f; }
+      .label { font: 600 22px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #243b53; }
+      .body { font: 20px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #334e68; }
+      .small { font: 18px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #486581; }
+      .mono { font: 19px Consolas, "Microsoft YaHei", monospace; fill: #243b53; }
+      .grid { stroke: #d9e2ec; stroke-width: 1.5; stroke-dasharray: 5 7; }
+      .clock { fill: none; stroke: #1769aa; stroke-width: 5; stroke-linejoin: round; }
+      .data { fill: none; stroke: #0f9d75; stroke-width: 5; stroke-linejoin: round; }
+      .accent { stroke: #e8791b; stroke-width: 4; fill: none; }
+      .capture { stroke: #c23b3b; stroke-width: 4; fill: none; }
+      .box-blue { fill: #e8f1fb; stroke: #5b8db8; stroke-width: 2; }
+      .box-green { fill: #e7f7f0; stroke: #3d9b78; stroke-width: 2; }
+      .box-orange { fill: #fff3e8; stroke: #d97722; stroke-width: 2; }
+      .note { fill: #edf2f7; stroke: #bcccdc; stroke-width: 1.5; }
+    </style>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#1769aa"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#d97722"/>
+    </marker>
+    <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#c23b3b"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1600" height="1100"/>
+  <text x="70" y="70" class="title">AD9269：ADC CLK、9周期流水线、DCO 与 DATA 的真实关系</text>
+  <text x="72" y="108" class="body">示例：5 MSPS，每个 ADC CLK 周期 200 ns；双通道复用时相邻 DCO 边沿间隔 100 ns</text>
+
+  <!-- Panel 1 -->
+  <rect x="55" y="140" width="1490" height="330" rx="8" class="panel"/>
+  <text x="85" y="185" class="h2">① 9周期流水线：决定“这个数字码对应9周期前的模拟样本”</text>
+
+  <text x="90" y="245" class="label">ADC CLK</text>
+  <path class="clock" d="M235 270 L275 270 L275 225 L315 225 L315 270 L355 270 L355 225 L395 225 L395 270 L435 270 L435 225 L475 225 L475 270 L515 270 L515 225 L555 225 L555 270 L595 270 L595 225 L635 225 L635 270 L675 270 L675 225 L715 225 L715 270 L755 270 L755 225 L795 225 L795 270 L835 270 L835 225 L875 225 L875 270 L915 270 L915 225 L955 225 L955 270 L995 270 L995 225 L1035 225 L1035 270 L1075 270 L1075 225 L1115 225 L1115 270 L1155 270 L1155 225 L1195 225 L1195 270 L1235 270 L1235 225 L1275 225 L1275 270 L1315 270 L1315 225 L1355 225 L1355 270 L1410 270"/>
+
+  <g class="small" text-anchor="middle">
+    <text x="275" y="302">N=0</text><text x="355" y="302">1</text><text x="435" y="302">2</text>
+    <text x="515" y="302">3</text><text x="595" y="302">4</text><text x="675" y="302">5</text>
+    <text x="755" y="302">6</text><text x="835" y="302">7</text><text x="915" y="302">8</text>
+    <text x="995" y="302">9</text><text x="1075" y="302">10</text>
+  </g>
+
+  <text x="90" y="355" class="label">模拟采样</text>
+  <g>
+    <rect x="240" y="325" width="70" height="48" rx="5" class="box-blue"/><text x="275" y="356" class="small" text-anchor="middle">A0/B0</text>
+    <rect x="320" y="325" width="70" height="48" rx="5" class="box-blue"/><text x="355" y="356" class="small" text-anchor="middle">A1/B1</text>
+    <rect x="400" y="325" width="70" height="48" rx="5" class="box-blue"/><text x="435" y="356" class="small" text-anchor="middle">A2/B2</text>
+    <text x="700" y="357" class="body" text-anchor="middle">ADC内部流水线处理中……</text>
+    <rect x="960" y="325" width="70" height="48" rx="5" class="box-blue"/><text x="995" y="356" class="small" text-anchor="middle">A9/B9</text>
+  </g>
+
+  <text x="90" y="423" class="label">数字输出</text>
+  <path d="M275 378 C275 430, 890 430, 970 392" class="accent" marker-end="url(#arrow-orange)"/>
+  <rect x="960" y="387" width="70" height="48" rx="5" class="box-green"/><text x="995" y="418" class="small" text-anchor="middle">A0/B0</text>
+  <rect x="1040" y="387" width="70" height="48" rx="5" class="box-green"/><text x="1075" y="418" class="small" text-anchor="middle">A1/B1</text>
+  <text x="1160" y="418" class="body">随后每个周期连续输出，不会再停9周期</text>
+
+  <!-- Panel 2 -->
+  <rect x="55" y="495" width="1490" height="370" rx="8" class="panel"/>
+  <text x="85" y="540" class="h2">② DCO：连续运行的“数字总线读取节拍”，不是偶发的 DATA READY 脉冲</text>
+
+  <g>
+    <line x1="310" y1="580" x2="310" y2="810" class="grid"/>
+    <line x1="360" y1="580" x2="360" y2="810" class="grid"/>
+    <line x1="830" y1="580" x2="830" y2="810" class="grid"/>
+    <line x1="880" y1="580" x2="880" y2="810" class="grid"/>
+    <line x1="1350" y1="580" x2="1350" y2="810" class="grid"/>
+  </g>
+
+  <text x="100" y="635" class="label">DCO</text>
+  <path class="clock" d="M230 660 L310 660 L310 600 L830 600 L830 660 L1350 660 L1350 600 L1450 600"/>
+  <g class="small" text-anchor="middle">
+    <text x="310" y="690">边沿 E0</text><text x="830" y="690">边沿 E1（+100 ns）</text><text x="1350" y="690">边沿 E2（+200 ns）</text>
+  </g>
+
+  <text x="100" y="745" class="label">DATA[15:0]</text>
+  <path class="data" d="M230 760 L360 760 L390 720 L800 720 L830 760 L880 760 L910 720 L1320 720 L1350 760 L1400 760 L1430 720 L1450 720"/>
+  <text x="285" y="735" class="mono" text-anchor="middle">W0稳定</text>
+  <text x="590" y="710" class="mono" text-anchor="middle">W1稳定</text>
+  <text x="1100" y="710" class="mono" text-anchor="middle">W2稳定</text>
+
+  <path d="M310 585 L310 755" class="capture" marker-end="url(#arrow-red)"/>
+  <path d="M830 585 L830 755" class="capture" marker-end="url(#arrow-red)"/>
+  <path d="M1350 585 L1350 755" class="capture" marker-end="url(#arrow-red)"/>
+  <text x="310" y="825" class="small" text-anchor="middle">FPGA锁存W0</text>
+  <text x="830" y="825" class="small" text-anchor="middle">FPGA锁存W1</text>
+  <text x="1350" y="825" class="small" text-anchor="middle">FPGA锁存W2</text>
+
+  <path d="M310 785 L360 785" class="accent" marker-end="url(#arrow-orange)"/>
+  <text x="335" y="810" class="small" text-anchor="middle">4.48 ns</text>
+  <text x="1000" y="795" class="body">W0、W1、W2依次是A、B、A、B……；边沿归属可由“交换A/B”校正</text>
+
+  <!-- Panel 3 -->
+  <rect x="55" y="890" width="1490" height="165" rx="8" class="panel"/>
+  <text x="85" y="935" class="h2">③ 一句话看懂三个信号</text>
+
+  <rect x="90" y="960" width="360" height="66" rx="6" class="box-blue"/>
+  <text x="270" y="988" class="label" text-anchor="middle">ADC CLK（FPGA → ADC）</text>
+  <text x="270" y="1015" class="small" text-anchor="middle">告诉ADC什么时候采模拟信号</text>
+
+  <rect x="505" y="960" width="360" height="66" rx="6" class="box-green"/>
+  <text x="685" y="988" class="label" text-anchor="middle">DATA（ADC → FPGA）</text>
+  <text x="685" y="1015" class="small" text-anchor="middle">9周期前的A/B数字结果</text>
+
+  <rect x="920" y="960" width="535" height="66" rx="6" class="box-orange"/>
+  <text x="1188" y="988" class="label" text-anchor="middle">DCO（ADC → FPGA，连续时钟）</text>
+  <text x="1188" y="1015" class="small" text-anchor="middle">告诉FPGA在每个边沿锁存当前稳定的16位总线</text>
+</svg>

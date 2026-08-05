@@ -1,0 +1,13 @@
+sha256,path
+10F45C03F5CDBE747CF4CD59F976FADEC78D45CD4709F4DF0E0955963E3D7AF1,C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\AXI_DMA.srcs\sources_1\new\top.v
+D74320F32264B1A713269284B58DF6E1343ABD678CD2BDAFA42943D46E7344DE,C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\AXI_DMA.srcs\sources_1\new\pl_raw_udp_streamer.v
+F515D1FDDB80B30A23B38E5FC2F0DA88FB632553BA93EA3E86733AF921179D75,C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\AXI_DMA.srcs\sim_1\new\tb_pl_raw_udp_streamer.sv
+EB2705E6B01985250FCAF8EFA92014637C5DA07FF1F04A3BB3B36275E6782E9A,C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\AXI_DMA.srcs\sim_1\new\tb_pl_monitor_packetizer.sv
+AAD526453B46F630B2585601C3B17192EE189ED5EB815886E7FE89F5894AA57B,C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\AXI_DMA.srcs\sim_1\new\tb_pl_monitor_gap_index.sv
+637450A225A6D251121AEE64D209CA45A48DAEE6E7C9C38B812F76BBF91D1283,C:\Users\chris\dlcpro_v1\daq_pc\daq_protocol_v2.py
+BF2F1F60F7A2302BA6CF23831541004BA48B53748C89520EDD05D8AA55828DDC,C:\Users\chris\dlcpro_v1\daq_pc\daq_udp_dual.py
+5C312FABEB70E439FF9A8449DCFEF93AF6652EDFF60FE11296CEA688528736C9,C:\Users\chris\dlcpro_v1\daq_pc\ad9269_daq_gui.py
+8159E208554169B3330BB7DAEE984C140E96B685480E7951552AEBDAF563D826,C:\Users\chris\dlcpro_v1\daq_pc\unified_daq_gui.py
+E2FFFC6038E1C491621959FAA06AB4C13E31BEE32B9886D294D65894314E2B71,C:\Users\chris\dlcpro_v1\daq_pc\tests\test_pl_protocol.py
+0E37A58A375DE38346D2F068A98B0D99295C8C67AF85EEB9DF3F8A6F2102F37D,C:\Users\chris\FPGA_Projects\A-high-speed-data-acquisition-framework-main\reports\pl_udp_pc_v2\phase2\top_pl_udp_v2_phase2_test.bit
+BC2AF12F3DB72E1E2EFAF7B15774167F6C63925A0F9AB82C7F83BF6B3D157F66,C:\Users\chris\Desktop\采集卡项目_最终版\02_最终硬件\top.bit

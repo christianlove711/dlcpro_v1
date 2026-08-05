@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dlcpro-control"
+version = "1.0.0"
+description = "PySide6 control application for TOPTICA DLC pro"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "PySide6>=6.9,<6.10",
+    "toptica-lasersdk>=3.3,<3.4",
+    "numpy>=2.3,<3",
+    "h5py>=3.15,<4",
+    "pyserial>=3.5,<4",
+    "ifaddr>=0.2,<0.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4,<9",
+    "pyinstaller>=6.20,<7",
+]
+
+[tool.pytest.ini_options]
+minversion = "8.4"
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.setuptools]
+py-modules = [
+    "app",
+    "device_task_coordinator",
+    "dlcpro_service",
+    "notifications",
+    "preset_store",
+    "ui_scaling",
+    "ui_text",
+]
+
+[tool.setuptools.packages.find]
+include = ["controllers*", "daq_pc*", "widgets*", "windows*"]

@@ -52,9 +52,9 @@ class LockSettingsPanel(QFrame):
         self.lock_settings_label.setObjectName("SectionTitle")
         header.addWidget(self.lock_settings_label)
         header.addStretch(1)
-        self.lock_enable_button = create_toggle_button(owner._on_lock_enabled_toggled)
+        self.lock_enable_button = create_toggle_button(owner.scan_lock_controller._on_lock_enabled_toggled)
         header.addWidget(self.lock_enable_button)
-        self.lock_hold_button = create_toggle_button(owner._on_lock_hold_toggled)
+        self.lock_hold_button = create_toggle_button(owner.scan_lock_controller._on_lock_hold_toggled)
         header.addWidget(self.lock_hold_button)
         layout.addLayout(header)
 
@@ -66,27 +66,27 @@ class LockSettingsPanel(QFrame):
 
         self.lock_input_signal_label = QLabel()
         self.lock_input_signal_combo = SafeComboBox()
-        self.lock_input_signal_combo.currentIndexChanged.connect(owner._on_lock_input_signal_changed)
+        self.lock_input_signal_combo.currentIndexChanged.connect(owner.scan_lock_controller._on_lock_input_signal_changed)
 
         self.lock_error_signal_label = QLabel()
         self.lock_error_signal_combo = SafeComboBox()
-        self.lock_error_signal_combo.currentIndexChanged.connect(owner._on_lock_error_signal_changed)
+        self.lock_error_signal_combo.currentIndexChanged.connect(owner.scan_lock_controller._on_lock_error_signal_changed)
 
         self.lock_type_label = QLabel()
         self.lock_type_combo = SafeComboBox()
-        self.lock_type_combo.currentIndexChanged.connect(owner._on_lock_type_changed)
+        self.lock_type_combo.currentIndexChanged.connect(owner.scan_lock_controller._on_lock_type_changed)
 
         self.lock_pid_selection_label = QLabel()
         self.lock_pid_selection_combo = SafeComboBox()
-        self.lock_pid_selection_combo.currentIndexChanged.connect(owner._on_lock_pid_selection_changed)
+        self.lock_pid_selection_combo.currentIndexChanged.connect(owner.scan_lock_controller._on_lock_pid_selection_changed)
 
         self.lock_falc_selection_label = QLabel()
         self.lock_falc_selection_combo = SafeComboBox()
-        self.lock_falc_selection_combo.currentIndexChanged.connect(owner._on_lock_falc_selection_changed)
+        self.lock_falc_selection_combo.currentIndexChanged.connect(owner.scan_lock_controller._on_lock_falc_selection_changed)
 
         self.lock_without_lockpoint_label = QLabel()
         self.lock_without_lockpoint_check = QCheckBox()
-        self.lock_without_lockpoint_check.stateChanged.connect(owner._on_lock_without_lockpoint_changed)
+        self.lock_without_lockpoint_check.stateChanged.connect(owner.scan_lock_controller._on_lock_without_lockpoint_changed)
 
         self.lock_status_label = QLabel()
         self.lock_status_value = QLabel("--")
@@ -109,19 +109,19 @@ class LockSettingsPanel(QFrame):
         candidate_form.setVerticalSpacing(12)
 
         self.lock_candidate_top_check = QCheckBox()
-        self.lock_candidate_top_check.toggled.connect(owner._on_lock_candidate_top_changed)
+        self.lock_candidate_top_check.toggled.connect(owner.scan_lock_controller._on_lock_candidate_top_changed)
         candidate_form.addRow(QLabel(), self._labeled_checkbox(self.lock_candidate_top_check))
 
         self.lock_candidate_bottom_check = QCheckBox()
-        self.lock_candidate_bottom_check.toggled.connect(owner._on_lock_candidate_bottom_changed)
+        self.lock_candidate_bottom_check.toggled.connect(owner.scan_lock_controller._on_lock_candidate_bottom_changed)
         candidate_form.addRow(QLabel(), self._labeled_checkbox(self.lock_candidate_bottom_check))
 
         self.lock_candidate_positive_edge_check = QCheckBox()
-        self.lock_candidate_positive_edge_check.toggled.connect(owner._on_lock_candidate_positive_edge_changed)
+        self.lock_candidate_positive_edge_check.toggled.connect(owner.scan_lock_controller._on_lock_candidate_positive_edge_changed)
         candidate_form.addRow(QLabel(), self._labeled_checkbox(self.lock_candidate_positive_edge_check))
 
         self.lock_candidate_negative_edge_check = QCheckBox()
-        self.lock_candidate_negative_edge_check.toggled.connect(owner._on_lock_candidate_negative_edge_changed)
+        self.lock_candidate_negative_edge_check.toggled.connect(owner.scan_lock_controller._on_lock_candidate_negative_edge_changed)
         candidate_form.addRow(QLabel(), self._labeled_checkbox(self.lock_candidate_negative_edge_check))
 
         self.lock_candidate_edge_level_label = QLabel()
@@ -129,7 +129,7 @@ class LockSettingsPanel(QFrame):
         self.lock_candidate_edge_level_spin.setDecimals(5)
         self.lock_candidate_edge_level_spin.setRange(-1_000_000_000.0, 1_000_000_000.0)
         self.lock_candidate_edge_level_spin.setSingleStep(0.001)
-        self.lock_candidate_edge_level_spin.connect_live_apply(owner._on_lock_candidate_edge_level_finished)
+        self.lock_candidate_edge_level_spin.connect_live_apply(owner.scan_lock_controller._on_lock_candidate_edge_level_finished)
         candidate_form.addRow(self.lock_candidate_edge_level_label, self.lock_candidate_edge_level_spin)
 
         self.lock_candidate_peak_noise_tolerance_label = QLabel()
@@ -138,7 +138,7 @@ class LockSettingsPanel(QFrame):
         self.lock_candidate_peak_noise_tolerance_spin.setRange(0.0, 1_000_000_000.0)
         self.lock_candidate_peak_noise_tolerance_spin.setSingleStep(0.001)
         self.lock_candidate_peak_noise_tolerance_spin.connect_live_apply(
-            owner._on_lock_candidate_peak_noise_tolerance_finished
+            owner.scan_lock_controller._on_lock_candidate_peak_noise_tolerance_finished
         )
         candidate_form.addRow(
             self.lock_candidate_peak_noise_tolerance_label,
@@ -149,13 +149,13 @@ class LockSettingsPanel(QFrame):
         self.lock_candidate_edge_min_distance_spin = SafeSpinBox()
         self.lock_candidate_edge_min_distance_spin.setRange(0, 1_000_000_000)
         self.lock_candidate_edge_min_distance_spin.setSingleStep(1)
-        self.lock_candidate_edge_min_distance_spin.connect_live_apply(owner._on_lock_candidate_edge_min_distance_finished)
+        self.lock_candidate_edge_min_distance_spin.connect_live_apply(owner.scan_lock_controller._on_lock_candidate_edge_min_distance_finished)
         candidate_form.addRow(self.lock_candidate_edge_min_distance_label, self.lock_candidate_edge_min_distance_spin)
 
         self.lock_candidate_top_of_fringe_low_pass_label = QLabel()
         self.lock_candidate_top_of_fringe_low_pass_check = QCheckBox()
         self.lock_candidate_top_of_fringe_low_pass_check.toggled.connect(
-            owner._on_lock_candidate_top_of_fringe_low_pass_changed
+            owner.scan_lock_controller._on_lock_candidate_top_of_fringe_low_pass_changed
         )
         candidate_form.addRow(
             self.lock_candidate_top_of_fringe_low_pass_label,

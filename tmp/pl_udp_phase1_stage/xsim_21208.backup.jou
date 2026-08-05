@@ -1,0 +1,13 @@
+#-----------------------------------------------------------
+# xsim v2020.2 (64-bit)
+# SW Build 3064766 on Wed Nov 18 09:12:45 MST 2020
+# IP Build 3064653 on Wed Nov 18 14:17:31 MST 2020
+# Start of session at: Wed Jul 29 21:06:18 2026
+# Process ID: 21208
+# Current directory: C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage
+# Command line: xsim.exe -mode tcl -source {xsim.dir/sim_packetizer_bram/xsim_script.tcl}
+# Log file: C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage/xsim.log
+# Journal file: C:/Users/chris/dlcpro_v1/tmp/pl_udp_phase1_stage\xsim.jou
+#-----------------------------------------------------------
+source xsim.dir/sim_packetizer_bram/xsim_script.tcl
+run -all

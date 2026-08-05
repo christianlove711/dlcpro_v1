@@ -1,5 +1,3 @@
-from widgets.auto_lock.config_panel import AutoLockConfigPanel
-from widgets.auto_lock.scope_plot import ScopePlotWidget
-from widgets.auto_lock.status_panel import AutoLockStatusPanel
+from widgets.auto_lock.signal_plot import AutoLockSignalPlot
 
-__all__ = ["AutoLockConfigPanel", "ScopePlotWidget", "AutoLockStatusPanel"]
+__all__ = ["AutoLockSignalPlot"]

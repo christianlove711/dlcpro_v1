@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-from concurrent.futures import Future, ThreadPoolExecutor
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
@@ -19,6 +18,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QStackedWidget,
     QTableWidget,
@@ -27,7 +27,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from dlcpro_service import ConnectionSettings, DeviceSnapshot, DlcProService
+from dlcpro_service import (
+    ConnectionSettings,
+    DeviceSnapshot,
+    DlcProService,
+    SnapshotRequest,
+    SnapshotSection,
+)
+from device_task_coordinator import DeviceTaskCoordinator
+from daq_pc.unified_daq_gui import MainWindow as DaqMainWindow
+from notifications import NotificationService
 from ui_text import (
     ARC_SIGNAL_OPTIONS,
     LOCK_ERROR_SIGNAL_OPTIONS,
@@ -40,12 +49,18 @@ from ui_text import (
     SCAN_SHAPE_OPTIONS,
     TEXT,
 )
-from controllers import AutoLockController, AutoLock2Controller, LaserController, ScanLockController
+from controllers import (
+    AutoLockController,
+    FalcController,
+    LaserController,
+    RelockController,
+    ScanLockController,
+    StabilizationController,
+)
 from widgets.common_controls import SafeComboBox, SafeSpinBox
-from ui_scaling import SCALE_OPTIONS, UiScaleManager, fit_window_to_screen
+from ui_scaling import SCALE_OPTIONS, UiScaleManager, WindowLayoutManager
 from windows import (
     AutoLockWindow,
-    AutoLock2Window,
     FalcProWindow,
     LaserWindow,
     RelockWindow,
@@ -54,9 +69,6 @@ from windows import (
     build_laser_page,
     build_scan_lock_page,
 )
-
-AUTO_APPLY_DEBOUNCE_MS = 150
-
 
 class MainWindow(QMainWindow):
     PRECISION_OPTIONS = [
@@ -74,14 +86,12 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.service = DlcProService()
-        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dlcpro")
+        self.task_coordinator = DeviceTaskCoordinator()
         self.language = "zh"
+        self.layout_manager = WindowLayoutManager()
         self.scale_manager: UiScaleManager | None = None
         self.busy = False
         self.snapshot: DeviceSnapshot | None = None
-        self.pending_future: Future | None = None
-        self.pending_success_handler = None
-        self.pending_task_kind = "action"
         self.current_set_dirty = False
         self.current_set_programmatic_update = False
         self.cc_programmatic_update = False
@@ -106,25 +116,23 @@ class MainWindow(QMainWindow):
             "sc": [],
             "pid": [],
         }
-        self.pending_followup_task: tuple[object, object, str] | None = None
         self.connection_loss_notified = False
+        self.notifier = NotificationService(self, lambda: self.language)
         self.auto_lock_controller = AutoLockController(self)
-        self.auto_lock2_controller = AutoLock2Controller(self)
+        self.falc_controller = FalcController(self)
         self.laser_controller = LaserController(self)
+        self.relock_controller = RelockController(self)
         self.scan_lock_controller = ScanLockController(self)
+        self.stabilization_controller = StabilizationController(self)
 
         self.refresh_timer = QTimer(self)
         self.refresh_timer.setInterval(500)
         self.refresh_timer.timeout.connect(self.refresh_snapshot)
+        self._refresh_tick = 0
 
         self.future_poll_timer = QTimer(self)
         self.future_poll_timer.setInterval(50)
         self.future_poll_timer.timeout.connect(self._poll_future)
-
-        self.current_apply_timer = QTimer(self)
-        self.current_apply_timer.setSingleShot(True)
-        self.current_apply_timer.setInterval(AUTO_APPLY_DEBOUNCE_MS)
-        self.current_apply_timer.timeout.connect(self._apply_current_if_needed)
 
         self._build_ui()
         self._configure_combo_boxes()
@@ -134,7 +142,7 @@ class MainWindow(QMainWindow):
         self._configure_ui_scaling()
         self._apply_texts()
         self._populate_environment_hints()
-        self._set_connection_mode("network")
+        self._load_connection_settings()
         self._set_busy(False)
 
     def _build_ui(self) -> None:
@@ -174,27 +182,28 @@ class MainWindow(QMainWindow):
         workspace_layout.setContentsMargins(12, 12, 12, 12)
         workspace_layout.setSpacing(12)
 
-        self.nav_layout = QHBoxLayout()
+        self.nav_layout = QGridLayout()
         self.nav_layout.setSpacing(10)
         self.overview_button = self._create_nav_button(lambda: self.page_stack.setCurrentIndex(0))
         self.laser_button = self._create_nav_button(self._open_laser_window)
         self.falc_button = self._create_nav_button(self._open_falc_window)
         self.scan_lock_button = self._create_nav_button(self._open_scan_lock_window)
         self.auto_lock_button = self._create_nav_button(self._open_auto_lock_window)
-        self.auto_lock2_button = self._create_nav_button(self._open_auto_lock2_window)
         self.relock_button = self._create_nav_button(self._open_relock_window)
         self.stabilization_button = self._create_nav_button(self._open_stabilization_window)
-        for button in (
+        self.daq_button = self._create_nav_button(self._open_daq_window)
+        self.nav_buttons = (
             self.overview_button,
             self.laser_button,
             self.falc_button,
             self.scan_lock_button,
             self.auto_lock_button,
-            self.auto_lock2_button,
             self.relock_button,
             self.stabilization_button,
-        ):
-            self.nav_layout.addWidget(button)
+            self.daq_button,
+        )
+        self._nav_columns = 0
+        self._reflow_navigation()
         workspace_layout.addLayout(self.nav_layout)
 
         self.page_stack = QStackedWidget()
@@ -210,15 +219,17 @@ class MainWindow(QMainWindow):
         root.setStretch(2, 1)
 
         self.laser_window = LaserWindow(self.laser_page)
-        self.falc_window = FalcProWindow(self)
+        self.falc_window = FalcProWindow(self, self.falc_controller)
+        self.falc_controller.bind_window(self.falc_window)
         self.scan_lock_page = self._build_scan_lock_page()
         self.scan_lock_window = ScanLockWindow(self.scan_lock_page)
         self.auto_lock_window = AutoLockWindow(self, self.auto_lock_controller)
         self.auto_lock_controller.bind_window(self.auto_lock_window)
-        self.auto_lock2_window = AutoLock2Window(self, self.auto_lock2_controller)
-        self.auto_lock2_controller.bind_window(self.auto_lock2_window)
-        self.relock_window = RelockWindow(self)
-        self.stabilization_window = StabilizationWindow(self)
+        self.relock_window = RelockWindow(self, self.relock_controller)
+        self.relock_controller.bind_window(self.relock_window)
+        self.stabilization_window = StabilizationWindow(self, self.stabilization_controller)
+        self.stabilization_controller.bind_window(self.stabilization_window)
+        self.daq_window: DaqMainWindow | None = None
 
     def _build_connection_group(self) -> QGroupBox:
         box = QGroupBox()
@@ -234,6 +245,14 @@ class MainWindow(QMainWindow):
 
         self.host_label = QLabel()
         self.host_edit = QLineEdit("169.254.5.11")
+        self.command_port_label = QLabel()
+        self.command_port_spin = SafeSpinBox()
+        self.command_port_spin.setRange(0, 65535)
+        self.command_port_spin.setValue(1998)
+        self.monitoring_port_label = QLabel()
+        self.monitoring_port_spin = SafeSpinBox()
+        self.monitoring_port_spin.setRange(0, 65535)
+        self.monitoring_port_spin.setValue(1999)
         self.serial_port_label = QLabel()
         self.serial_port_combo = SafeComboBox()
         self.baudrate_label = QLabel()
@@ -250,7 +269,7 @@ class MainWindow(QMainWindow):
         self.refresh_button = QPushButton()
         self.connect_button.clicked.connect(self.connect_device)
         self.disconnect_button.clicked.connect(self.disconnect_device)
-        self.refresh_button.clicked.connect(self.refresh_snapshot)
+        self.refresh_button.clicked.connect(self.refresh_full_snapshot)
 
         self.serial_ports_info = QTextEdit()
         self.serial_ports_info.setReadOnly(True)
@@ -262,18 +281,22 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.mode_label, 0, 0)
         layout.addWidget(self.mode_combo, 0, 1)
         layout.addWidget(self.host_label, 1, 0)
-        layout.addWidget(self.host_edit, 1, 1, 1, 3)
-        layout.addWidget(self.serial_port_label, 2, 0)
-        layout.addWidget(self.serial_port_combo, 2, 1)
-        layout.addWidget(self.baudrate_label, 2, 2)
-        layout.addWidget(self.baudrate_spin, 2, 3)
-        layout.addWidget(self.timeout_label, 3, 0)
-        layout.addWidget(self.timeout_spin, 3, 1)
-        layout.addWidget(self.connect_button, 3, 2)
-        layout.addWidget(self.disconnect_button, 3, 3)
-        layout.addWidget(self.refresh_button, 3, 4)
-        layout.addWidget(self.network_info, 4, 0, 1, 5)
-        layout.addWidget(self.serial_ports_info, 5, 0, 1, 5)
+        layout.addWidget(self.host_edit, 1, 1, 1, 4)
+        layout.addWidget(self.command_port_label, 2, 0)
+        layout.addWidget(self.command_port_spin, 2, 1)
+        layout.addWidget(self.monitoring_port_label, 2, 2)
+        layout.addWidget(self.monitoring_port_spin, 2, 3)
+        layout.addWidget(self.serial_port_label, 3, 0)
+        layout.addWidget(self.serial_port_combo, 3, 1)
+        layout.addWidget(self.baudrate_label, 3, 2)
+        layout.addWidget(self.baudrate_spin, 3, 3)
+        layout.addWidget(self.timeout_label, 4, 0)
+        layout.addWidget(self.timeout_spin, 4, 1)
+        layout.addWidget(self.connect_button, 4, 2)
+        layout.addWidget(self.disconnect_button, 4, 3)
+        layout.addWidget(self.refresh_button, 4, 4)
+        layout.addWidget(self.network_info, 5, 0, 1, 5)
+        layout.addWidget(self.serial_ports_info, 6, 0, 1, 5)
         return box
 
     def _build_overview_page(self) -> QWidget:
@@ -317,6 +340,25 @@ class MainWindow(QMainWindow):
         button.clicked.connect(slot)
         return button
 
+    def _reflow_navigation(self) -> None:
+        if not hasattr(self, "nav_buttons"):
+            return
+        width = max(self.width(), 1)
+        columns = 1 if width < 520 else 2 if width < 900 else 4 if width < 1280 else len(self.nav_buttons)
+        if columns == self._nav_columns:
+            return
+        for button in self.nav_buttons:
+            self.nav_layout.removeWidget(button)
+        for index, button in enumerate(self.nav_buttons):
+            self.nav_layout.addWidget(button, index // columns, index % columns)
+        for column in range(columns):
+            self.nav_layout.setColumnStretch(column, 1)
+        self._nav_columns = columns
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._reflow_navigation()
+
     def _register_module_precision_targets(self, module: str, default_target: QDoubleSpinBox, *spinboxes: QDoubleSpinBox) -> None:
         self.module_precision_defaults[module] = default_target
         self.module_precision_selected[module] = default_target
@@ -335,82 +377,63 @@ class MainWindow(QMainWindow):
             button.setChecked(button._precision_target is current)
             button.blockSignals(False)
 
+    def sync_precision_target_buttons(self, module: str) -> None:
+        self._sync_precision_target_buttons(module)
+
     def _open_laser_window(self) -> None:
-        if self.laser_window.isHidden():
-            self.laser_window.move(self.x() + 40, self.y() + 40)
-        self.laser_window.showNormal()
-        self.laser_window.show()
-        fit_window_to_screen(self.laser_window)
-        self.laser_window.raise_()
-        self.laser_window.activateWindow()
+        self._show_auxiliary_window(self.laser_window)
 
     def _open_falc_window(self) -> None:
-        if self.falc_window.isHidden():
-            self.falc_window.move(self.x() + 60, self.y() + 60)
-        self.falc_window.showNormal()
-        self.falc_window.show()
-        fit_window_to_screen(self.falc_window)
-        self.falc_window.raise_()
-        self.falc_window.activateWindow()
+        self._show_auxiliary_window(self.falc_window)
 
     def _open_scan_lock_window(self) -> None:
-        if self.scan_lock_window.isHidden():
-            self.scan_lock_window.move(self.x() + 60, self.y() + 60)
-        self.scan_lock_window.showNormal()
-        self.scan_lock_window.show()
-        fit_window_to_screen(self.scan_lock_window)
-        self.scan_lock_window.raise_()
-        self.scan_lock_window.activateWindow()
+        self._show_auxiliary_window(self.scan_lock_window)
 
     def _open_auto_lock_window(self) -> None:
-        if self.auto_lock_window.isHidden():
-            self.auto_lock_window.move(self.x() + 80, self.y() + 80)
-        self.auto_lock_window.showNormal()
-        self.auto_lock_window.show()
-        fit_window_to_screen(self.auto_lock_window)
-        self.auto_lock_window.raise_()
-        self.auto_lock_window.activateWindow()
-
-    def _open_auto_lock2_window(self) -> None:
-        if self.auto_lock2_window.isHidden():
-            self.auto_lock2_window.move(self.x() + 90, self.y() + 90)
-        self.auto_lock2_window.showNormal()
-        self.auto_lock2_window.show()
-        fit_window_to_screen(self.auto_lock2_window)
-        self.auto_lock2_window.raise_()
-        self.auto_lock2_window.activateWindow()
+        self._show_auxiliary_window(self.auto_lock_window)
 
     def _open_relock_window(self) -> None:
-        if self.relock_window.isHidden():
-            self.relock_window.move(self.x() + 80, self.y() + 80)
-        self.relock_window.showNormal()
-        self.relock_window.show()
-        fit_window_to_screen(self.relock_window)
-        self.relock_window.raise_()
-        self.relock_window.activateWindow()
+        self._show_auxiliary_window(self.relock_window)
 
     def _open_stabilization_window(self) -> None:
-        if self.stabilization_window.isHidden():
-            self.stabilization_window.move(self.x() + 100, self.y() + 100)
-        self.stabilization_window.showNormal()
-        self.stabilization_window.show()
-        fit_window_to_screen(self.stabilization_window)
-        self.stabilization_window.raise_()
-        self.stabilization_window.activateWindow()
+        self._show_auxiliary_window(self.stabilization_window)
+
+    def _open_daq_window(self) -> None:
+        if self.daq_window is None:
+            self.daq_window = DaqMainWindow(
+                snapshot_provider=lambda: self.snapshot,
+                dlc_service=self.service,
+                snapshot_consumer=self._on_snapshot_updated,
+            )
+            self.daq_window.destroyed.connect(
+                lambda: setattr(self, "daq_window", None)
+            )
+        self.daq_window.showNormal()
+        self.daq_window.show()
+        self.daq_window.raise_()
+        self.daq_window.activateWindow()
+        self.refresh_visible_snapshot()
+
+    def _show_auxiliary_window(self, window: QWidget) -> None:
+        self.layout_manager.prepare_show(window)
+        window.showNormal()
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        self.refresh_visible_snapshot()
 
     def _apply_base_style(self) -> None:
         stylesheet = """
             QWidget {
                 background: #2d2d2d;
                 color: #f0f0f0;
-                font-size: 14px;
             }
             QLabel {
                 background: transparent;
             }
             QGroupBox {
                 border: 1px solid #4e4e4e;
-                border-radius: 14px;
+                border-radius: 6px;
                 margin-top: 10px;
                 padding-top: 10px;
                 background: #343434;
@@ -443,7 +466,7 @@ class MainWindow(QMainWindow):
             QPushButton {
                 background: #525252;
                 border: 1px solid #6a6a6a;
-                border-radius: 10px;
+                border-radius: 6px;
                 padding: 8px 14px;
             }
             QPushButton:hover {
@@ -451,20 +474,6 @@ class MainWindow(QMainWindow):
             }
             QPushButton:pressed {
                 background: #4a4a4a;
-            }
-            QPushButton#ScopeModeButton {
-                min-width: 76px;
-                padding: 6px 12px;
-                border-radius: 8px;
-            }
-            QPushButton#ScopeModeButton:checked {
-                background: #455b79;
-                border: 1px solid #7292c0;
-                color: #f4f8ff;
-                font-weight: 700;
-            }
-            QPushButton#ScopeOpenButton {
-                min-width: 164px;
             }
             QPushButton#PrecisionButton {
                 min-width: 72px;
@@ -542,19 +551,17 @@ class MainWindow(QMainWindow):
                 font-weight: 600;
             }
             QLabel#PageTitle {
-                font-size: 19px;
                 font-weight: 700;
                 color: #f5f5f5;
             }
             QLabel#SectionTitle {
-                font-size: 17px;
                 font-weight: 700;
                 color: #f2f2f2;
             }
             QFrame#LaserPanel {
                 background: #3a3a3a;
                 border: 1px solid #5b5b5b;
-                border-radius: 18px;
+                border-radius: 6px;
             }
             QLabel#ReadValue {
                 background: #505050;
@@ -584,23 +591,43 @@ class MainWindow(QMainWindow):
         if app is None:
             return
         if self.scale_manager is None:
-            self.scale_manager = UiScaleManager(app, app.styleSheet())
+            self.scale_manager = UiScaleManager(app, app.styleSheet(), self.layout_manager.settings)
         self.scale_manager.register_windows(
             (
-                (self, 980, 860),
-                (self.laser_window, 860, 900),
-                (self.falc_window, 760, 760),
-                (self.scan_lock_window, 980, 1180),
-                (self.auto_lock_window, 1120, 820),
-                (self.auto_lock_window.scope_window, 1120, 760),
-                (self.auto_lock2_window, 1180, 620),
-                (self.auto_lock2_window.config_window, 720, 520),
-                (self.auto_lock2_window.waveform_window, 1120, 700),
-                (self.auto_lock2_window.log_window, 920, 620),
-                (self.relock_window, 1180, 480),
-                (self.stabilization_window, 920, 860),
+                self,
+                self.laser_window,
+                self.falc_window,
+                self.scan_lock_window,
+                self.auto_lock_window,
+                self.auto_lock_window.config_window,
+                self.auto_lock_window.waveform_window,
+                self.auto_lock_window.log_window,
+                self.relock_window,
+                self.stabilization_window,
             )
         )
+        self.layout_manager.register_windows(
+            (
+                (self, "main", 980, 860),
+                (self.laser_window, "laser", 860, 900),
+                (self.falc_window, "falc", 760, 760),
+                (self.scan_lock_window, "scan-lock", 980, 900),
+                (self.auto_lock_window, "auto-lock", 1080, 680),
+                (self.auto_lock_window.config_window, "auto-lock-config", 720, 620),
+                (self.auto_lock_window.waveform_window, "auto-lock-waveform", 1040, 700),
+                (self.auto_lock_window.log_window, "auto-lock-log", 920, 620),
+                (self.relock_window, "relock", 1080, 560),
+                (self.stabilization_window, "stabilization", 920, 860),
+            )
+        )
+        selected = self.scale_manager.selected_scale
+        index = next(
+            (i for i, (_label, value) in enumerate(SCALE_OPTIONS) if value == selected),
+            0,
+        )
+        self.ui_scale_combo.blockSignals(True)
+        self.ui_scale_combo.setCurrentIndex(index)
+        self.ui_scale_combo.blockSignals(False)
         self.scale_manager.apply()
 
     def _on_ui_scale_changed(self) -> None:
@@ -625,6 +652,8 @@ class MainWindow(QMainWindow):
         self.mode_combo.setItemText(0, t["network"])
         self.mode_combo.setItemText(1, t["serial"])
         self.host_label.setText(t["host"])
+        self.command_port_label.setText(t["command_port"])
+        self.monitoring_port_label.setText(t["monitoring_port"])
         self.serial_port_label.setText(t["serial_port"])
         self.baudrate_label.setText(t["baudrate"])
         self.timeout_label.setText(t["timeout"])
@@ -638,15 +667,15 @@ class MainWindow(QMainWindow):
         self.falc_button.setText(t["falc"])
         self.scan_lock_button.setText(t["scan_lock"])
         self.auto_lock_button.setText(t["auto_lock"])
-        self.auto_lock2_button.setText(t["auto_lock2"])
         self.relock_button.setText(t["relock"])
         self.stabilization_button.setText(t["stabilization"])
+        self.daq_button.setText(t["data_acquisition"])
         self.auto_lock_controller.apply_texts()
-        self.auto_lock2_controller.apply_texts()
         self.falc_window.apply_texts(self.language)
         self.relock_window.apply_texts(self.language)
         self.stabilization_window.apply_texts(self.language)
         if self.snapshot is None:
+            self.auto_lock_window.reset_state(self.language)
             self.relock_window.reset_state(self.language)
             self.stabilization_window.reset_state(self.language)
 
@@ -823,11 +852,56 @@ class MainWindow(QMainWindow):
         )
         button.blockSignals(False)
 
+    def update_toggle_button(self, button: QPushButton, enabled: bool) -> None:
+        self._update_toggle_button(button, enabled)
+
     def _set_connection_mode(self, mode: str) -> None:
         is_network = mode == "network"
         self.host_edit.setEnabled(is_network)
+        self.command_port_spin.setEnabled(is_network)
+        self.monitoring_port_spin.setEnabled(is_network)
         self.serial_port_combo.setEnabled(not is_network)
         self.baudrate_spin.setEnabled(not is_network)
+
+    def _load_connection_settings(self) -> None:
+        settings = self.layout_manager.settings
+        mode = str(settings.value("dlcpro/mode", "network"))
+        mode_index = self.mode_combo.findData(mode)
+        self.mode_combo.setCurrentIndex(max(0, mode_index))
+        self.host_edit.setText(
+            str(settings.value("dlcpro/network_target", "169.254.18.52"))
+        )
+        self.command_port_spin.setValue(
+            int(settings.value("dlcpro/command_line_port", 1998))
+        )
+        self.monitoring_port_spin.setValue(
+            int(settings.value("dlcpro/monitoring_line_port", 1999))
+        )
+        self.baudrate_spin.setValue(int(settings.value("dlcpro/baudrate", 115200)))
+        self.timeout_spin.setValue(int(settings.value("dlcpro/timeout", 5)))
+        serial_target = str(settings.value("dlcpro/serial_target", ""))
+        if serial_target:
+            serial_index = self.serial_port_combo.findData(serial_target)
+            if serial_index < 0:
+                serial_index = self.serial_port_combo.findText(serial_target)
+            if serial_index >= 0:
+                self.serial_port_combo.setCurrentIndex(serial_index)
+        self._set_connection_mode(str(self.mode_combo.currentData()))
+
+    def _save_connection_settings(self) -> None:
+        settings = self.layout_manager.settings
+        settings.setValue("dlcpro/mode", self.mode_combo.currentData())
+        settings.setValue("dlcpro/network_target", self.host_edit.text().strip())
+        settings.setValue("dlcpro/command_line_port", self.command_port_spin.value())
+        settings.setValue(
+            "dlcpro/monitoring_line_port", self.monitoring_port_spin.value()
+        )
+        settings.setValue(
+            "dlcpro/serial_target", self.serial_port_combo.currentText().strip()
+        )
+        settings.setValue("dlcpro/baudrate", self.baudrate_spin.value())
+        settings.setValue("dlcpro/timeout", self.timeout_spin.value())
+        settings.sync()
 
     def _set_busy(self, busy: bool, freeze_controls: bool = True) -> None:
         laser_scroll = self._laser_scroll_value()
@@ -838,7 +912,7 @@ class MainWindow(QMainWindow):
             self.status_label.setText(t["busy"])
         else:
             self.status_label.setText(t["connected"] if self.service.is_connected else t["disconnected"])
-        auto_lock_running = self.auto_lock_controller.is_running or self.auto_lock2_controller.is_running
+        auto_lock_running = self.auto_lock_controller.is_running
         self.connect_button.setEnabled(not busy and not auto_lock_running)
         self.disconnect_button.setEnabled(not busy)
         self.refresh_button.setEnabled(not busy and not auto_lock_running)
@@ -864,7 +938,6 @@ class MainWindow(QMainWindow):
             widget.setEnabled(previewable)
         self.falc_window.set_writable(writable, previewable)
         self.auto_lock_window.set_writable(writable, previewable, auto_lock_running)
-        self.auto_lock2_window.set_writable(writable, previewable, self.auto_lock2_controller.is_running)
         self.relock_window.set_writable(writable, previewable)
         self.stabilization_window.set_writable(writable, previewable)
 
@@ -931,69 +1004,80 @@ class MainWindow(QMainWindow):
         self._restore_laser_scroll(laser_scroll)
         self._restore_scan_lock_scroll(scan_lock_scroll)
 
-    def _run_task(self, fn, on_success, task_kind: str = "action") -> bool:
-        if self.busy:
+    def _run_task(
+        self,
+        fn,
+        on_success,
+        task_kind: str = "action",
+        coalesce_key: str | None = None,
+    ) -> bool:
+        accepted = self.task_coordinator.submit(
+            fn,
+            lambda ok, result, kind: self._handle_task_done(on_success, ok, result, kind),
+            kind=task_kind,
+            coalesce_key=coalesce_key,
+        )
+        if not accepted:
             return False
-        if self.pending_future is not None:
-            if task_kind != "poll" and self.pending_task_kind == "poll":
-                self.pending_followup_task = (fn, on_success, task_kind)
-                return True
-            return False
-        freeze_controls = task_kind != "poll"
-        self._set_busy(True, freeze_controls=freeze_controls)
-        self.pending_success_handler = on_success
-        self.pending_task_kind = task_kind
-        self.pending_future = self.executor.submit(fn)
-        self.future_poll_timer.start()
+        if task_kind != "poll":
+            self._set_busy(True)
+        if not self.future_poll_timer.isActive():
+            self.future_poll_timer.start()
         return True
 
+    def submit_device_task(self, fn, on_success=None, *, coalesce_key: str | None = None) -> bool:
+        """Public controller entry point for serialized SDK operations."""
+
+        return self._run_task(
+            fn,
+            on_success or self._on_snapshot_updated,
+            coalesce_key=coalesce_key,
+        )
+
+    def publish_snapshot(self, snapshot: DeviceSnapshot) -> None:
+        self._on_snapshot_updated(snapshot)
+
+    def set_operation_busy(self, busy: bool) -> None:
+        self._set_busy(busy)
+
+    def set_background_refresh_enabled(self, enabled: bool) -> None:
+        if enabled and self.service.is_connected:
+            if not self.refresh_timer.isActive():
+                self.refresh_timer.start()
+        else:
+            self.refresh_timer.stop()
+
+    def show_falc_window(self) -> None:
+        self._open_falc_window()
+
     def _poll_future(self) -> None:
-        future = self.pending_future
-        if future is None or not future.done():
-            return
-
-        self.future_poll_timer.stop()
-        self.pending_future = None
-        on_success = self.pending_success_handler
-        self.pending_success_handler = None
-        task_kind = self.pending_task_kind
-        self.pending_task_kind = "action"
-
-        try:
-            result = future.result()
-        except Exception as exc:  # noqa: BLE001
-            self._handle_task_done(on_success, False, exc, task_kind)
-            return
-
-        self._handle_task_done(on_success, True, result, task_kind)
+        self.task_coordinator.poll_completed()
+        if not self.task_coordinator.has_work:
+            self.future_poll_timer.stop()
 
     def _handle_task_done(self, on_success, ok: bool, result: object, task_kind: str) -> None:
-        self._set_busy(False, freeze_controls=task_kind != "poll")
         if ok:
             self.connection_loss_notified = False
             if on_success is not None:
                 on_success(result)
-            self._run_followup_task_if_needed()
+            self._set_busy(self.task_coordinator.has_user_work)
             return
         if isinstance(result, Exception) and self._handle_connection_failure(result, task_kind):
             return
+        if task_kind == "connect":
+            # Do not preserve stale readbacks or a green connection badge when
+            # the initial device snapshot was rejected after opening transport.
+            self._reset_after_disconnect(silent=True)
+        self._set_busy(self.task_coordinator.has_user_work)
         if self.auto_lock_controller.is_running:
             self.auto_lock_controller.handle_task_failure(result)
-        if self.auto_lock2_controller.is_running:
-            self.auto_lock2_controller.handle_task_failure(result)
         message = self.service.format_error(result) if isinstance(result, Exception) else str(result)
-        QMessageBox.critical(self, "Error", message)
-
-    def _run_followup_task_if_needed(self) -> None:
-        if self.pending_future is not None or self.pending_followup_task is None:
-            return
-        fn, on_success, task_kind = self.pending_followup_task
-        self.pending_followup_task = None
-        self._run_task(fn, on_success, task_kind)
+        QMessageBox.critical(self, TEXT[self.language]["error_title"], message)
 
     def _handle_connection_failure(self, exc: Exception, task_kind: str) -> bool:
         if task_kind != "poll":
             return False
+        self.task_coordinator.stop_polling_and_clear()
         self._reset_after_disconnect(silent=True)
         if self.connection_loss_notified:
             return True
@@ -1059,11 +1143,20 @@ class MainWindow(QMainWindow):
         if hasattr(self, "pid_precision_buttons"):
             self._update_precision_buttons(self.pid_precision_buttons, self.pid_precision_step)
 
+    def update_all_precision_buttons(self) -> None:
+        self._update_all_precision_buttons()
+
     def _format_value_with_unit(self, value: float, decimals: int, unit: str) -> str:
         return f"{value:.{decimals}f} {unit}"
 
+    def format_value_with_unit(self, value: float, decimals: int, unit: str) -> str:
+        return self._format_value_with_unit(value, decimals, unit)
+
     def _unit_only_text(self, unit: str) -> str:
         return unit
+
+    def unit_only_text(self, unit: str) -> str:
+        return self._unit_only_text(unit)
 
     def _laser_scroll_value(self) -> int | None:
         scroll_area = getattr(self, "laser_scroll_area", None)
@@ -1096,881 +1189,6 @@ class MainWindow(QMainWindow):
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
         return super().eventFilter(watched, event)
 
-    def _on_current_set_changed(self) -> None:
-        if self.current_set_programmatic_update:
-            return
-        self.current_set_dirty = True
-        if self.service.is_connected:
-            self.current_apply_timer.start()
-
-    def _on_current_set_step_applied(self) -> None:
-        if self.current_set_programmatic_update:
-            return
-        self.current_set_dirty = True
-        self.current_apply_timer.stop()
-        if not self.service.is_connected:
-            return
-        if self.busy or self.pending_future is not None:
-            self.current_apply_timer.start(20)
-            return
-        self._apply_current_if_needed()
-
-    def _apply_current_if_needed(self) -> None:
-        if not self.service.is_connected or not self.current_set_dirty:
-            return
-        if self.busy or self.pending_future is not None:
-            self.current_apply_timer.start(20)
-            return
-
-        value = self.current_set_spin.value()
-        self.current_set_dirty = False
-        if not self._run_task(lambda: self.service.set_current(value), self._on_snapshot_updated):
-            self.current_set_dirty = True
-            self.current_apply_timer.start()
-
-    def _confirm_and_run(self, label: str, current: str, value: str, action) -> None:
-        t = TEXT[self.language]
-        confirmed = QMessageBox.question(
-            self,
-            t["confirm_large_change_title"],
-            t["confirm_large_change_body"].format(label=label, current=current, value=value),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
-        )
-        if confirmed == QMessageBox.Yes:
-            self._run_task(action, self._on_snapshot_updated)
-
-    def _on_current_clip_finished(self) -> None:
-        if not self.service.is_connected or self.cc_programmatic_update or self.snapshot is None:
-            return
-        value = self.current_clip_spin.value()
-        current = self.snapshot.current_clip
-        if abs(value - current) < 1e-9:
-            return
-        self._confirm_and_run(
-            TEXT[self.language]["maximum_current"],
-            f"{current:.5f}",
-            f"{value:.5f}",
-            lambda: self.service.set_current_clip(value),
-        )
-
-    def _on_feedforward_enable_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.feedforward_programmatic_update:
-            return
-        self._run_task(lambda: self.service.set_feedforward_enabled(checked), self._on_snapshot_updated)
-
-    def _on_feedforward_factor_finished(self) -> None:
-        if not self.service.is_connected or self.feedforward_programmatic_update or self.snapshot is None:
-            return
-        value = self.feedforward_factor_spin.value()
-        current = self.snapshot.feedforward_factor
-        if abs(value - current) < 1e-9:
-            return
-        self._run_task(lambda: self.service.set_feedforward_factor(value), self._on_snapshot_updated)
-
-    def _on_arc_enable_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.arc_programmatic_update:
-            return
-        self._run_task(lambda: self.service.set_arc_enabled(checked), self._on_snapshot_updated)
-
-    def _on_arc_signal_changed(self) -> None:
-        if not self.service.is_connected or self.arc_programmatic_update or self.snapshot is None:
-            return
-        value = int(self.arc_signal_combo.currentData())
-        if value == self.snapshot.arc_signal:
-            return
-        self._run_task(lambda: self.service.set_arc_signal(value), self._on_snapshot_updated)
-
-    def _on_arc_factor_finished(self) -> None:
-        if not self.service.is_connected or self.arc_programmatic_update or self.snapshot is None:
-            return
-        value = self.arc_factor_spin.value()
-        current = self.snapshot.arc_factor
-        if abs(value - current) < 1e-9:
-            return
-        self._run_task(lambda: self.service.set_arc_factor(value), self._on_snapshot_updated)
-
-    def _on_tc_enable_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.tc_programmatic_update:
-            return
-        self._run_task(lambda: self.service.set_tc_enabled(checked), self._on_snapshot_updated)
-
-    def _on_temp_set_finished(self) -> None:
-        if not self.service.is_connected or self.tc_programmatic_update or self.snapshot is None:
-            return
-        value = self.temp_set_spin.value()
-        current = self.snapshot.temp_set
-        if abs(value - current) < 1e-9:
-            return
-        self._run_task(lambda: self.service.set_temp_set(value), self._on_snapshot_updated)
-
-    def _on_tc_arc_enable_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.tc_programmatic_update:
-            return
-        self._run_task(lambda: self.service.set_tc_arc_enabled(checked), self._on_snapshot_updated)
-
-    def _on_tc_arc_signal_changed(self) -> None:
-        if not self.service.is_connected or self.tc_programmatic_update or self.snapshot is None:
-            return
-        value = int(self.tc_arc_signal_combo.currentData())
-        if value == self.snapshot.tc_arc_signal:
-            return
-        self._run_task(lambda: self.service.set_tc_arc_signal(value), self._on_snapshot_updated)
-
-    def _on_tc_arc_factor_finished(self) -> None:
-        if not self.service.is_connected or self.tc_programmatic_update or self.snapshot is None:
-            return
-        value = self.tc_arc_factor_spin.value()
-        current = self.snapshot.tc_arc_factor
-        if abs(value - current) < 1e-9:
-            return
-        self._run_task(lambda: self.service.set_tc_arc_factor(value), self._on_snapshot_updated)
-
-    def _on_pc_enable_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.pc_programmatic_update:
-            return
-        self._run_task(lambda: self.service.set_pc_enabled(checked), self._on_snapshot_updated)
-
-    def _on_pc_voltage_set_finished(self) -> None:
-        if not self.service.is_connected or self.pc_programmatic_update or self.snapshot is None:
-            return
-        value = self.pc_voltage_set_spin.value()
-        current = self.snapshot.pc_voltage_set
-        if abs(value - current) < 1e-9:
-            return
-        self._run_task(lambda: self.service.set_pc_voltage_set(value), self._on_snapshot_updated)
-
-    def _on_pc_slew_rate_enable_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.pc_programmatic_update:
-            return
-        self._run_task(lambda: self.service.set_pc_slew_rate_enabled(checked), self._on_snapshot_updated)
-
-    def _on_pc_slew_rate_finished(self) -> None:
-        if not self.service.is_connected or self.pc_programmatic_update or self.snapshot is None:
-            return
-        value = self.pc_slew_rate_spin.value()
-        current = self.snapshot.pc_slew_rate
-        if abs(value - current) < 1e-9:
-            return
-        self._run_task(lambda: self.service.set_pc_slew_rate(value), self._on_snapshot_updated)
-
-    def _on_pc_arc_enable_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.pc_programmatic_update:
-            return
-        self._run_task(lambda: self.service.set_pc_arc_enabled(checked), self._on_snapshot_updated)
-
-    def _on_pc_arc_signal_changed(self) -> None:
-        if not self.service.is_connected or self.pc_programmatic_update or self.snapshot is None:
-            return
-        value = int(self.pc_arc_signal_combo.currentData())
-        if value == self.snapshot.pc_arc_signal:
-            return
-        self._run_task(lambda: self.service.set_pc_arc_signal(value), self._on_snapshot_updated)
-
-    def _on_pc_arc_factor_finished(self) -> None:
-        if not self.service.is_connected or self.pc_programmatic_update or self.snapshot is None:
-            return
-        value = self.pc_arc_factor_spin.value()
-        current = self.snapshot.pc_arc_factor
-        if abs(value - current) < 1e-9:
-            return
-        self._run_task(lambda: self.service.set_pc_arc_factor(value), self._on_snapshot_updated)
-
-    def _on_pressure_comp_enable_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.pc_programmatic_update:
-            return
-        self._run_task(lambda: self.service.set_pressure_comp_enabled(checked), self._on_snapshot_updated)
-
-    def _on_pressure_comp_factor_finished(self) -> None:
-        if not self.service.is_connected or self.pc_programmatic_update or self.snapshot is None:
-            return
-        value = self.pressure_comp_factor_spin.value()
-        current = self.snapshot.pressure_comp_factor
-        if abs(value - current) < 1e-9:
-            return
-        self._run_task(lambda: self.service.set_pressure_comp_factor(value), self._on_snapshot_updated)
-
-    def _on_sc_enable_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.sc_programmatic_update:
-            return
-        self._run_task(lambda: self.service.set_sc_enabled(checked), self._on_snapshot_updated)
-
-    def _on_sc_amplitude_finished(self) -> None:
-        if not self.service.is_connected or self.sc_programmatic_update or self.snapshot is None:
-            return
-        value = self.scan_amplitude_spin.value()
-        current = self.snapshot.sc_amplitude
-        if abs(value - current) < 1e-9:
-            return
-        self._run_task(lambda: self.service.set_sc_amplitude(value), self._on_snapshot_updated)
-
-    def _on_sc_offset_finished(self) -> None:
-        if not self.service.is_connected or self.sc_programmatic_update or self.snapshot is None:
-            return
-        value = self.scan_offset_spin.value()
-        current = self.snapshot.sc_offset
-        if abs(value - current) < 1e-9:
-            return
-        self._run_task(lambda: self.service.set_sc_offset(value), self._on_snapshot_updated)
-
-    def _on_sc_output_changed(self) -> None:
-        if not self.service.is_connected or self.sc_programmatic_update or self.snapshot is None:
-            return
-        value = int(self.scan_output_combo.currentData())
-        if value == self.snapshot.sc_output_channel:
-            return
-        self._run_task(lambda: self.service.set_sc_output_channel(value), self._on_snapshot_updated)
-
-    def _on_sc_frequency_finished(self) -> None:
-        if not self.service.is_connected or self.sc_programmatic_update or self.snapshot is None:
-            return
-        value = self.scan_frequency_spin.value()
-        current = self.snapshot.sc_frequency
-        if abs(value - current) < 1e-9:
-            return
-        self._run_task(lambda: self.service.set_sc_frequency(value), self._on_snapshot_updated)
-
-    def _on_sc_shape_changed(self) -> None:
-        if not self.service.is_connected or self.sc_programmatic_update or self.snapshot is None:
-            return
-        value = int(self.scan_shape_combo.currentData())
-        if value == self.snapshot.sc_signal_type:
-            return
-        self._run_task(lambda: self.service.set_sc_signal_type(value), self._on_snapshot_updated)
-
-    def _on_lock_enabled_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update:
-            return
-        self._run_task(lambda: self.service.set_lock_enabled(checked), self._on_snapshot_updated)
-
-    def _on_lock_hold_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update:
-            return
-        self._run_task(lambda: self.service.set_lock_hold(checked), self._on_snapshot_updated)
-
-    def _on_lock_input_signal_changed(self) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
-            return
-        value = int(self.lock_input_signal_combo.currentData())
-        if value == self.snapshot.lock_input_channel:
-            return
-        self._run_task(lambda: self.service.set_lock_input_channel(value), self._on_snapshot_updated)
-
-    def _on_lock_error_signal_changed(self) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
-            return
-        value = int(self.lock_error_signal_combo.currentData())
-        if value == self.snapshot.lock_error_channel:
-            return
-        self._run_task(lambda: self.service.set_lock_error_channel(value), self._on_snapshot_updated)
-
-    def _on_lock_type_changed(self) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
-            return
-        value = int(self.lock_type_combo.currentData())
-        if value == self.snapshot.lock_type:
-            return
-        self._run_task(lambda: self.service.set_lock_type(value), self._on_snapshot_updated)
-
-    def _on_lock_pid_selection_changed(self) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
-            return
-        value = int(self.lock_pid_selection_combo.currentData())
-        if value == self.snapshot.lock_pid_selection:
-            return
-        self._run_task(lambda: self.service.set_lock_pid_selection(value), self._on_snapshot_updated)
-
-    def _on_lock_falc_selection_changed(self) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
-            return
-        value = int(self.lock_falc_selection_combo.currentData())
-        if value == self.snapshot.lock_falc_selection:
-            return
-        self._run_task(lambda: self.service.set_lock_falc_selection(value), self._on_snapshot_updated)
-
-    def _on_lock_without_lockpoint_changed(self) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
-            return
-        checked = self.lock_without_lockpoint_check.isChecked()
-        if checked == self.snapshot.lock_without_lockpoint:
-            return
-        self._run_task(lambda: self.service.set_lock_without_lockpoint(checked), self._on_snapshot_updated)
-
-    def _on_lock_candidate_top_changed(self, checked: bool) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
-            return
-        if checked == self.snapshot.lock_candidate_top_enabled:
-            return
-        self._run_task(lambda: self.service.set_lock_candidate_top_enabled(checked), self._on_snapshot_updated)
-
-    def _on_lock_candidate_bottom_changed(self, checked: bool) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
-            return
-        if checked == self.snapshot.lock_candidate_bottom_enabled:
-            return
-        self._run_task(lambda: self.service.set_lock_candidate_bottom_enabled(checked), self._on_snapshot_updated)
-
-    def _on_lock_candidate_positive_edge_changed(self, checked: bool) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
-            return
-        if checked == self.snapshot.lock_candidate_positive_edge_enabled:
-            return
-        self._run_task(lambda: self.service.set_lock_candidate_positive_edge_enabled(checked), self._on_snapshot_updated)
-
-    def _on_lock_candidate_negative_edge_changed(self, checked: bool) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
-            return
-        if checked == self.snapshot.lock_candidate_negative_edge_enabled:
-            return
-        self._run_task(lambda: self.service.set_lock_candidate_negative_edge_enabled(checked), self._on_snapshot_updated)
-
-    def _on_lock_candidate_edge_level_finished(self) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
-            return
-        value = self.lock_candidate_edge_level_spin.value()
-        if abs(value - self.snapshot.lock_candidate_edge_level) < 1e-12:
-            return
-        self._run_task(lambda: self.service.set_lock_candidate_edge_level(value), self._on_snapshot_updated)
-
-    def _on_lock_candidate_peak_noise_tolerance_finished(self) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
-            return
-        value = self.lock_candidate_peak_noise_tolerance_spin.value()
-        if abs(value - self.snapshot.lock_candidate_peak_noise_tolerance) < 1e-12:
-            return
-        self._run_task(lambda: self.service.set_lock_candidate_peak_noise_tolerance(value), self._on_snapshot_updated)
-
-    def _on_lock_candidate_edge_min_distance_finished(self) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
-            return
-        value = int(self.lock_candidate_edge_min_distance_spin.value())
-        if value == self.snapshot.lock_candidate_edge_min_distance:
-            return
-        self._run_task(lambda: self.service.set_lock_candidate_edge_min_distance(value), self._on_snapshot_updated)
-
-    def _on_lock_candidate_top_of_fringe_low_pass_changed(self, checked: bool) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
-            return
-        if checked == self.snapshot.lock_candidate_top_of_fringe_low_pass:
-            return
-        self._run_task(
-            lambda: self.service.set_lock_candidate_top_of_fringe_low_pass(checked),
-            self._on_snapshot_updated,
-        )
-
-    def _on_auto_lock_error_signal_changed(self) -> None:
-        if not self.service.is_connected or self.snapshot is None:
-            return
-        value = int(self.auto_lock_window.config_panel.error_signal_combo.currentData())
-        if value == self.snapshot.lock_error_channel:
-            return
-        self._run_task(lambda: self.service.set_lock_error_channel(value), self._on_snapshot_updated)
-
-    def _on_auto_lock_falc_selection_changed(self) -> None:
-        if not self.service.is_connected or self.snapshot is None:
-            return
-        value = int(self.auto_lock_window.config_panel.falc_selection_combo.currentData())
-        if value == self.snapshot.lock_falc_selection:
-            return
-        self._run_task(lambda: self.service.set_lock_falc_selection(value), self._on_snapshot_updated)
-
-    def _on_auto_lock_falc_path_selection_changed(self) -> None:
-        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
-            return
-        value = int(self.auto_lock_window.config_panel.falc_path_combo.currentData())
-        if value == self.snapshot.falc1.path_selection:
-            return
-        self._run_task(lambda: self.service.set_falc1_path_selection(value), self._on_snapshot_updated)
-
-    def _on_auto_lock_candidate_top_changed(self, checked: bool) -> None:
-        if not self.service.is_connected or self.snapshot is None:
-            return
-        if checked == self.snapshot.lock_candidate_top_enabled:
-            return
-        self._run_task(lambda: self.service.set_lock_candidate_top_enabled(checked), self._on_snapshot_updated)
-
-    def _on_auto_lock_candidate_bottom_changed(self, checked: bool) -> None:
-        if not self.service.is_connected or self.snapshot is None:
-            return
-        if checked == self.snapshot.lock_candidate_bottom_enabled:
-            return
-        self._run_task(lambda: self.service.set_lock_candidate_bottom_enabled(checked), self._on_snapshot_updated)
-
-    def _on_auto_lock_candidate_positive_edge_changed(self, checked: bool) -> None:
-        if not self.service.is_connected or self.snapshot is None:
-            return
-        if checked == self.snapshot.lock_candidate_positive_edge_enabled:
-            return
-        self._run_task(lambda: self.service.set_lock_candidate_positive_edge_enabled(checked), self._on_snapshot_updated)
-
-    def _on_auto_lock_candidate_negative_edge_changed(self, checked: bool) -> None:
-        if not self.service.is_connected or self.snapshot is None:
-            return
-        if checked == self.snapshot.lock_candidate_negative_edge_enabled:
-            return
-        self._run_task(lambda: self.service.set_lock_candidate_negative_edge_enabled(checked), self._on_snapshot_updated)
-
-    def _on_auto_lock_candidate_edge_level_finished(self) -> None:
-        if not self.service.is_connected or self.snapshot is None:
-            return
-        value = self.auto_lock_window.config_panel.candidate_edge_level_spin.value()
-        if abs(value - self.snapshot.lock_candidate_edge_level) < 1e-12:
-            return
-        self._run_task(lambda: self.service.set_lock_candidate_edge_level(value), self._on_snapshot_updated)
-
-    def _on_auto_lock_candidate_peak_noise_tolerance_finished(self) -> None:
-        if not self.service.is_connected or self.snapshot is None:
-            return
-        value = self.auto_lock_window.config_panel.candidate_peak_noise_tolerance_spin.value()
-        if abs(value - self.snapshot.lock_candidate_peak_noise_tolerance) < 1e-12:
-            return
-        self._run_task(lambda: self.service.set_lock_candidate_peak_noise_tolerance(value), self._on_snapshot_updated)
-
-    def _on_auto_lock_candidate_edge_min_distance_finished(self) -> None:
-        if not self.service.is_connected or self.snapshot is None:
-            return
-        value = int(self.auto_lock_window.config_panel.candidate_edge_min_distance_spin.value())
-        if value == self.snapshot.lock_candidate_edge_min_distance:
-            return
-        self._run_task(lambda: self.service.set_lock_candidate_edge_min_distance(value), self._on_snapshot_updated)
-
-    def _on_auto_lock_candidate_top_of_fringe_low_pass_changed(self, checked: bool) -> None:
-        if not self.service.is_connected or self.snapshot is None:
-            return
-        if checked == self.snapshot.lock_candidate_top_of_fringe_low_pass:
-            return
-        self._run_task(
-            lambda: self.service.set_lock_candidate_top_of_fringe_low_pass(checked),
-            self._on_snapshot_updated,
-        )
-
-    def _on_relock_detection_enabled_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.snapshot is None:
-            return
-        if checked == self.snapshot.relock_detection_enabled:
-            return
-        self._run_task(lambda: self.service.set_relock_detection_enabled(checked), self._on_snapshot_updated)
-
-    def _on_relock_input_signal_changed(self) -> None:
-        if not self.service.is_connected or self.snapshot is None:
-            return
-        value = int(self.relock_window.lock_detection_panel.input_signal_combo.currentData())
-        if value == self.snapshot.relock_input_channel:
-            return
-        self._run_task(lambda: self.service.set_relock_input_channel(value), self._on_snapshot_updated)
-
-    def _on_relock_level_high_finished(self) -> None:
-        if not self.relock_window.validate_window_levels():
-            return
-        self._run_relock_spin_write(
-            "relock_level_high",
-            self.relock_window.lock_detection_panel.level_high_spin,
-            self.service.set_relock_level_high,
-        )
-
-    def _on_relock_level_low_finished(self) -> None:
-        if not self.relock_window.validate_window_levels():
-            return
-        self._run_relock_spin_write(
-            "relock_level_low",
-            self.relock_window.lock_detection_panel.level_low_spin,
-            self.service.set_relock_level_low,
-        )
-
-    def _on_relock_hysteresis_finished(self) -> None:
-        if not self.relock_window.validate_window_levels():
-            return
-        self._run_relock_spin_write(
-            "relock_level_hysteresis",
-            self.relock_window.lock_detection_panel.hysteresis_spin,
-            self.service.set_relock_level_hysteresis,
-        )
-
-    def _on_relock_delay_finished(self) -> None:
-        self._run_relock_spin_write(
-            "relock_delay",
-            self.relock_window.lock_detection_panel.delay_spin,
-            self.service.set_relock_delay,
-        )
-
-    def _on_relock_reset_enabled_changed(self) -> None:
-        if not self.service.is_connected or self.snapshot is None:
-            return
-        checked = self.relock_window.lock_detection_panel.enable_reset_check.isChecked()
-        if checked == self.snapshot.relock_reset_enabled:
-            return
-        self._run_task(lambda: self.service.set_relock_reset_enabled(checked), self._on_snapshot_updated)
-
-    def _on_relock_enabled_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.snapshot is None:
-            return
-        if checked == self.snapshot.relock_enabled:
-            return
-        self._run_task(lambda: self.service.set_relock_enabled(checked), self._on_snapshot_updated)
-
-    def _on_relock_amplitude_finished(self) -> None:
-        self._run_relock_spin_write(
-            "relock_amplitude",
-            self.relock_window.relock_panel.amplitude_spin,
-            self.service.set_relock_amplitude,
-        )
-
-    def _on_relock_frequency_finished(self) -> None:
-        self._run_relock_spin_write(
-            "relock_frequency",
-            self.relock_window.relock_panel.frequency_spin,
-            self.service.set_relock_frequency,
-        )
-
-    def _on_relock_output_channel_changed(self) -> None:
-        if not self.service.is_connected or self.snapshot is None:
-            return
-        value = int(self.relock_window.relock_panel.output_channel_combo.currentData())
-        if value == self.snapshot.relock_output_channel:
-            return
-        self._run_task(lambda: self.service.set_relock_output_channel(value), self._on_snapshot_updated)
-
-    def _on_stabilization_enabled_toggled(self, checked: bool) -> None:
-        snapshot = self._stabilization_snapshot()
-        if snapshot is None or checked == snapshot.enabled:
-            return
-        self._run_task(lambda: self.service.set_stabilization_enabled(checked), self._on_snapshot_updated)
-
-    def _on_stabilization_pd_ext_input_channel_changed(self) -> None:
-        snapshot = self._stabilization_snapshot()
-        if snapshot is None:
-            return
-        value = int(self.stabilization_window.power_panel.external_physical_channel_combo.currentData())
-        if value == snapshot.pd_ext_input_channel:
-            return
-        self._run_task(lambda: self.service.set_stabilization_pd_ext_input_channel(value), self._on_snapshot_updated)
-
-    def _on_stabilization_cal_factor_finished(self) -> None:
-        self._run_stabilization_spin_write(
-            "pd_ext_cal_factor",
-            self.stabilization_window.power_panel.cal_factor_spin,
-            self.service.set_stabilization_pd_ext_cal_factor,
-        )
-
-    def _on_stabilization_cal_offset_finished(self) -> None:
-        self._run_stabilization_spin_write(
-            "pd_ext_cal_offset",
-            self.stabilization_window.power_panel.cal_offset_spin,
-            self.service.set_stabilization_pd_ext_cal_offset,
-        )
-
-    def _on_stabilization_set_level_finished(self) -> None:
-        self._run_stabilization_spin_write(
-            "setpoint",
-            self.stabilization_window.power_panel.set_level_spin,
-            self.service.set_stabilization_setpoint,
-        )
-
-    def _on_stabilization_gain_all_finished(self) -> None:
-        self._run_stabilization_spin_write(
-            "gain_all",
-            self.stabilization_window.power_panel.gain_all_spin,
-            self.service.set_stabilization_gain_all,
-        )
-
-    def _on_stabilization_gain_p_finished(self) -> None:
-        self._run_stabilization_spin_write(
-            "gain_p",
-            self.stabilization_window.power_panel.gain_p_spin,
-            self.service.set_stabilization_gain_p,
-        )
-
-    def _on_stabilization_gain_i_finished(self) -> None:
-        self._run_stabilization_spin_write(
-            "gain_i",
-            self.stabilization_window.power_panel.gain_i_spin,
-            self.service.set_stabilization_gain_i,
-        )
-
-    def _on_stabilization_gain_d_finished(self) -> None:
-        self._run_stabilization_spin_write(
-            "gain_d",
-            self.stabilization_window.power_panel.gain_d_spin,
-            self.service.set_stabilization_gain_d,
-        )
-
-    def _on_stabilization_hold_output_on_unlock_changed(self) -> None:
-        snapshot = self._stabilization_snapshot()
-        if snapshot is None:
-            return
-        checked = self.stabilization_window.power_panel.hold_output_check.isChecked()
-        if checked == snapshot.hold_output_on_unlock:
-            return
-        self._run_task(lambda: self.service.set_stabilization_hold_output_on_unlock(checked), self._on_snapshot_updated)
-
-    def _on_stabilization_window_enabled_toggled(self, checked: bool) -> None:
-        snapshot = self._stabilization_snapshot()
-        if snapshot is None or checked == snapshot.window_enabled:
-            return
-        self._run_task(lambda: self.service.set_stabilization_window_enabled(checked), self._on_snapshot_updated)
-
-    def _on_stabilization_window_level_finished(self) -> None:
-        self._run_stabilization_spin_write(
-            "window_level_low",
-            self.stabilization_window.detection_panel.level_spin,
-            self.service.set_stabilization_window_level_low,
-        )
-
-    def _on_stabilization_window_hysteresis_finished(self) -> None:
-        self._run_stabilization_spin_write(
-            "window_level_hysteresis",
-            self.stabilization_window.detection_panel.hysteresis_spin,
-            self.service.set_stabilization_window_level_hysteresis,
-        )
-
-    def _on_pid1_gain_finished(self) -> None:
-        self._run_pid_spin_write("pid1_gain_all", self.pid1_gain_spin, self.service.set_pid1_gain_all)
-
-    def _on_pid1_p_finished(self) -> None:
-        self._run_pid_spin_write("pid1_gain_p", self.pid1_p_spin, self.service.set_pid1_gain_p)
-
-    def _on_pid1_i_finished(self) -> None:
-        self._run_pid_spin_write("pid1_gain_i", self.pid1_i_spin, self.service.set_pid1_gain_i)
-
-    def _on_pid1_d_finished(self) -> None:
-        self._run_pid_spin_write("pid1_gain_d", self.pid1_d_spin, self.service.set_pid1_gain_d)
-
-    def _on_pid1_output_channel_changed(self) -> None:
-        self._run_pid_combo_write("pid1_output_channel", self.pid1_output_channel_combo, self.service.set_pid1_output_channel)
-
-    def _on_pid1_sign_changed(self) -> None:
-        self._run_pid_check_write("pid1_sign", self.pid1_sign_check, self.service.set_pid1_sign)
-
-    def _on_pid1_i_cutoff_enabled_changed(self) -> None:
-        self._run_pid_check_write("pid1_i_cutoff_enabled", self.pid1_use_i_cutoff_check, self.service.set_pid1_i_cutoff_enabled)
-
-    def _on_pid1_i_cutoff_finished(self) -> None:
-        self._run_pid_spin_write("pid1_i_cutoff", self.pid1_i_cutoff_spin, self.service.set_pid1_i_cutoff)
-
-    def _on_pid1_limit_enabled_changed(self) -> None:
-        self._run_pid_check_write("pid1_limit_enabled", self.pid1_use_limit_check, self.service.set_pid1_limit_enabled)
-
-    def _on_pid1_limit_finished(self) -> None:
-        self._run_pid_spin_write("pid1_limit_max", self.pid1_limit_spin, self.service.set_pid1_limit_max)
-
-    def _on_pid1_enabled_changed(self) -> None:
-        self._run_pid_check_write("pid1_enabled", self.pid1_enable_check, self.service.set_pid1_enabled)
-
-    def _on_pid2_gain_finished(self) -> None:
-        self._run_pid_spin_write("pid2_gain_all", self.pid2_gain_spin, self.service.set_pid2_gain_all)
-
-    def _on_pid2_p_finished(self) -> None:
-        self._run_pid_spin_write("pid2_gain_p", self.pid2_p_spin, self.service.set_pid2_gain_p)
-
-    def _on_pid2_i_finished(self) -> None:
-        self._run_pid_spin_write("pid2_gain_i", self.pid2_i_spin, self.service.set_pid2_gain_i)
-
-    def _on_pid2_d_finished(self) -> None:
-        self._run_pid_spin_write("pid2_gain_d", self.pid2_d_spin, self.service.set_pid2_gain_d)
-
-    def _on_pid2_output_channel_changed(self) -> None:
-        self._run_pid_combo_write("pid2_output_channel", self.pid2_output_channel_combo, self.service.set_pid2_output_channel)
-
-    def _on_pid2_sign_changed(self) -> None:
-        self._run_pid_check_write("pid2_sign", self.pid2_sign_check, self.service.set_pid2_sign)
-
-    def _on_pid2_limit_enabled_changed(self) -> None:
-        self._run_pid_check_write("pid2_limit_enabled", self.pid2_use_limit_check, self.service.set_pid2_limit_enabled)
-
-    def _on_pid2_limit_finished(self) -> None:
-        self._run_pid_spin_write("pid2_limit_max", self.pid2_limit_spin, self.service.set_pid2_limit_max)
-
-    def _on_pid2_enabled_changed(self) -> None:
-        self._run_pid_check_write("pid2_enabled", self.pid2_enable_check, self.service.set_pid2_enabled)
-
-    def _run_pid_spin_write(self, snapshot_attr: str, spinbox: QDoubleSpinBox, setter) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
-            return
-        value = spinbox.value()
-        current = getattr(self.snapshot, snapshot_attr)
-        if abs(value - current) < 1e-9:
-            return
-        self._run_task(lambda: setter(value), self._on_snapshot_updated)
-
-    def _run_pid_combo_write(self, snapshot_attr: str, combo: QComboBox, setter) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
-            return
-        value = int(combo.currentData())
-        if value == getattr(self.snapshot, snapshot_attr):
-            return
-        self._run_task(lambda: setter(value), self._on_snapshot_updated)
-
-    def _run_pid_check_write(self, snapshot_attr: str, check, setter) -> None:
-        if not self.service.is_connected or self.lock_programmatic_update or self.snapshot is None:
-            return
-        value = check.isChecked()
-        if value == getattr(self.snapshot, snapshot_attr):
-            return
-        self._run_task(lambda: setter(value), self._on_snapshot_updated)
-
-    def _run_relock_spin_write(self, snapshot_attr: str, spinbox: QDoubleSpinBox, setter) -> None:
-        if not self.service.is_connected or self.snapshot is None:
-            return
-        value = spinbox.value()
-        current = getattr(self.snapshot, snapshot_attr)
-        if abs(value - current) < 1e-9:
-            return
-        self._run_task(lambda: setter(value), self._on_snapshot_updated)
-
-    def _run_stabilization_spin_write(self, snapshot_attr: str, spinbox: QDoubleSpinBox, setter) -> None:
-        snapshot = self._stabilization_snapshot()
-        if snapshot is None:
-            return
-        value = spinbox.value()
-        current = getattr(snapshot, snapshot_attr)
-        if abs(value - current) < 1e-9:
-            return
-        self._run_task(lambda: setter(value), self._on_snapshot_updated)
-
-    def _stabilization_snapshot(self):
-        if not self.service.is_connected or self.snapshot is None:
-            return None
-        return self.snapshot.stabilization
-
-    def _on_falc_input_gain_changed(self) -> None:
-        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
-            return
-        value = int(self.falc_window.input_gain_combo.currentData())
-        if value == self.snapshot.falc1.input_gain:
-            return
-        self._run_task(lambda: self.service.set_falc1_input_gain(value), self._on_snapshot_updated)
-
-    def _on_falc_input_offset_finished(self) -> None:
-        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
-            return
-        value = self.falc_window.input_offset_spin.value()
-        current = self.snapshot.falc1.input_offset
-        if abs(value - current) < 1e-12:
-            return
-        self._run_task(lambda: self.service.set_falc1_input_offset(value), self._on_snapshot_updated)
-
-    def _on_falc_path_selection_changed(self) -> None:
-        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
-            return
-        value = int(self.falc_window.path_selection_combo.currentData())
-        if value == self.snapshot.falc1.path_selection:
-            return
-        self._run_task(lambda: self.service.set_falc1_path_selection(value), self._on_snapshot_updated)
-
-    def _on_falc_mon_config_changed(self) -> None:
-        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
-            return
-        value = int(self.falc_window.mon_config_combo.currentData())
-        if value == self.snapshot.falc1.mon_config:
-            return
-        self._run_task(lambda: self.service.set_falc1_mon_config(value), self._on_snapshot_updated)
-
-    def _on_falc_main_enabled_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
-            return
-        if checked == self.snapshot.falc1.main.enabled:
-            return
-        self._run_task(lambda: self.service.set_falc1_main_enabled(checked), self._on_snapshot_updated)
-
-    def _on_falc_main_gain_finished(self) -> None:
-        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
-            return
-        value = self.falc_window.main_gain_spin.value()
-        current = self.snapshot.falc1.main.gain_all
-        if abs(value - current) < 1e-12:
-            return
-        self._run_task(lambda: self.service.set_falc1_main_gain_all(value), self._on_snapshot_updated)
-
-    def _on_falc_main_use_external_input_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
-            return
-        if checked == self.snapshot.falc1.main.use_external_input:
-            return
-        self._run_task(lambda: self.service.set_falc1_main_use_external_input(checked), self._on_snapshot_updated)
-
-    def _on_falc_filter_enabled_toggled(self, filter_name: str, checked: bool) -> None:
-        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
-            return
-        current = getattr(self.snapshot.falc1.main, f"{filter_name}_enabled")
-        if checked == current:
-            return
-        self._run_task(
-            lambda: self.service.set_falc1_main_filter_enabled(filter_name, checked),
-            self._on_snapshot_updated,
-        )
-
-    def _on_falc_filter_value_changed(self, filter_name: str) -> None:
-        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
-            return
-        value = self.falc_window.current_filter_value(filter_name)
-        if value is None:
-            QMessageBox.warning(
-                self,
-                "Warning",
-                "FALC preset must be an integer raw device value / FALC 预设值必须为设备整数原始值",
-            )
-            self.falc_window.render_snapshot(self.snapshot)
-            return
-        current = getattr(self.snapshot.falc1.main, filter_name)
-        if value == current:
-            return
-        self._run_task(
-            lambda: self.service.set_falc1_main_filter_value(filter_name, value),
-            self._on_snapshot_updated,
-        )
-
-    def _on_falc_unlim_enabled_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
-            return
-        if checked == self.snapshot.falc1.unlim.enabled:
-            return
-        self._run_task(lambda: self.service.set_falc1_unlim_enabled(checked), self._on_snapshot_updated)
-
-    def _on_falc_unlim_hold_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
-            return
-        if checked == self.snapshot.falc1.unlim.hold:
-            return
-        self._run_task(lambda: self.service.set_falc1_unlim_hold(checked), self._on_snapshot_updated)
-
-    def _on_falc_unlim_input_offset_finished(self) -> None:
-        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
-            return
-        value = self.falc_window.unlim_input_offset_spin.value()
-        current = self.snapshot.falc1.unlim.input_offset
-        if abs(value - current) < 1e-12:
-            return
-        self._run_task(lambda: self.service.set_falc1_unlim_input_offset(value), self._on_snapshot_updated)
-
-    def _on_falc_unlim_output_range_finished(self) -> None:
-        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
-            return
-        value = self.falc_window.unlim_output_range_spin.value()
-        current = self.snapshot.falc1.unlim.output_range
-        if abs(value - current) < 1e-12:
-            return
-        self._run_task(lambda: self.service.set_falc1_unlim_output_range(value), self._on_snapshot_updated)
-
-    def _on_falc_unlim_slew_rate_finished(self) -> None:
-        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
-            return
-        value = int(round(self.falc_window.unlim_slew_rate_spin.value()))
-        current = self.snapshot.falc1.unlim.slew_rate
-        if value == current:
-            return
-        self._run_task(lambda: self.service.set_falc1_unlim_slew_rate(value), self._on_snapshot_updated)
-
-    def _on_falc_unlim_sign_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.snapshot is None or self.snapshot.falc1 is None:
-            return
-        if checked == self.snapshot.falc1.unlim.sign:
-            return
-        self._run_task(lambda: self.service.set_falc1_unlim_sign(checked), self._on_snapshot_updated)
-
-    def _on_cc_enable_toggled(self, checked: bool) -> None:
-        if not self.service.is_connected or self.cc_programmatic_update:
-            return
-        self._run_task(lambda: self.service.set_cc_enabled(checked), self._on_snapshot_updated)
 
     def connect_device(self) -> None:
         mode = self.mode_combo.currentData()
@@ -1979,28 +1197,43 @@ class MainWindow(QMainWindow):
         else:
             target = str(self.serial_port_combo.currentData() or "").strip()
         if not target:
-            QMessageBox.warning(self, "Warning", "Please enter a connection target / 请输入连接目标")
+            QMessageBox.warning(
+                self,
+                TEXT[self.language]["warning_title"],
+                "Please enter a connection target / 请输入连接目标",
+            )
             return
         settings = ConnectionSettings(
             mode=mode,
             target=target,
             baudrate=self.baudrate_spin.value(),
             timeout=self.timeout_spin.value(),
+            command_line_port=self.command_port_spin.value(),
+            monitoring_line_port=self.monitoring_port_spin.value(),
         )
-        self._run_task(lambda: self.service.connect(settings), self._on_snapshot_updated)
+        self._save_connection_settings()
+        self.task_coordinator.resume_polling()
+        self._run_task(
+            lambda: self.service.connect(settings),
+            self._on_snapshot_updated,
+            task_kind="connect",
+        )
 
     def _reset_after_disconnect(self, silent: bool = False) -> None:
         self.refresh_timer.stop()
-        self.current_apply_timer.stop()
-        self.pending_followup_task = None
+        self.laser_controller.current_apply_timer.stop()
+        self.task_coordinator.stop_polling_and_clear()
         try:
             self.service.disconnect()
         except Exception as exc:  # noqa: BLE001
             if not silent:
-                QMessageBox.critical(self, "Error", self.service.format_error(exc))
+                QMessageBox.critical(
+                    self,
+                    TEXT[self.language]["error_title"],
+                    self.service.format_error(exc),
+                )
             return
         self.auto_lock_controller.handle_disconnect()
-        self.auto_lock2_controller.handle_disconnect()
         self.snapshot = None
         self.last_device_current_set = None
         self.parameter_table.setRowCount(0)
@@ -2025,7 +1258,6 @@ class MainWindow(QMainWindow):
         self.laser_controller.reset_readbacks()
         self.scan_lock_controller.render_snapshot(self._empty_scan_snapshot())
         self.auto_lock_window.reset_state(self.language)
-        self.auto_lock2_window.reset_state(self.language)
         self.falc_window.reset_state(self.language)
         self.relock_window.reset_state(self.language)
         self.stabilization_window.reset_state(self.language)
@@ -2052,30 +1284,104 @@ class MainWindow(QMainWindow):
     def refresh_snapshot(self) -> None:
         if not self.service.is_connected or self.busy:
             return
-        self._run_task(self.service.read_snapshot, self._on_snapshot_updated, task_kind="poll")
+        self._refresh_tick += 1
+        if self._refresh_tick % 10 == 0:
+            request = SnapshotRequest.full()
+        elif self._refresh_tick % 2 == 0:
+            request = self._visible_snapshot_request()
+        else:
+            request = SnapshotRequest.core()
+        self._run_task(
+            lambda request=request: self.service.read_snapshot(request),
+            self._on_snapshot_updated,
+            task_kind="poll",
+        )
+
+    def refresh_visible_snapshot(self) -> None:
+        if not self.service.is_connected or self.busy:
+            return
+        request = self._visible_snapshot_request()
+        self._run_task(
+            lambda request=request: self.service.read_snapshot(request),
+            self._on_snapshot_updated,
+            task_kind="poll",
+        )
+
+    def refresh_full_snapshot(self) -> None:
+        if not self.service.is_connected or self.busy:
+            return
+        self._run_task(
+            lambda: self.service.read_snapshot(SnapshotRequest.full()),
+            self._on_snapshot_updated,
+        )
+
+    def _visible_snapshot_request(self) -> SnapshotRequest:
+        sections = {SnapshotSection.CORE}
+        if self.laser_window.isVisible():
+            sections.add(SnapshotSection.LASER)
+        if self.scan_lock_window.isVisible():
+            sections.add(SnapshotSection.SCAN_LOCK)
+        if self.auto_lock_window.isVisible():
+            sections.update({SnapshotSection.SCAN_LOCK, SnapshotSection.FALC})
+        if self.falc_window.isVisible():
+            sections.add(SnapshotSection.FALC)
+        if self.relock_window.isVisible():
+            sections.add(SnapshotSection.RELOCK)
+        if self.stabilization_window.isVisible():
+            sections.add(SnapshotSection.STABILIZATION)
+        if self.daq_window is not None and self.daq_window.isVisible():
+            sections.add(SnapshotSection.SCAN_LOCK)
+        return SnapshotRequest(frozenset(sections))
 
     def _on_snapshot_updated(self, snapshot: DeviceSnapshot) -> None:
         self.snapshot = snapshot
         self._render_snapshot(snapshot)
         if (
             not self.auto_lock_controller.is_running
-            and not self.auto_lock2_controller.is_running
             and not self.refresh_timer.isActive()
         ):
             self.refresh_timer.start()
 
     def _render_snapshot(self, snapshot: DeviceSnapshot) -> None:
-        laser_scroll = self._laser_scroll_value()
-        scan_lock_scroll = self._scan_lock_scroll_value()
+        scroll_positions = self._capture_scroll_positions()
         self.laser_controller.render_snapshot(snapshot)
-        self._restore_laser_scroll(laser_scroll)
         self.scan_lock_controller.render_snapshot(snapshot)
-        self._restore_scan_lock_scroll(scan_lock_scroll)
-        self.auto_lock_window.render_snapshot(snapshot)
-        self.auto_lock2_controller.render_snapshot(snapshot)
+        self.auto_lock_controller.render_snapshot(snapshot)
         self.falc_window.render_snapshot(snapshot)
         self.relock_window.render_snapshot(snapshot)
         self.stabilization_window.render_snapshot(snapshot)
+        self._restore_scroll_positions(scroll_positions)
+
+    def _capture_scroll_positions(self) -> list[tuple[QScrollArea, int, int]]:
+        positions: list[tuple[QScrollArea, int, int]] = []
+        seen: set[QScrollArea] = set()
+        for root in (
+            self,
+            self.laser_window,
+            self.falc_window,
+            self.scan_lock_window,
+            self.auto_lock_window,
+            self.relock_window,
+            self.stabilization_window,
+        ):
+            for scroll in root.findChildren(QScrollArea):
+                if scroll in seen:
+                    continue
+                seen.add(scroll)
+                positions.append(
+                    (
+                        scroll,
+                        scroll.horizontalScrollBar().value(),
+                        scroll.verticalScrollBar().value(),
+                    )
+                )
+        return positions
+
+    @staticmethod
+    def _restore_scroll_positions(positions: list[tuple[QScrollArea, int, int]]) -> None:
+        for scroll, horizontal, vertical in positions:
+            scroll.horizontalScrollBar().setValue(horizontal)
+            scroll.verticalScrollBar().setValue(vertical)
 
     def _empty_scan_snapshot(self):
         return type(
@@ -2142,26 +1448,29 @@ class MainWindow(QMainWindow):
         if confirmed != QMessageBox.Yes:
             event.ignore()
             return
+        self.layout_manager.save_all()
         self.refresh_timer.stop()
         self.future_poll_timer.stop()
-        self.current_apply_timer.stop()
+        self.laser_controller.shutdown()
         for window in (
             self.laser_window,
             self.falc_window,
             self.scan_lock_window,
             self.auto_lock_window,
-            self.auto_lock2_window,
             self.relock_window,
             self.stabilization_window,
         ):
             window.request_shutdown()
             window.close()
+        if self.daq_window is not None:
+            self.daq_window.close()
         self._reset_after_disconnect(silent=True)
-        self.executor.shutdown(wait=False, cancel_futures=True)
+        self.task_coordinator.shutdown()
         super().closeEvent(event)
 
 
 def main() -> int:
+    open_daq_on_start = "--open-adc" in sys.argv
     try:
         QApplication.setHighDpiScaleFactorRoundingPolicy(
             Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
@@ -2170,13 +1479,15 @@ def main() -> int:
         pass
     app = QApplication(sys.argv)
     window = MainWindow()
+    window.layout_manager.prepare_show(window)
     window.show()
-    fit_window_to_screen(window)
     QMessageBox.information(
         window,
         TEXT["zh"]["safety_title"],
         f"{TEXT['zh']['safety_text']}\n\n{TEXT['en']['safety_text']}",
     )
+    if open_daq_on_start:
+        window._open_daq_window()
     return app.exec()
 
 

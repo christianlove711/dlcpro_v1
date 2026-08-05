@@ -37,7 +37,7 @@ class ScanControlPanel(QFrame):
         self.sc_label.setObjectName("SectionTitle")
         header.addWidget(self.sc_label)
         header.addStretch(1)
-        self.sc_enable_button = create_toggle_button(owner._on_sc_enable_toggled)
+        self.sc_enable_button = create_toggle_button(owner.scan_lock_controller._on_sc_enable_toggled)
         header.addWidget(self.sc_enable_button)
         layout.addLayout(header)
 
@@ -57,7 +57,7 @@ class ScanControlPanel(QFrame):
         self.scan_amplitude_spin.setDecimals(6)
         self.scan_amplitude_spin.setSuffix(f" {TEXT[owner.language]['scan_amplitude_unit']}")
         self.scan_amplitude_spin.setKeyboardTracking(False)
-        self.scan_amplitude_spin.connect_live_apply(owner._on_sc_amplitude_finished)
+        self.scan_amplitude_spin.connect_live_apply(owner.scan_lock_controller._on_sc_amplitude_finished)
         self.scan_amplitude_spin.set_button_only_mode()
 
         self.scan_offset_label = QLabel()
@@ -66,7 +66,7 @@ class ScanControlPanel(QFrame):
         self.scan_offset_spin.setDecimals(6)
         self.scan_offset_spin.setSuffix(f" {TEXT[owner.language]['voltage_unit']}")
         self.scan_offset_spin.setKeyboardTracking(False)
-        self.scan_offset_spin.connect_live_apply(owner._on_sc_offset_finished)
+        self.scan_offset_spin.connect_live_apply(owner.scan_lock_controller._on_sc_offset_finished)
         self.scan_offset_spin.set_button_only_mode()
 
         top_form.addRow(self.sc_precision_label, self.sc_precision_row)
@@ -87,7 +87,7 @@ class ScanControlPanel(QFrame):
 
         self.scan_output_label = QLabel()
         self.scan_output_combo = SafeComboBox()
-        self.scan_output_combo.currentIndexChanged.connect(owner._on_sc_output_changed)
+        self.scan_output_combo.currentIndexChanged.connect(owner.scan_lock_controller._on_sc_output_changed)
 
         self.scan_frequency_label = QLabel()
         self.scan_frequency_spin = SafeDoubleSpinBox()
@@ -95,12 +95,12 @@ class ScanControlPanel(QFrame):
         self.scan_frequency_spin.setDecimals(2)
         self.scan_frequency_spin.setSuffix(" Hz")
         self.scan_frequency_spin.setKeyboardTracking(False)
-        self.scan_frequency_spin.connect_live_apply(owner._on_sc_frequency_finished)
+        self.scan_frequency_spin.connect_live_apply(owner.scan_lock_controller._on_sc_frequency_finished)
         self.scan_frequency_spin.set_button_only_mode()
 
         self.scan_shape_label = QLabel()
         self.scan_shape_combo = SafeComboBox()
-        self.scan_shape_combo.currentIndexChanged.connect(owner._on_sc_shape_changed)
+        self.scan_shape_combo.currentIndexChanged.connect(owner.scan_lock_controller._on_sc_shape_changed)
 
         bottom_form.addRow(self.scan_output_label, self.scan_output_combo)
         bottom_form.addRow(self.scan_frequency_label, owner._create_target_row("sc", self.scan_frequency_spin))
