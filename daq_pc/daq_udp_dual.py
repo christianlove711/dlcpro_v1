@@ -150,7 +150,9 @@ class RawHistoryFrame:
 class DualSampleRingBuffer:
     """Thread-safe two-channel preview ring indexed in received sample pairs."""
     HISTORY_BIN_SECONDS = 0.001
-    HISTORY_SECONDS = 20.0
+    # Long scope timebases use compact 1 ms min/max bins, so extending the
+    # visible history to 100 s costs little memory and supports 10 s/div.
+    HISTORY_SECONDS = 100.0
 
     def __init__(self, capacity: int = 10_000_000):
         self.capacity = int(capacity)

@@ -101,6 +101,7 @@ class DlcScanControlWindow(QMainWindow):
         self._write_pending = False
         self._active_write = None
         self._queued_writes = {}
+        self._triangle_write_pending = False
         self._connected = bool(session.is_connected)
         self._step = float(settings.value("dlcpro/scan_step", 0.01))
         valid_steps = {value for _label, value in self.PRECISION_OPTIONS}
@@ -196,6 +197,10 @@ class DlcScanControlWindow(QMainWindow):
         self.shape = SafeComboBox()
         for text_key, value in SCAN_SHAPE_OPTIONS:
             self.shape.addItem(TEXT["zh"][text_key], value)
+        triangle_index = self.shape.findData(1)
+        if triangle_index >= 0:
+            self.shape.setCurrentIndex(triangle_index)
+        self.shape.setToolTip("自动锁频算法固定使用三角波，连接后不可修改")
 
         form.addRow("调节步进", self.precision_row)
         form.addRow("扫描幅度", self.amplitude_row)
@@ -329,14 +334,27 @@ class DlcScanControlWindow(QMainWindow):
         self._write(self.session.set_scan_output_channel, int(self.output.currentData()))
 
     def _write_shape(self):
-        if self.shape.signalsBlocked() or self.shape.currentData() is None:
+        # Manual.md documents Scan Shape value 1 as Triangle.  The peak
+        # balancing algorithm depends on alternating triangle half-cycles, so
+        # this control is display-only and cannot issue arbitrary shape writes.
+        return
+
+    def _ensure_triangle(self, snapshot=None):
+        if not self._connected or self._triangle_write_pending:
             return
-        self._write(self.session.set_scan_signal_type, int(self.shape.currentData()))
+        snapshot = snapshot or self.session.snapshot()
+        if snapshot is None or int(snapshot.sc_signal_type) == 1:
+            return
+        self._triangle_write_pending = True
+        self.status.setText("正在将扫描波形设为三角波…")
+        self.session.set_scan_signal_type(1)
 
     def _can_edit(self) -> bool:
         return self._connected and not self._scan_edit_locked
 
     def _write_completed(self, snapshot):
+        if self._triangle_write_pending:
+            self._triangle_write_pending = int(snapshot.sc_signal_type) != 1
         active = self._active_write
         self._write_pending = False
         self._active_write = None
@@ -364,11 +382,12 @@ class DlcScanControlWindow(QMainWindow):
         self.offset.setSuffix(f" {unit}" if unit else "")
         self.amplitude.setSuffix(f" {unit} pp" if unit else "")
         self._sync_combo(self.output, int(snapshot.sc_output_channel), "设备值")
-        self._sync_combo(self.shape, int(snapshot.sc_signal_type), "设备值")
+        self._sync_combo(self.shape, 1, "三角波")
         self.enable_button.blockSignals(True)
         self.enable_button.setChecked(bool(snapshot.sc_enabled))
         self.enable_button.setText("扫描已启用" if snapshot.sc_enabled else "启用扫描")
         self.enable_button.blockSignals(False)
+        self._ensure_triangle(snapshot)
 
     @staticmethod
     def _sync_combo(combo: QComboBox, value: int, fallback: str):
@@ -390,8 +409,11 @@ class DlcScanControlWindow(QMainWindow):
             self._write_pending = False
             self._active_write = None
             self._queued_writes.clear()
+            self._triangle_write_pending = False
         self.status.setText("已连接 DLC pro" if connected else text)
         self._update_editable()
+        if connected:
+            self._ensure_triangle()
 
     def _update_editable(self):
         editable = self._can_edit()
@@ -399,8 +421,9 @@ class DlcScanControlWindow(QMainWindow):
             widget.setEnabled(editable)
         # This task only makes the three numeric scan writes queueable.  Keep
         # unrelated switches serialized behind the active device transaction.
-        for widget in (self.enable_button, self.output, self.shape):
+        for widget in (self.enable_button, self.output):
             widget.setEnabled(editable and not self._write_pending)
+        self.shape.setEnabled(False)
         self.precision_row.setEnabled(not self._scan_edit_locked)
         self.refresh_button.setEnabled(self._connected and not self._write_pending)
         if self._scan_edit_locked:
@@ -410,6 +433,7 @@ class DlcScanControlWindow(QMainWindow):
         self._write_pending = False
         self._active_write = None
         self._queued_writes.clear()
+        self._triangle_write_pending = False
         self._update_editable()
         if self._connected:
             self.session.refresh()

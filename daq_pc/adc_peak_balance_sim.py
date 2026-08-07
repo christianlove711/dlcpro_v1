@@ -80,6 +80,11 @@ def run_virtual_lock(iterations: int = 60, *, drift_per_step: float = 0.0,
     settings = PeakBalanceSettings(
         max_offset_deviation=0.5, offset_step=0.03,
         min_prominence_codes=40, carrier_dominance_ratio=2.0,
+        # The synthetic cavity shifts by more than the production default
+        # ±5 mV when changing directly from 1.2 to 0.2 Vpp.  Give this
+        # long-running drift/frequency simulation enough final-grid coverage;
+        # the grid step remains exactly 1 mV.
+        final_local_max_distance=0.05,
     )
     cavity = VirtualCavity()
     engine = PeakBalanceEngine(settings)
@@ -100,6 +105,9 @@ def run_virtual_lock(iterations: int = 60, *, drift_per_step: float = 0.0,
         elif action.kind == "amplitude" and action.value is not None:
             amplitude = float(action.value)
         engine.sync(offset, amplitude)
+        if action.kind == "amplitude" and action.value is not None:
+            # Match the real controller's post-readback transition handling.
+            engine.reset_after_amplitude_change()
         trace.append({
             "step": index, "state": engine.state,
             "carrier_position": cavity.carrier_position,

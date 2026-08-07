@@ -6,7 +6,7 @@ from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QDialogButtonBox
 
 import ui_scaling
-from app import MainWindow
+from app import MainWindow, create_safety_notice
 from ui_text import TEXT
 
 
@@ -20,13 +20,25 @@ def test_all_windows_reflow_across_scale_language_and_resolution(qapp, tmp_path,
     settings = QSettings(str(tmp_path / "ui-matrix.ini"), QSettings.Format.IniFormat)
     monkeypatch.setattr(ui_scaling, "QSettings", lambda *args, **kwargs: settings)
     window = MainWindow()
+    assert len(window.nav_buttons) == 3
+    assert not hasattr(window, "overview_button")
+    assert not hasattr(window, "scan_lock_button")
+    assert not hasattr(window, "auto_lock_button")
+    assert window.parameter_group.maximumHeight() == 170
+    assert window.network_info.minimumHeight() == 105
+    assert window.serial_ports_info.minimumHeight() == 105
+    assert "max-width: 360px" not in qapp.styleSheet()
+    safety_notice = create_safety_notice(window)
+    safety_label = safety_notice.findChild(type(window.hero_title), "qt_msgbox_label")
+    assert safety_label is not None
+    assert safety_label.wordWrap()
+    assert safety_label.maximumWidth() == 520
+    assert safety_label.text() == TEXT[window.language]["safety_text"]
     auxiliary = (
         window.laser_window,
         window.falc_window,
         window.scan_lock_window,
         window.auto_lock_window,
-        window.relock_window,
-        window.stabilization_window,
         window.auto_lock_window.config_window,
         window.auto_lock_window.waveform_window,
         window.auto_lock_window.log_window,
@@ -71,5 +83,23 @@ def test_all_windows_reflow_across_scale_language_and_resolution(qapp, tmp_path,
     finally:
         for item in auxiliary:
             item.hide()
+        window.hide()
+        window.task_coordinator.shutdown()
+
+
+def test_adc_entry_opens_acquisition_without_scope(qapp, tmp_path, monkeypatch) -> None:
+    settings = QSettings(str(tmp_path / "adc-entry.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(ui_scaling, "QSettings", lambda *args, **kwargs: settings)
+    window = MainWindow()
+    try:
+        window._open_daq_window()
+        qapp.processEvents()
+        assert window.daq_window is not None
+        assert window.daq_window.isVisible()
+        assert not window.daq_window.auto_lock_workspace.isVisible()
+        assert not window.daq_window.scope_window.isVisible()
+    finally:
+        if window.daq_window is not None:
+            window.daq_window.close()
         window.hide()
         window.task_coordinator.shutdown()

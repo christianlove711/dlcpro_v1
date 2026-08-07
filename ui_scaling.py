@@ -136,7 +136,9 @@ def scale_widget_metrics(root: QWidget, scale: float) -> None:
                 widget.setProperty("baseFixedSize", base_fixed_size)
             widget.setFixedSize(_scaled_size(base_fixed_size, scale))
 
-        if hasattr(widget, "icon") and not widget.icon().isNull():
+        icon_getter = getattr(widget, "icon", None)
+        icon = icon_getter() if callable(icon_getter) else None
+        if hasattr(icon, "isNull") and not icon.isNull():
             base_icon_size = widget.property("baseIconSize")
             if base_icon_size is None:
                 base_icon_size = widget.iconSize()

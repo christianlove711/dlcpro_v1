@@ -31,6 +31,7 @@ class _FakeDlcSession(QObject):
         self.is_connected = True
         self.offset_writes = []
         self.amplitude_writes = []
+        self.frequency_writes = []
         self.scan_writes = []
         self._snapshot = SimpleNamespace(
             sc_enabled=True,
@@ -53,6 +54,11 @@ class _FakeDlcSession(QObject):
     def set_scan_amplitude(self, value):
         self.amplitude_writes.append(float(value))
         self._snapshot.sc_amplitude = float(value)
+        self.write_snapshot_changed.emit(self._snapshot)
+
+    def set_scan_frequency(self, value):
+        self.frequency_writes.append(float(value))
+        self._snapshot.sc_frequency = float(value)
         self.write_snapshot_changed.emit(self._snapshot)
 
     def set_scan_enabled(self, enabled):
@@ -96,6 +102,8 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
             min_prominence_codes=40,
             max_offset_deviation=0.5,
             offset_step=0.03,
+            search_frequency_hz=1.0,
+            initial_search_amplitude=1.2,
         )
 
     def test_raw_code_carrier_is_selected_over_low_sidebands(self):
@@ -235,26 +243,26 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
             snr=20.0, balance_error=0.20,
         )
         controller._observe(first)
-        self.assertIn("0.050000", controller.manual_advice)
+        self.assertIn("0.030000", controller.manual_advice)
         self.assertIn("正向试探", controller.manual_advice)
 
-        controller.engine.sync(0.05, 1.2)
+        controller.engine.sync(0.03, 1.2)
         improved = PeakObservation(
             True, "00模有效", prominence=800.0, width_seconds=0.002,
             snr=20.0, balance_error=0.13,
         )
         controller._observe(improved)
         self.assertIn("继续同方向", controller.manual_advice)
-        self.assertIn("0.100000", controller.manual_advice)
+        self.assertIn("0.060000", controller.manual_advice)
 
-        controller.engine.sync(0.10, 1.2)
+        controller.engine.sync(0.06, 1.2)
         worsened = PeakObservation(
             True, "00模有效", prominence=800.0, width_seconds=0.002,
             snr=20.0, balance_error=0.16,
         )
         controller._observe(worsened)
         self.assertIn("反向并减小步长", controller.manual_advice)
-        self.assertIn("0.075000", controller.manual_advice)
+        self.assertIn("0.045000", controller.manual_advice)
         self.assertEqual(session.offset_writes, [])
         self.assertEqual(session.amplitude_writes, [])
         controller.stop()
@@ -286,7 +294,9 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
         )
         controller = AdcPeakBalanceController(ring, session, lambda: True)
         controller.start(
-            PeakBalanceSettings(target_amplitude=0.2),
+            PeakBalanceSettings(
+                target_amplitude=0.2, initial_search_amplitude=0.2,
+            ),
             observe_only=False,
             auto_engage_falc=True,
         )
@@ -307,6 +317,41 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
         self.assertTrue(controller.falc_engaged)
         self.assertFalse(controller.running)
         self.assertFalse(session.snapshot().sc_enabled)
+
+    def test_final_pass_without_auto_falc_stops_adjusting_and_keeps_scan(self):
+        cavity = VirtualCavity()
+        ring = _FrameRing(_shifted_history(cavity, 0))
+        session = _FakeDlcSession()
+        session._snapshot.sc_amplitude = 0.2
+        controller = AdcPeakBalanceController(ring, session, lambda: True)
+        controller.start(
+            PeakBalanceSettings(
+                target_amplitude=0.2, search_frequency_hz=1.0,
+                initial_search_amplitude=0.2,
+            ),
+            observe_only=False,
+            auto_engage_falc=False,
+        )
+        controller.engine.state = "center"
+        valid = PeakObservation(
+            True, "00模有效", prominence=800.0,
+            second_prominence=100.0, dominance_ratio=8.0,
+            width_seconds=0.002, snr=20.0, balance_error=0.04,
+        )
+        with mock.patch(
+            "daq_pc.adc_peak_balance_controller.analyze_carrier",
+            return_value=valid,
+        ):
+            for index in range(3):
+                ring.frame = _shifted_history(cavity, (index + 1) * 10_000)
+                controller.available_after = 0.0
+                controller._tick()
+        self.assertFalse(controller.running)
+        self.assertFalse(controller.falc_engaged)
+        self.assertTrue(session.snapshot().sc_enabled)
+        self.assertEqual(session.offset_writes, [])
+        self.assertEqual(session.amplitude_writes, [])
+        self.assertIn("停止自动调节", controller.manual_advice)
 
     def test_automatic_scan_write_requires_matching_device_readback(self):
         cavity = VirtualCavity()
@@ -338,15 +383,14 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
         controller._write_completed(session._snapshot)
         self.assertEqual(engine.current_offset, 0.0)
 
-    def test_configurable_amplitude_stages_select_all_control_limits(self):
+    def test_two_level_strategy_selects_search_and_final_limits(self):
         engine = PeakBalanceEngine(self.settings)
         engine.start(0.0, 4.0)
         expected = (
-            (4.0, "宽扫", 0.20, 0.1, 0.70, 1),
-            (1.5, "中扫", 0.12, 0.05, 0.75, 2),
-            (0.75, "细扫", 0.08, 0.01, 0.75, 2),
-            (0.4, "窄扫", 0.06, 0.001, 0.80, 2),
-            (0.2, "最终验收", 0.05, 0.001, None, 3),
+            (4.0, "快速寻峰", 0.08, 0.03, 0.05, 2),
+            (1.5, "快速寻峰", 0.08, 0.03, 0.2 / 1.5, 2),
+            (0.4, "快速寻峰", 0.08, 0.03, 0.5, 2),
+            (0.2, "最终锁定", 0.05, 0.001, None, 3),
         )
         for amplitude, name, tolerance, step, shrink, windows in expected:
             engine.sync(0.0, amplitude)
@@ -357,25 +401,20 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
             self.assertEqual(stage.shrink_ratio, shrink)
             self.assertEqual(stage.stable_windows, windows)
 
-    def test_each_stage_shrinks_after_its_own_independent_window_count(self):
+    def test_search_shrinks_directly_to_final_after_two_windows(self):
         settings = PeakBalanceSettings(target_amplitude=0.2)
         engine = PeakBalanceEngine(settings)
-        engine.start(0.0, 5.0)
+        engine.start(0.0, 1.2)
         valid = PeakObservation(
             True, "00模有效", prominence=800.0, width_seconds=0.002,
             snr=20.0, balance_error=0.01,
         )
-        for amplitude, windows, target in (
-            (5.0, 1, 3.5), (1.5, 2, 1.125),
-            (0.75, 2, 0.5625), (0.4, 2, 0.32),
-        ):
-            engine.sync(0.0, amplitude)
-            engine.state = "center"
-            engine.stable_count = 0
-            for _ in range(windows):
-                action = engine.update(valid)
-            self.assertEqual(action.kind, "amplitude")
-            self.assertAlmostEqual(float(action.value), target)
+        engine.state = "center"
+        self.assertEqual(engine.update(valid).kind, "none")
+        action = engine.update(valid)
+        self.assertEqual(action.kind, "amplitude")
+        self.assertAlmostEqual(float(action.value), 0.2)
+        self.assertEqual(action.state, "final_shrink")
 
         engine.sync(0.0, 0.2)
         engine.state = "center"
@@ -418,6 +457,283 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
         engine.update(worse)
         self.assertGreaterEqual(engine.step_size, 0.001)
 
+    def test_theoretical_prediction_uses_origin_not_probe_offset(self):
+        settings = PeakBalanceSettings(
+            offset_step=0.05, prediction_gain=0.8,
+            target_amplitude=0.2,
+        )
+        engine = PeakBalanceEngine(settings)
+        engine.start(65.0, 1.2)
+        baseline = PeakObservation(True, "00模有效", balance_error=0.20)
+        probe = engine.update(baseline)
+        self.assertAlmostEqual(float(probe.value), 65.05)
+        engine.sync(float(probe.value), 1.2)
+
+        improved = PeakObservation(True, "00模有效", balance_error=0.12)
+        predicted = engine.update(improved)
+        # D = A/2*E = 0.12 V; 0.8D is applied from 65.000, not 65.050.
+        self.assertAlmostEqual(float(predicted.value), 65.096)
+        self.assertEqual(predicted.state, "search_verify")
+
+    def test_model_residual_correction_prepares_direct_final_shrink(self):
+        settings = PeakBalanceSettings(
+            offset_step=0.05, prediction_gain=0.8,
+            target_amplitude=0.2, search_windows=2,
+        )
+        engine = PeakBalanceEngine(settings)
+        engine.start(0.0, 1.2)
+        first = engine.update(PeakObservation(
+            True, "00模有效", balance_error=0.20
+        ))
+        engine.sync(float(first.value), 1.2)
+        predicted = engine.update(PeakObservation(
+            True, "00模有效", balance_error=0.25
+        ))
+        engine.sync(float(predicted.value), 1.2)
+        correction = engine.update(PeakObservation(
+            True, "00模有效", balance_error=0.12
+        ))
+        self.assertEqual(correction.state, "search_model_correct")
+        self.assertAlmostEqual(
+            float(correction.value), float(predicted.value) - 0.0576
+        )
+
+    def test_two_sub_eight_percent_windows_shrink_without_more_offset_writes(self):
+        settings = PeakBalanceSettings(
+            offset_step=0.05, prediction_gain=0.8,
+            target_amplitude=0.2, search_tolerance=0.08,
+            search_windows=2,
+        )
+        engine = PeakBalanceEngine(settings)
+        engine.start(66.049572, 2.370071)
+        probe = engine.update(PeakObservation(
+            True, "00模有效", balance_error=0.52
+        ))
+        engine.sync(float(probe.value), 2.370071)
+        predicted = engine.update(PeakObservation(
+            True, "00模有效", balance_error=0.4727
+        ))
+        engine.sync(float(predicted.value), 2.370071)
+
+        first_good = engine.update(PeakObservation(
+            True, "00模有效", balance_error=0.0631
+        ))
+        self.assertEqual(first_good.kind, "none")
+        self.assertEqual(first_good.state, "search_accept")
+        second_good = engine.update(PeakObservation(
+            True, "00模有效", balance_error=0.0651
+        ))
+        self.assertEqual(second_good.kind, "amplitude")
+        self.assertEqual(second_good.state, "final_shrink")
+        self.assertAlmostEqual(float(second_good.value), 0.2)
+
+    def test_final_local_search_uses_exact_one_millivolt_grid(self):
+        settings = PeakBalanceSettings(
+            target_amplitude=0.2, min_offset_step=0.001,
+            final_local_max_distance=0.005,
+        )
+        engine = PeakBalanceEngine(settings)
+        engine.start(65.0, 0.2)
+        engine.state = "final_verify"
+        observation = PeakObservation(
+            True, "00模有效", balance_error=0.10
+        )
+        action = engine.update(observation)
+        values = [float(action.value)]
+        engine.sync(values[-1], 0.2)
+        for error in (0.09,) * 9:
+            action = engine.update(PeakObservation(
+                True, "00模有效", balance_error=error
+            ))
+            values.append(float(action.value))
+            engine.sync(values[-1], 0.2)
+        self.assertEqual(values, [
+            65.001, 64.999, 65.002, 64.998, 65.003,
+            64.997, 65.004, 64.996, 65.005, 64.995,
+        ])
+        self.assertTrue(all(
+            abs(value - 65.0) <= 0.005 + 1e-12 for value in values
+        ))
+
+    def test_starting_at_final_amplitude_never_uses_theoretical_jump(self):
+        settings = PeakBalanceSettings(
+            target_amplitude=0.2, min_offset_step=0.001,
+            final_local_max_distance=0.005,
+        )
+        engine = PeakBalanceEngine(settings)
+        engine.start(65.8, 0.2)
+        action = engine.update(PeakObservation(
+            True, "00模有效", prominence=800.0,
+            width_seconds=0.01, balance_error=0.1477,
+        ))
+        self.assertEqual(action.kind, "offset")
+        self.assertEqual(action.state, "final_local_search")
+        self.assertAlmostEqual(float(action.value), 65.801)
+        self.assertNotIn("理论", action.reason)
+
+    def test_final_amplitude_ambiguous_start_uses_one_millivolt_search(self):
+        settings = PeakBalanceSettings(
+            target_amplitude=0.2, min_offset_step=0.001,
+            final_local_max_distance=0.005,
+        )
+        engine = PeakBalanceEngine(settings)
+        engine.start(65.8, 0.2)
+        ambiguous = PeakObservation(False, "00模候选不唯一")
+        first = engine.update(ambiguous)
+        self.assertEqual(first.state, "startup_offset_search")
+        self.assertAlmostEqual(float(first.value), 65.801)
+        engine.sync(float(first.value), 0.2)
+        second = engine.update(ambiguous)
+        self.assertAlmostEqual(float(second.value), 65.799)
+        self.assertAlmostEqual(engine.current_amplitude, 0.2)
+
+    def test_final_amplitude_invalid_period_start_uses_one_millivolt_search(self):
+        engine = PeakBalanceEngine(PeakBalanceSettings(target_amplitude=0.2))
+        engine.start(65.8, 0.2)
+        action = engine.update(PeakObservation(
+            False, "峰周期与DLC pro扫描频率不一致"
+        ))
+        self.assertEqual(action.kind, "offset")
+        self.assertEqual(action.state, "startup_offset_search")
+        self.assertAlmostEqual(float(action.value), 65.801)
+
+    def test_final_amplitude_start_escalates_from_millivolt_to_ten_millivolt_search(self):
+        settings = PeakBalanceSettings(
+            target_amplitude=0.2,
+            final_local_max_distance=0.002,
+            max_offset_deviation=0.03,
+        )
+        engine = PeakBalanceEngine(settings)
+        engine.start(65.8, 0.2)
+        invalid = PeakObservation(False, "未找到足够的00模穿越峰")
+        self.assertEqual(engine.update(invalid).kind, "none")
+
+        values = []
+        for _ in range(5):
+            action = engine.update(invalid)
+            values.append(float(action.value))
+            engine.sync(float(action.value), 0.2)
+
+        self.assertEqual(
+            [round(value, 6) for value in values],
+            [65.801, 65.799, 65.802, 65.798, 65.81],
+        )
+        self.assertEqual(action.state, "final_local_search")
+        self.assertIn("改用0.010 V步长", action.reason)
+
+    def test_invalid_final_grid_candidate_advances_without_restoring_amplitude(self):
+        settings = PeakBalanceSettings(target_amplitude=0.2)
+        engine = PeakBalanceEngine(settings)
+        engine.start(65.8, 0.2)
+        first = engine.update(PeakObservation(
+            True, "00模有效", balance_error=0.10
+        ))
+        engine.sync(float(first.value), 0.2)
+        next_action = engine.update(PeakObservation(
+            False, "00模候选不唯一"
+        ))
+        self.assertEqual(next_action.kind, "offset")
+        self.assertEqual(next_action.state, "final_local_search")
+        self.assertAlmostEqual(float(next_action.value), 65.799)
+        self.assertAlmostEqual(engine.current_amplitude, 0.2)
+
+    def test_first_final_window_ambiguous_starts_millivolt_search_without_widening(self):
+        engine = PeakBalanceEngine(PeakBalanceSettings(target_amplitude=0.2))
+        engine.start(64.3, 2.5)
+        engine.state = "final_shrink"
+        engine.sync(64.3, 0.2)
+        engine.reset_after_amplitude_change()
+
+        action = engine.update(PeakObservation(False, "00模候选不唯一"))
+
+        self.assertEqual(action.kind, "offset")
+        self.assertEqual(action.state, "final_local_search")
+        self.assertAlmostEqual(float(action.value), 64.301)
+        self.assertAlmostEqual(engine.current_amplitude, 0.2)
+        self.assertIn("保持Amplitude=0.200000 Vpp", action.reason)
+
+    def test_large_final_error_starts_millivolt_search_without_widening(self):
+        engine = PeakBalanceEngine(PeakBalanceSettings(target_amplitude=0.2))
+        engine.start(64.3, 2.5)
+        engine.state = "final_shrink"
+        engine.sync(64.3, 0.2)
+        engine.reset_after_amplitude_change()
+
+        action = engine.update(PeakObservation(
+            True, "00模有效", balance_error=0.6255
+        ))
+
+        self.assertEqual(action.kind, "offset")
+        self.assertEqual(action.state, "final_local_search")
+        self.assertAlmostEqual(float(action.value), 64.301)
+        self.assertAlmostEqual(engine.current_amplitude, 0.2)
+        self.assertNotEqual(action.kind, "amplitude")
+
+    def test_failed_millivolt_grid_escalates_to_ten_millivolt_offset_search(self):
+        settings = PeakBalanceSettings(
+            target_amplitude=0.2,
+            min_offset_step=0.001,
+            final_local_max_distance=0.002,
+            final_fallback_step=0.01,
+            max_offset_deviation=0.03,
+        )
+        engine = PeakBalanceEngine(settings)
+        engine.start(64.0, 2.5)
+        engine.state = "final_shrink"
+        engine.sync(64.0, 0.2)
+        engine.reset_after_amplitude_change()
+        invalid = PeakObservation(False, "峰周期与DLC pro扫描频率不一致")
+
+        values = []
+        for _ in range(5):
+            action = engine.update(invalid)
+            values.append(float(action.value))
+            engine.sync(float(action.value), 0.2)
+
+        self.assertEqual(values, [64.001, 63.999, 64.002, 63.998, 64.01])
+        self.assertEqual(action.state, "final_local_search")
+        self.assertIn("改用0.010 V步长", action.reason)
+        self.assertAlmostEqual(engine.current_amplitude, 0.2)
+
+        next_action = engine.update(invalid)
+        self.assertAlmostEqual(float(next_action.value), 63.99)
+        self.assertNotEqual(next_action.kind, "amplitude")
+
+    def test_default_final_search_uses_exact_requested_two_ranges(self):
+        settings = PeakBalanceSettings(target_amplitude=0.2)
+        self.assertAlmostEqual(settings.final_local_max_distance, 0.009)
+        self.assertAlmostEqual(settings.final_fallback_max_distance, 0.09)
+        engine = PeakBalanceEngine(settings)
+        engine.start(64.0, 2.5)
+        engine.state = "final_shrink"
+        engine.sync(64.0, 0.2)
+        engine.reset_after_amplitude_change()
+        invalid = PeakObservation(False, "峰周期与DLC pro扫描频率不一致")
+
+        actions = []
+        for _ in range(36):
+            action = engine.update(invalid)
+            self.assertEqual(action.kind, "offset")
+            actions.append(round(float(action.value) - 64.0, 6))
+            engine.sync(float(action.value), 0.2)
+
+        expected_fine = [
+            signed
+            for index in range(1, 10)
+            for signed in (index / 1000.0, -index / 1000.0)
+        ]
+        expected_fallback = [
+            signed
+            for index in range(1, 10)
+            for signed in (index / 100.0, -index / 100.0)
+        ]
+        self.assertEqual(actions, expected_fine + expected_fallback)
+
+        stopped = engine.update(invalid)
+        self.assertEqual(stopped.kind, "stop")
+        self.assertAlmostEqual(engine.current_amplitude, 0.2)
+        self.assertIn("±0.090 V", stopped.reason)
+
     def test_controller_rejects_current_scan_output(self):
         cavity = VirtualCavity()
         session = _FakeDlcSession()
@@ -429,25 +745,47 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "PC Voltage"):
             controller.start(self.settings, observe_only=True)
 
-    def test_initial_missing_peak_expands_from_device_start_amplitude(self):
+    def test_initial_missing_peak_searches_offset_both_sides_without_amplitude(self):
         settings = PeakBalanceSettings(
             offset_step=0.1,
             target_amplitude=0.2,
-            max_search_amplitude_factor=2.0,
+            max_offset_deviation=0.25,
         )
         engine = PeakBalanceEngine(settings)
-        engine.start(0.0, 1.0)
+        engine.start(66.0, 2.5)
         missing = PeakObservation(False, "未找到足够的00模穿越峰")
         first = engine.update(missing)
         self.assertEqual(first.kind, "none")
-        second = engine.update(missing)
-        self.assertEqual(second.kind, "amplitude")
-        self.assertAlmostEqual(second.value, 1.25)
-        engine.sync(0.0, float(second.value))
+        actions = []
+        for _ in range(6):
+            action = engine.update(missing)
+            actions.append(action)
+            self.assertEqual(action.kind, "offset")
+            engine.sync(float(action.value), 2.5)
+        self.assertEqual([float(action.value) for action in actions], [
+            67.0, 65.0, 68.0, 64.0, 69.0, 63.0,
+        ])
+        self.assertAlmostEqual(engine.current_amplitude, 2.5)
+
+    def test_startup_offset_search_enters_fast_centering_as_soon_as_peak_appears(self):
+        settings = PeakBalanceSettings(
+            offset_step=0.1, max_offset_deviation=0.5,
+            target_amplitude=0.2,
+        )
+        engine = PeakBalanceEngine(settings)
+        engine.start(66.0, 2.5)
+        missing = PeakObservation(False, "未找到足够的00模穿越峰")
         engine.update(missing)
-        fourth = engine.update(missing)
-        self.assertEqual(fourth.kind, "amplitude")
-        self.assertLessEqual(float(fourth.value), 2.0)
+        search = engine.update(missing)
+        engine.sync(float(search.value), 2.5)
+        found = engine.update(PeakObservation(
+            True, "00模有效", prominence=800.0,
+            width_seconds=0.002, balance_error=0.20,
+        ))
+        self.assertEqual(found.kind, "offset")
+        self.assertEqual(found.state, "search_direction_probe")
+        self.assertAlmostEqual(engine.current_amplitude, 2.5)
+        self.assertAlmostEqual(engine.start_offset, float(search.value))
 
     def test_initial_ambiguous_peak_uses_symmetric_recovery_without_stopping(self):
         engine = PeakBalanceEngine(self.settings)
@@ -464,7 +802,7 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
         ])
         self.assertNotIn("ambiguous", {row.state for row in actions})
 
-    def test_wrong_offset_trial_restores_best_and_reverses(self):
+    def test_wrong_direction_probe_jumps_from_origin_in_reverse_direction(self):
         engine = PeakBalanceEngine(self.settings)
         engine.start(0.0, 1.2)
         engine.set_offset_step(0.05)
@@ -475,10 +813,11 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
         worse = PeakObservation(True, "00模有效", balance_error=0.23)
         reverse = engine.update(worse)
         self.assertEqual(reverse.kind, "offset")
-        self.assertLess(float(reverse.value), engine.best_offset)
-        self.assertIn("反向", reverse.reason)
+        expected = -0.8 * 0.5 * 1.2 * 0.20
+        self.assertAlmostEqual(float(reverse.value), expected)
+        self.assertIn("方向=-", reverse.reason)
 
-    def test_two_neutral_windows_reverse_against_fixed_reference(self):
+    def test_two_neutral_probe_windows_enter_bounded_legacy_fallback(self):
         engine = PeakBalanceEngine(self.settings)
         engine.start(0.0, 1.2)
         engine.set_offset_step(0.05)
@@ -494,26 +833,34 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
             True, "00模有效", balance_error=0.199
         ))
         self.assertEqual(reverse.kind, "offset")
-        self.assertLess(float(reverse.value), engine.best_offset)
+        self.assertEqual(reverse.state, "probe")
+        self.assertLessEqual(abs(float(reverse.value)), 0.5)
 
-    def test_single_offset_boundary_reverses_from_best(self):
+    def test_theoretical_jump_is_not_clipped_by_fine_search_deviation(self):
         settings = PeakBalanceSettings(
-            max_offset_deviation=0.05, offset_step=0.05,
+            max_offset_deviation=0.5, offset_step=0.05,
+            prediction_gain=0.8,
             min_offset_step=0.001,
         )
         engine = PeakBalanceEngine(settings)
-        engine.start(0.0, 1.2)
-        engine.set_offset_step(0.05)
+        engine.start(65.804967, 2.5)
         first = engine.update(PeakObservation(
-            True, "00模有效", balance_error=0.20
+            True, "00模有效", balance_error=0.708
         ))
-        engine.sync(float(first.value), 1.2)
-        boundary_recovery = engine.update(PeakObservation(
-            True, "00模有效", balance_error=0.15
+        engine.sync(float(first.value), 2.5)
+        predicted = engine.update(PeakObservation(
+            True, "00模有效", balance_error=0.668
         ))
-        self.assertEqual(boundary_recovery.kind, "offset")
-        self.assertLess(float(boundary_recovery.value), engine.best_offset)
-        self.assertIn("安全边界", boundary_recovery.reason)
+        # D=2.5/2*0.708=0.885 V, so 0.8D=0.708 V.  This deliberately
+        # exceeds the ±0.5 V fine-search window and must still jump directly.
+        self.assertAlmostEqual(float(predicted.value), 66.512967)
+        self.assertEqual(predicted.state, "search_verify")
+
+        engine.sync(float(predicted.value), 2.5)
+        full = engine.update(PeakObservation(False, "00模候选不唯一"))
+        self.assertAlmostEqual(float(full.value), 66.689967)
+        self.assertEqual(full.state, "search_verify")
+        self.assertIn("1.00×完整理论距离", full.reason)
 
     def test_tracking_drift_rebases_obsolete_historical_best(self):
         engine = PeakBalanceEngine(self.settings)
@@ -542,8 +889,104 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
         self.assertTrue(session.snapshot().sc_enabled)
         self.assertTrue(controller.running)
         self.assertIsNotNone(controller.engine)
-        self.assertEqual(controller.required_cycles, 4.0)
+        self.assertEqual(controller.required_cycles, 2.0)
         controller.stop()
+
+    def test_control_mode_switches_to_ten_hz_with_readback_before_analysis(self):
+        cavity = VirtualCavity()
+        session = _FakeDlcSession()
+        controller = AdcPeakBalanceController(
+            _FrameRing(_shifted_history(cavity, 0)), session, lambda: True
+        )
+        controller.start(PeakBalanceSettings(), observe_only=False)
+        self.assertEqual(session.frequency_writes, [10.0])
+        self.assertEqual(controller.scan_frequency, 10.0)
+        self.assertTrue(controller.running)
+        self.assertIsNotNone(controller.engine)
+        controller.stop()
+
+    def test_control_mode_initializes_amplitude_to_two_point_five_before_analysis(self):
+        cavity = VirtualCavity()
+        session = _FakeDlcSession()
+        session._snapshot.sc_amplitude = 0.2
+        controller = AdcPeakBalanceController(
+            _FrameRing(_shifted_history(cavity, 0)), session, lambda: True
+        )
+        controller.start(PeakBalanceSettings(), observe_only=False)
+        self.assertEqual(session.amplitude_writes, [2.5])
+        self.assertAlmostEqual(controller.engine.current_amplitude, 2.5)
+        self.assertAlmostEqual(controller.start_amplitude, 2.5)
+        controller.restore_start_values()
+        self.assertEqual(session.amplitude_writes, [2.5, 0.2])
+
+    def test_quantized_frequency_readback_is_accepted(self):
+        cavity = VirtualCavity()
+        session = _FakeDlcSession()
+        session._snapshot.sc_frequency = 0.500052
+
+        def quantized_frequency(value):
+            session.frequency_writes.append(float(value))
+            session._snapshot.sc_frequency = float(value) + 0.00005
+            session.write_snapshot_changed.emit(session._snapshot)
+
+        session.set_scan_frequency = quantized_frequency
+        controller = AdcPeakBalanceController(
+            _FrameRing(_shifted_history(cavity, 0)), session, lambda: True
+        )
+        controller.start(
+            PeakBalanceSettings(search_frequency_hz=5.0), observe_only=False
+        )
+        self.assertEqual(session.frequency_writes, [5.0])
+        self.assertAlmostEqual(controller.scan_frequency, 5.00005)
+        self.assertTrue(controller.running)
+        self.assertIsNotNone(controller.engine)
+        controller.stop()
+
+    def test_frequency_already_within_device_resolution_is_not_rewritten(self):
+        cavity = VirtualCavity()
+        session = _FakeDlcSession()
+        session._snapshot.sc_frequency = 0.999947
+        controller = AdcPeakBalanceController(
+            _FrameRing(_shifted_history(cavity, 0)), session, lambda: True
+        )
+        controller.start(
+            PeakBalanceSettings(search_frequency_hz=1.0), observe_only=False
+        )
+        self.assertEqual(session.frequency_writes, [])
+        self.assertAlmostEqual(controller.scan_frequency, 0.999947)
+        self.assertTrue(controller.running)
+        controller.stop()
+
+    def test_material_frequency_readback_error_still_blocks_start(self):
+        cavity = VirtualCavity()
+        session = _FakeDlcSession()
+
+        def rejected_frequency(value):
+            session.frequency_writes.append(float(value))
+            session._snapshot.sc_frequency = float(value) + 0.02
+            session.write_snapshot_changed.emit(session._snapshot)
+
+        session.set_scan_frequency = rejected_frequency
+        controller = AdcPeakBalanceController(
+            _FrameRing(_shifted_history(cavity, 0)), session, lambda: True
+        )
+        controller.start(
+            PeakBalanceSettings(search_frequency_hz=5.0), observe_only=False
+        )
+        self.assertFalse(controller.running)
+        self.assertIsNone(controller.engine)
+
+    def test_restore_start_values_also_restores_original_frequency(self):
+        cavity = VirtualCavity()
+        session = _FakeDlcSession()
+        controller = AdcPeakBalanceController(
+            _FrameRing(_shifted_history(cavity, 0)), session, lambda: True
+        )
+        controller.start(PeakBalanceSettings(), observe_only=False)
+        controller.restore_start_values()
+        self.assertEqual(session.frequency_writes, [10.0, 1.0])
+        self.assertEqual(session.amplitude_writes, [2.5, 1.2])
+        self.assertAlmostEqual(session.snapshot().sc_frequency, 1.0)
 
     def test_observe_mode_does_not_auto_enable_scan(self):
         cavity = VirtualCavity()
@@ -574,7 +1017,7 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
         self.assertEqual(session.offset_writes, [])
         self.assertEqual(session.amplitude_writes, [])
 
-    def test_write_discards_settle_cycles_before_four_cycle_window(self):
+    def test_write_discards_one_settle_cycle_before_two_cycle_window(self):
         cavity = VirtualCavity()
         ring = _FrameRing(_shifted_history(cavity, 0))
         session = _FakeDlcSession()
@@ -590,7 +1033,7 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
         controller.available_after = 0.0
         controller._tick()
         self.assertFalse(controller.settle_pending)
-        self.assertEqual(controller.required_cycles, 4.0)
+        self.assertEqual(controller.required_cycles, 2.0)
         self.assertEqual(controller.gate_bin, int(ring.frame.bin_indices[-1]))
         controller.stop()
 
@@ -630,7 +1073,7 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
         for _ in range(self.settings.stable_windows):
             controller._observe(valid)
         self.assertIn("下一步进入缩幅", controller.manual_advice)
-        self.assertIn("直至最终目标", controller.manual_advice)
+        self.assertIn("一步进入最终幅度", controller.manual_advice)
         controller.stop()
 
     def test_control_mode_waits_for_independent_stage_windows_then_writes(self):
@@ -650,26 +1093,34 @@ class AdcPeakBalanceAlgorithmTest(unittest.TestCase):
         controller._tick()
         self.assertEqual(session.offset_writes, [])
         self.assertEqual(len(session.amplitude_writes), 1)
-        self.assertAlmostEqual(session.amplitude_writes[0], 0.9)
+        self.assertAlmostEqual(session.amplitude_writes[0], 0.2)
         controller.stop()
 
-    def test_control_mode_executes_configured_coarse_amplitude_shrink(self):
+    def test_control_mode_executes_direct_final_amplitude_shrink(self):
         cavity = VirtualCavity()
         ring = _FrameRing(_shifted_history(cavity, 0))
         session = _FakeDlcSession()
         session._snapshot.sc_amplitude = 5.0
         controller = AdcPeakBalanceController(ring, session, lambda: True)
-        controller.start(self.settings, observe_only=False)
+        controller.start(PeakBalanceSettings(
+            min_prominence_codes=40,
+            max_offset_deviation=0.5,
+            offset_step=0.03,
+            search_frequency_hz=1.0,
+            initial_search_amplitude=5.0,
+        ), observe_only=False)
         controller.engine.state = "center"
         ring.frame = cavity.history(0.0, 5.0)
         ring.frame.bin_indices += 10_000
-        controller.available_after = 0.0
-        controller._tick()
+        for _ in range(2):
+            controller.available_after = 0.0
+            controller._tick()
+            ring.frame.bin_indices += 10_000
         self.assertEqual(session.offset_writes, [])
         self.assertEqual(len(session.amplitude_writes), 1)
-        self.assertAlmostEqual(session.amplitude_writes[0], 3.5)
+        self.assertAlmostEqual(session.amplitude_writes[0], 0.2)
         self.assertFalse(controller.pending_write)
-        self.assertAlmostEqual(controller.engine.current_amplitude, 3.5)
+        self.assertAlmostEqual(controller.engine.current_amplitude, 0.2)
         self.assertGreater(controller.available_after, 0.0)
         controller.stop()
 

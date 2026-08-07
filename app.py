@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -35,6 +36,7 @@ from dlcpro_service import (
     SnapshotSection,
 )
 from device_task_coordinator import DeviceTaskCoordinator
+from daq_pc.unified_daq_gui import APP_STYLE as DAQ_APP_STYLE
 from daq_pc.unified_daq_gui import MainWindow as DaqMainWindow
 from notifications import NotificationService
 from ui_text import (
@@ -53,9 +55,7 @@ from controllers import (
     AutoLockController,
     FalcController,
     LaserController,
-    RelockController,
     ScanLockController,
-    StabilizationController,
 )
 from widgets.common_controls import SafeComboBox, SafeSpinBox
 from ui_scaling import SCALE_OPTIONS, UiScaleManager, WindowLayoutManager
@@ -63,9 +63,7 @@ from windows import (
     AutoLockWindow,
     FalcProWindow,
     LaserWindow,
-    RelockWindow,
     ScanLockWindow,
-    StabilizationWindow,
     build_laser_page,
     build_scan_lock_page,
 )
@@ -89,6 +87,14 @@ class MainWindow(QMainWindow):
         self.task_coordinator = DeviceTaskCoordinator()
         self.language = "zh"
         self.layout_manager = WindowLayoutManager()
+        if not self.layout_manager.settings.value(
+            "ui/compact_main_window_v1", False, type=bool
+        ):
+            # Discard only the obsolete oversized main-window geometry once.
+            self.layout_manager.settings.remove("windows/main/geometry")
+            self.layout_manager.settings.setValue(
+                "ui/compact_main_window_v1", True
+            )
         self.scale_manager: UiScaleManager | None = None
         self.busy = False
         self.snapshot: DeviceSnapshot | None = None
@@ -121,9 +127,7 @@ class MainWindow(QMainWindow):
         self.auto_lock_controller = AutoLockController(self)
         self.falc_controller = FalcController(self)
         self.laser_controller = LaserController(self)
-        self.relock_controller = RelockController(self)
         self.scan_lock_controller = ScanLockController(self)
-        self.stabilization_controller = StabilizationController(self)
 
         self.refresh_timer = QTimer(self)
         self.refresh_timer.setInterval(500)
@@ -147,13 +151,31 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         central = QWidget(self)
+        central.setObjectName("appRoot")
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(14)
 
-        header_layout = QHBoxLayout()
+        hero = QFrame()
+        hero.setObjectName("hero")
+        header_layout = QHBoxLayout(hero)
+        header_layout.setContentsMargins(22, 14, 22, 14)
+        heading_layout = QVBoxLayout()
+        heading_layout.setSpacing(1)
+        self.hero_eyebrow = QLabel("TOPTICA · DLC PRO CONTROL")
+        self.hero_eyebrow.setObjectName("heroEyebrow")
+        self.hero_title = QLabel()
+        self.hero_title.setObjectName("heroTitle")
+        self.hero_subtitle = QLabel()
+        self.hero_subtitle.setObjectName("heroSubtitle")
+        heading_layout.addWidget(self.hero_eyebrow)
+        heading_layout.addWidget(self.hero_title)
+        heading_layout.addWidget(self.hero_subtitle)
+        header_layout.addLayout(heading_layout)
+        header_layout.addStretch(1)
         self.language_label = QLabel()
+        self.language_label.setObjectName("heroSubtitle")
         self.language_combo = SafeComboBox()
         self.language_combo.addItem("中文", "zh")
         self.language_combo.addItem("English", "en")
@@ -161,17 +183,17 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(self.language_label)
         header_layout.addWidget(self.language_combo)
         self.ui_scale_label = QLabel()
+        self.ui_scale_label.setObjectName("heroSubtitle")
         self.ui_scale_combo = SafeComboBox()
         for label, scale in SCALE_OPTIONS:
             self.ui_scale_combo.addItem(label, scale)
         self.ui_scale_combo.currentIndexChanged.connect(self._on_ui_scale_changed)
         header_layout.addWidget(self.ui_scale_label)
         header_layout.addWidget(self.ui_scale_combo)
-        header_layout.addStretch(1)
         self.status_label = QLabel()
         self.status_label.setObjectName("StatusBadge")
         header_layout.addWidget(self.status_label)
-        root.addLayout(header_layout)
+        root.addWidget(hero)
 
         self.connection_group = self._build_connection_group()
         self.connection_group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
@@ -184,22 +206,12 @@ class MainWindow(QMainWindow):
 
         self.nav_layout = QGridLayout()
         self.nav_layout.setSpacing(10)
-        self.overview_button = self._create_nav_button(lambda: self.page_stack.setCurrentIndex(0))
         self.laser_button = self._create_nav_button(self._open_laser_window)
         self.falc_button = self._create_nav_button(self._open_falc_window)
-        self.scan_lock_button = self._create_nav_button(self._open_scan_lock_window)
-        self.auto_lock_button = self._create_nav_button(self._open_auto_lock_window)
-        self.relock_button = self._create_nav_button(self._open_relock_window)
-        self.stabilization_button = self._create_nav_button(self._open_stabilization_window)
         self.daq_button = self._create_nav_button(self._open_daq_window)
         self.nav_buttons = (
-            self.overview_button,
             self.laser_button,
             self.falc_button,
-            self.scan_lock_button,
-            self.auto_lock_button,
-            self.relock_button,
-            self.stabilization_button,
             self.daq_button,
         )
         self._nav_columns = 0
@@ -225,10 +237,6 @@ class MainWindow(QMainWindow):
         self.scan_lock_window = ScanLockWindow(self.scan_lock_page)
         self.auto_lock_window = AutoLockWindow(self, self.auto_lock_controller)
         self.auto_lock_controller.bind_window(self.auto_lock_window)
-        self.relock_window = RelockWindow(self, self.relock_controller)
-        self.relock_controller.bind_window(self.relock_window)
-        self.stabilization_window = StabilizationWindow(self, self.stabilization_controller)
-        self.stabilization_controller.bind_window(self.stabilization_window)
         self.daq_window: DaqMainWindow | None = None
 
     def _build_connection_group(self) -> QGroupBox:
@@ -273,10 +281,11 @@ class MainWindow(QMainWindow):
 
         self.serial_ports_info = QTextEdit()
         self.serial_ports_info.setReadOnly(True)
-        self.serial_ports_info.setMaximumHeight(68)
         self.network_info = QTextEdit()
         self.network_info.setReadOnly(True)
-        self.network_info.setMaximumHeight(68)
+        for info in (self.network_info, self.serial_ports_info):
+            info.setMinimumHeight(105)
+            info.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         layout.addWidget(self.mode_label, 0, 0)
         layout.addWidget(self.mode_combo, 0, 1)
@@ -295,8 +304,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.connect_button, 4, 2)
         layout.addWidget(self.disconnect_button, 4, 3)
         layout.addWidget(self.refresh_button, 4, 4)
-        layout.addWidget(self.network_info, 5, 0, 1, 5)
-        layout.addWidget(self.serial_ports_info, 6, 0, 1, 5)
         return box
 
     def _build_overview_page(self) -> QWidget:
@@ -308,6 +315,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.overview_title)
 
         self.parameter_group = QGroupBox()
+        self.parameter_group.setMinimumHeight(95)
+        self.parameter_group.setMaximumHeight(170)
+        self.parameter_group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         group_layout = QVBoxLayout(self.parameter_group)
         self.parameter_table = QTableWidget(0, 2)
         self.parameter_table.setSizeAdjustPolicy(QAbstractScrollArea.AdjustIgnored)
@@ -318,7 +328,15 @@ class MainWindow(QMainWindow):
         self.parameter_table.setSelectionMode(QTableWidget.NoSelection)
         self.parameter_table.setMinimumHeight(0)
         group_layout.addWidget(self.parameter_table)
-        layout.addWidget(self.parameter_group, 1)
+        layout.addWidget(self.parameter_group, 0)
+
+        self.runtime_log_group = QGroupBox()
+        log_layout = QHBoxLayout(self.runtime_log_group)
+        log_layout.setContentsMargins(12, 14, 12, 12)
+        log_layout.setSpacing(12)
+        log_layout.addWidget(self.network_info, 1)
+        log_layout.addWidget(self.serial_ports_info, 1)
+        layout.addWidget(self.runtime_log_group, 1)
         return page
 
     def _build_laser_page(self) -> QWidget:
@@ -344,7 +362,8 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "nav_buttons"):
             return
         width = max(self.width(), 1)
-        columns = 1 if width < 520 else 2 if width < 900 else 4 if width < 1280 else len(self.nav_buttons)
+        desired_columns = 1 if width < 520 else 2 if width < 900 else len(self.nav_buttons)
+        columns = min(len(self.nav_buttons), desired_columns)
         if columns == self._nav_columns:
             return
         for button in self.nav_buttons:
@@ -392,12 +411,6 @@ class MainWindow(QMainWindow):
     def _open_auto_lock_window(self) -> None:
         self._show_auxiliary_window(self.auto_lock_window)
 
-    def _open_relock_window(self) -> None:
-        self._show_auxiliary_window(self.relock_window)
-
-    def _open_stabilization_window(self) -> None:
-        self._show_auxiliary_window(self.stabilization_window)
-
     def _open_daq_window(self) -> None:
         if self.daq_window is None:
             self.daq_window = DaqMainWindow(
@@ -409,6 +422,9 @@ class MainWindow(QMainWindow):
             self.daq_window.destroyed.connect(
                 lambda: setattr(self, "daq_window", None)
             )
+            # Entering ADC opens only the acquisition console.  The combined
+            # auto-lock/scope workspace is opened explicitly from inside it.
+            self.daq_window.auto_lock_workspace.hide()
         self.daq_window.showNormal()
         self.daq_window.show()
         self.daq_window.raise_()
@@ -577,7 +593,117 @@ class MainWindow(QMainWindow):
             QFrame#Divider {
                 color: #595959;
             }
+
+            /* Unified light card theme shared with the DAQ secondary UI. */
+            QWidget {
+                background: #f3f6fa;
+                color: #172033;
+                font-family: "Microsoft YaHei UI", "Segoe UI";
+            }
+            QLabel {
+                background: transparent;
+                color: #25324a;
+            }
+            QGroupBox {
+                border: 1px solid #dce3ed;
+                border-radius: 10px;
+                background: #ffffff;
+                color: #25324a;
+            }
+            QLineEdit, QComboBox, QTextEdit, QTableWidget,
+            QSpinBox, QDoubleSpinBox {
+                background: #ffffff;
+                border: 1px solid #cfd8e6;
+                border-radius: 7px;
+                color: #172033;
+                selection-background-color: #2f6fcb;
+            }
+            QLineEdit:focus, QComboBox:focus, QTextEdit:focus,
+            QSpinBox:focus, QDoubleSpinBox:focus {
+                border-color: #4b82cf;
+            }
+            QLineEdit:disabled, QComboBox:disabled, QTextEdit:disabled,
+            QSpinBox:disabled, QDoubleSpinBox:disabled {
+                background: #f0f2f5;
+                color: #8993a4;
+                border-color: #e0e5ec;
+            }
+            QScrollArea, QScrollArea > QWidget > QWidget {
+                background: #f3f6fa;
+            }
+            QTableWidget { gridline-color: #dce3ed; }
+            QPushButton {
+                background: #ffffff;
+                border: 1px solid #cbd5e1;
+                border-radius: 7px;
+                color: #25324a;
+            }
+            QPushButton:hover {
+                background: #f6f8fb;
+                border-color: #9eacbf;
+            }
+            QPushButton:pressed { background: #edf1f6; }
+            QPushButton:disabled {
+                background: #f0f2f5;
+                border-color: #e0e5ec;
+                color: #a3adbb;
+            }
+            QPushButton#PrecisionButton:checked {
+                background: #e8f7ef;
+                border-color: #75b391;
+                color: #137044;
+            }
+            QPushButton#StepTargetButton {
+                background: #ffffff;
+                border-color: #cbd5e1;
+                color: #25324a;
+            }
+            QPushButton#StepTargetButton:checked {
+                background: #fff7e8;
+                border-color: #d8af68;
+                color: #8a5a12;
+            }
+            QPushButton#ParameterHelpButton {
+                background: #ffffff;
+                border-color: #cbd5e1;
+                color: #3563a9;
+            }
+            QLabel#StatusBadge {
+                background: #e8f7ef;
+                border: 1px solid #bce6ce;
+                color: #137044;
+            }
+            QLabel#PageTitle {
+                color: #102f57;
+                font-size: 22px;
+            }
+            QLabel#SectionTitle { color: #25324a; }
+            QFrame#LaserPanel {
+                background: #ffffff;
+                border: 1px solid #dce3ed;
+                border-radius: 10px;
+            }
+            QLabel#ReadValue {
+                background: #f8fafc;
+                border: 1px solid #d7dee8;
+                color: #172033;
+            }
+            QLabel#SubtleHint, QLabel#PlaceholderBody { color: #69758a; }
+            QFrame#Divider { color: #dce3ed; }
             """
+        # Apply the exact secondary-window palette last so the main console
+        # uses the same blue hero, light canvas, cards and status colors.
+        stylesheet += DAQ_APP_STYLE
+        stylesheet += """
+            QMessageBox QLabel {
+                background: transparent;
+            }
+            QMessageBox QPushButton {
+                min-width: 64px;
+                min-height: 28px;
+                padding: 3px 10px;
+            }
+        """
         app = QApplication.instance()
         if app is not None and self.scale_manager is not None:
             self.scale_manager.base_stylesheet = stylesheet
@@ -603,13 +729,11 @@ class MainWindow(QMainWindow):
                 self.auto_lock_window.config_window,
                 self.auto_lock_window.waveform_window,
                 self.auto_lock_window.log_window,
-                self.relock_window,
-                self.stabilization_window,
             )
         )
         self.layout_manager.register_windows(
             (
-                (self, "main", 980, 860),
+                (self, "main", 920, 680),
                 (self.laser_window, "laser", 860, 900),
                 (self.falc_window, "falc", 760, 760),
                 (self.scan_lock_window, "scan-lock", 980, 900),
@@ -617,8 +741,6 @@ class MainWindow(QMainWindow):
                 (self.auto_lock_window.config_window, "auto-lock-config", 720, 620),
                 (self.auto_lock_window.waveform_window, "auto-lock-waveform", 1040, 700),
                 (self.auto_lock_window.log_window, "auto-lock-log", 920, 620),
-                (self.relock_window, "relock", 1080, 560),
-                (self.stabilization_window, "stabilization", 920, 860),
             )
         )
         selected = self.scale_manager.selected_scale
@@ -643,10 +765,13 @@ class MainWindow(QMainWindow):
         self.ui_scale_label.setText(t["ui_scale"])
         self.ui_scale_combo.setItemText(0, t["ui_scale_auto"])
         self.status_label.setText(t["disconnected"] if not self.service.is_connected else t["connected"])
+        self.hero_title.setText(t["console_title"])
+        self.hero_subtitle.setText(t["console_subtitle"])
 
         self.connection_group.setTitle(t["connection"])
         self.workspace_group.setTitle(t["workspace"])
         self.parameter_group.setTitle(t["device_parameters"])
+        self.runtime_log_group.setTitle(t["runtime_log"])
         self.overview_title.setText(t["device_overview"])
 
         self.mode_label.setText(t["mode"])
@@ -663,22 +788,13 @@ class MainWindow(QMainWindow):
         self.refresh_button.setText(t["refresh"])
         self.parameter_table.setHorizontalHeaderLabels([t["parameter"], t["value"]])
 
-        self.overview_button.setText(t["device_overview"])
         self.laser_button.setText(t["laser"])
         self.falc_button.setText(t["falc"])
-        self.scan_lock_button.setText(t["scan_lock"])
-        self.auto_lock_button.setText(t["auto_lock"])
-        self.relock_button.setText(t["relock"])
-        self.stabilization_button.setText(t["stabilization"])
         self.daq_button.setText(t["data_acquisition"])
         self.auto_lock_controller.apply_texts()
         self.falc_window.apply_texts(self.language)
-        self.relock_window.apply_texts(self.language)
-        self.stabilization_window.apply_texts(self.language)
         if self.snapshot is None:
             self.auto_lock_window.reset_state(self.language)
-            self.relock_window.reset_state(self.language)
-            self.stabilization_window.reset_state(self.language)
 
         self.cc_status_label = t["cc_status"]
         self.laser_controller.apply_texts()
@@ -939,8 +1055,6 @@ class MainWindow(QMainWindow):
             widget.setEnabled(previewable)
         self.falc_window.set_writable(writable, previewable)
         self.auto_lock_window.set_writable(writable, previewable, auto_lock_running)
-        self.relock_window.set_writable(writable, previewable)
-        self.stabilization_window.set_writable(writable, previewable)
 
         for widget in (
             self.current_set_spin,
@@ -1260,8 +1374,6 @@ class MainWindow(QMainWindow):
         self.scan_lock_controller.render_snapshot(self._empty_scan_snapshot())
         self.auto_lock_window.reset_state(self.language)
         self.falc_window.reset_state(self.language)
-        self.relock_window.reset_state(self.language)
-        self.stabilization_window.reset_state(self.language)
         self.current_set_dirty = False
         self._update_toggle_button(self.cc_enable_button, False)
         self._update_toggle_button(self.feedforward_enable_button, False)
@@ -1326,10 +1438,6 @@ class MainWindow(QMainWindow):
             sections.update({SnapshotSection.SCAN_LOCK, SnapshotSection.FALC})
         if self.falc_window.isVisible():
             sections.add(SnapshotSection.FALC)
-        if self.relock_window.isVisible():
-            sections.add(SnapshotSection.RELOCK)
-        if self.stabilization_window.isVisible():
-            sections.add(SnapshotSection.STABILIZATION)
         if self.daq_window is not None and self.daq_window.isVisible():
             sections.add(SnapshotSection.SCAN_LOCK)
         return SnapshotRequest(frozenset(sections))
@@ -1349,8 +1457,6 @@ class MainWindow(QMainWindow):
         self.scan_lock_controller.render_snapshot(snapshot)
         self.auto_lock_controller.render_snapshot(snapshot)
         self.falc_window.render_snapshot(snapshot)
-        self.relock_window.render_snapshot(snapshot)
-        self.stabilization_window.render_snapshot(snapshot)
         self._restore_scroll_positions(scroll_positions)
 
     def _capture_scroll_positions(self) -> list[tuple[QScrollArea, int, int]]:
@@ -1362,8 +1468,6 @@ class MainWindow(QMainWindow):
             self.falc_window,
             self.scan_lock_window,
             self.auto_lock_window,
-            self.relock_window,
-            self.stabilization_window,
         ):
             for scroll in root.findChildren(QScrollArea):
                 if scroll in seen:
@@ -1458,8 +1562,6 @@ class MainWindow(QMainWindow):
             self.falc_window,
             self.scan_lock_window,
             self.auto_lock_window,
-            self.relock_window,
-            self.stabilization_window,
         ):
             window.request_shutdown()
             window.close()
@@ -1468,6 +1570,21 @@ class MainWindow(QMainWindow):
         self._reset_after_disconnect(silent=True)
         self.task_coordinator.shutdown()
         super().closeEvent(event)
+
+
+def create_safety_notice(parent: QWidget) -> QMessageBox:
+    """Build a compact, word-wrapped safety notice without clipping text."""
+    t = TEXT[parent.language]
+    box = QMessageBox(QMessageBox.Information, t["safety_title"], "", parent=parent)
+    box.setTextFormat(Qt.PlainText)
+    box.setText(t["safety_text"])
+    box.setStandardButtons(QMessageBox.Ok)
+    text_label = box.findChild(QLabel, "qt_msgbox_label")
+    if text_label is not None:
+        text_label.setWordWrap(True)
+        text_label.setMinimumWidth(380)
+        text_label.setMaximumWidth(520)
+    return box
 
 
 def main() -> int:
@@ -1481,12 +1598,9 @@ def main() -> int:
     app = QApplication(sys.argv)
     window = MainWindow()
     window.layout_manager.prepare_show(window)
+    window.showNormal()
     window.show()
-    QMessageBox.information(
-        window,
-        TEXT["zh"]["safety_title"],
-        f"{TEXT['zh']['safety_text']}\n\n{TEXT['en']['safety_text']}",
-    )
+    create_safety_notice(window).exec()
     if open_daq_on_start:
         window._open_daq_window()
     return app.exec()

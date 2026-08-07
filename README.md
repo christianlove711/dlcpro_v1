@@ -6,7 +6,7 @@
 - Laser、Scan&Lock、FALC、Relock、Stabilization 独立控制窗口；
 - Zynq-7020 + AD9269 双通道 PL UDP 实时采集；
 - 通道 A/B 独立示波器、HDF5 录制和后台 FPGA JTAG 下载；
-- 基于 AD9269 原始码的 00 模自动居中、阶梯缩幅和 FALC 接管。
+- 基于 AD9269 原始码的 00 模快速理论居中、两级最终 Offset 搜索和可选 FALC 接管。
 
 设备编程接口以项目内的 TOPTICA 官方 SDK 3.3 文档镜像为依据，设备行为和安全要求以 [Manual.md](Manual.md) 为依据。ADC/FPGA 协议及自动找峰策略属于本项目实现。
 
@@ -60,9 +60,10 @@ PL 协议不响应 ARP/ICMP，`ping` 失败不能单独作为离线判断。20 M
 - 示波器支持原始 ADC 码/电压、独立纵轴、时基、触发、点/连线/min-max 包络显示；
 - HDF5 可选择单通道、记录速率、保存路径，以及是否同步保存 DLC pro 扫描参数；
 - FPGA 可在后台自动连接本机硬件服务器并下载 `.bit`，无需打开 Vivado GUI；
-- ADC 自动锁频只使用透射峰原始码，控制 `Scan Offset` 与 `Scan Amplitude`，达到最终条件后执行 `Scan Off → FALC Main On → FALC Unlim On` 并逐项读回验证。
+- ADC 自动锁频只使用透射峰原始码：自动模式先切换到默认 `10 Hz / 2.5 Vpp`，无峰时以 `±1 V` 递增搜索 Offset；找到峰后按 `D=0.5×Amplitude×不均匀度` 快速居中并一步缩到 `0.2 Vpp`。
+- 最终阶段保持 `0.2 Vpp`，依次搜索 `±0.001～±0.009 V` 和 `±0.01～±0.09 V`；不会回到大扫幅。达到最终条件后，可按勾选状态停止调节，或执行 `Scan Off → FALC Main On → FALC Unlim On` 并逐项读回验证。
 
-自动找峰的公式、独立窗口规则、错误方向恢复、候选不唯一恢复和 FALC 接管顺序见 [算法报告](reports/adc_peak_balance/ALGORITHM_REPORT.md)。
+自动找峰的初始化、理论跳转、两级最终 Offset 网格、独立窗口规则、异常恢复和 FALC 接管顺序见 [当前算法报告](reports/adc_peak_balance/ALGORITHM_REPORT.md)。
 
 ## 文档入口
 
@@ -73,7 +74,7 @@ PL 协议不响应 ARP/ICMP，`ping` 失败不能单独作为离线判断。20 M
 - [2026-08-05 发布验证记录](reports/RELEASE_VALIDATION_2026-08-05.md)
 - [AD9269 PC 端说明](daq_pc/README_AD9269.md)
 - [PL UDP 网络与协议说明](daq_pc/README_PL_UDP.md)
-- [ADC 00 模自动找峰算法报告](reports/adc_peak_balance/ALGORITHM_REPORT.md)
+- [ADC 00 模两级自动锁定算法报告](reports/adc_peak_balance/ALGORITHM_REPORT.md)
 - [DLC pro 官方设备手册镜像](Manual.md)
 - [TOPTICA Python SDK 文档镜像](python-lasersdk/index.html)
 
@@ -92,7 +93,7 @@ app.py / dlcpro_service.py    主程序与统一设备服务
 controllers/                 主 DLC pro 窗口业务控制器
 windows/                     主 DLC pro 独立窗口
 widgets/                     可复用面板和控件
-daq_pc/                      AD9269 PL UDP、示波器、录制、ADC自动找峰
+daq_pc/                      AD9269 PL UDP、示波器、录制、ADC两级自动锁定
 tools/                       FPGA下载Tcl和硬件辅助源码/脚本
 tests/ + daq_pc/tests/       自动化测试
 docs/                        操作、结构、打包和历史文档

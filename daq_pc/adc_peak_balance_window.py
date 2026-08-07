@@ -95,48 +95,73 @@ PARAMETER_HELP = {
         "00模峰族突出度与第二强峰族突出度的最小比值，用于防止误锁边带。\n\n"
         "软件允许范围：1.01～20.00。默认：2.00。"
     ),
-    "Offset初始步长": (
-        "算法首次试探Scan Offset方向时使用的偏置变化量，单位沿用DLC pro当前扫描单位。\n\n"
-        "软件允许范围：0.000001～1000000。默认：0.010000。\n"
+    "方向试探步长": (
+        "找到峰以后，它用于一次正向试探，以判断Offset增大后峰间隔是否改善；"
+        "启动窗口完全没有透射峰时，也作为左右扩大Offset搜索的基础步长。\n\n"
+        "软件允许范围：0.000001～1000000。默认：0.050000 V。\n"
         "实际可用范围仍受当前DLC pro配置限制。"
+    ),
+    "快速扫频频率": (
+        "自动控制模式启动时写入的三角扫描频率。提高到10 Hz可显著缩短每个独立窗口的等待时间；"
+        "观察模式不会自动写入。恢复启动参数时会恢复原频率。\n\n"
+        "软件允许范围：0.01～1000 Hz。默认：10 Hz。"
+    ),
+    "初始化扫频范围": (
+        "自动控制开始时首先写入的Scan Amplitude。若当前值不同，会先写入并校验读回，"
+        "然后才开始寻找透射峰。默认：2.500000 Vpp。"
+    ),
+    "初始化无峰Offset步长": (
+        "在初始化扫频范围内没有透射峰时，围绕初始化Offset按"
+        "+步长、-步长、+2倍步长、-2倍步长依次搜索。默认：1.000000 V。"
     ),
     "Offset最小步长": (
         "Offset接近居中时允许算法使用的最小调节步长；反向或减半试探不会低于此值。\n\n"
         "使用PC Voltage扫描时单位为V。软件允许范围：0.000001～1000000，"
-        "且不能大于Offset初始步长。默认：0.001000 V。"
+        "且不能大于方向试探步长。默认：0.001000 V。"
     ),
     "启动Offset最大偏移": (
         "自动运行期间Scan Offset相对启动值允许偏离的最大绝对量。\n\n"
-        "软件允许范围：0.000001～1000000。默认：0.200000。\n"
+        "软件允许范围：0.000001～1000000。默认：0.500000 V。\n"
         "实际可用范围仍受当前DLC pro配置限制。"
-    ),
-    "Amplitude缩小比例": (
-        "每次缩幅时，新Scan Amplitude等于当前Amplitude乘以该比例。数值越小，缩幅越快。\n\n"
-        "软件允许范围：0.20～0.99。默认：0.75。"
     ),
     "最终扫频范围目标": (
         "自动流程逐级缩小Scan Amplitude时的最终目标。算法不会缩到该值以下；"
         "达到目标并连续满足峰间隔标准后，才允许自动使能FALC pro。\n\n"
         "本功能强制要求Scan Output为PC Voltage，因此单位为Vpp。"
         "软件允许范围：0.000001～1000000。默认：0.200000 Vpp；"
-        "目标不能大于启动Amplitude；该显式目标就是阶梯缩幅的硬下限。"
+        "目标不能大于启动Amplitude；快速寻峰通过后会直接写入该值。"
     ),
-    "无峰最大扩幅倍数": (
-        "启动时以DLC pro当前Scan Amplitude为搜索起点。若没有检测到足够的00模穿越峰，"
-        "自动模式按1.25倍逐级扩大，观察模式给出相同的人工建议。此参数限制最大搜索幅度，"
-        "防止无限扩幅。\n\n软件允许范围：1.0～10.0倍。默认：2.0倍。"
+    "重捕获最大扩幅倍数": (
+        "仅用于锁定后丢峰或窄扫失败时的恢复流程，限制恢复Amplitude的最大值。"
+        "启动窗口没有透射峰时不会增大Amplitude，而是保持当前幅度并围绕启动Offset左右扩大搜索。\n\n"
+        "软件允许范围：1.0～10.0倍。默认：2.0倍。"
     ),
-    "启动幅度最低保护": (
-        "Scan Amplitude允许缩小到启动Amplitude的最低百分比，防止扫频范围缩到接近零。\n\n"
-        "软件允许范围：1%～90%。默认：5%。"
-    ),
-    "最小可靠幅度裕量": (
-        "测得最小可靠扫频幅度后额外保留的工作裕量。25%表示最终幅度约为最小可靠值的1.25倍。\n\n"
-        "软件允许范围：0%～200%。默认：25%。"
-    ),
-    "峰间隔目标": (
+    "最终允许不均匀度": (
         "上、下扫描两次穿越的间隔不均匀度目标；越小表示00模越接近扫描中心。\n\n"
-        "软件允许范围：0.1%～25%。默认：2%。"
+        "软件允许范围：0.1%～25%。默认：5%。"
+    ),
+    "快速寻峰允许不均匀度": (
+        "大扫理论预测后的粗居中门槛。达到后不再进行多级缩幅，而是直接进入0.200 Vpp。\n\n"
+        "软件允许范围：0.1%～25%。默认：8%。"
+    ),
+    "理论预测增益": (
+        "理论移动量为 prediction_gain × 0.5 × Amplitude × 不均匀度。\n\n"
+        "软件允许范围：0.01～1.00。默认：0.80。"
+    ),
+    "模型最大修正次数": (
+        "第一次理论跳转后允许继续按剩余误差直接修正的最多次数。正常流程不做无限迭代。\n\n"
+        "软件允许范围：0～10。默认：2。"
+    ),
+    "最终邻域最大距离": (
+        "0.200 Vpp最终阶段围绕当前Offset进行第一轮离散比较的最大距离。\n\n"
+        "默认：0.009 V，即测试O±0.001…O±0.009；仍未达标时自动进入"
+        "第二轮O±0.01…O±0.09 V搜索，Amplitude保持0.200 Vpp。"
+    ),
+    "快速确认窗口": (
+        "大扫阶段达到8%门槛后，需要连续多少个独立窗口确认。默认：2。"
+    ),
+    "最终验收窗口": (
+        "最终幅度达到5%门槛后，需要连续多少个独立窗口确认后才允许FALC接管。默认：3。"
     ),
 }
 
@@ -229,8 +254,8 @@ class AdviceHistoryDialog(QDialog):
 
 class AdcPeakBalanceWindow(QMainWindow):
     def __init__(self, controller, settings_store, parent=None,
-                 falc_window_opener=None):
-        super().__init__(parent)
+                 falc_window_opener=None, embedded: bool = False):
+        super().__init__(parent, Qt.Widget if embedded else Qt.Window)
         self.controller = controller
         self.settings_store = settings_store
         self.advice_history: list[str] = []
@@ -238,20 +263,29 @@ class AdcPeakBalanceWindow(QMainWindow):
         self.advice_dialog: AdviceHistoryDialog | None = None
         self.falc_window_opener = falc_window_opener
         self.setWindowTitle("ADC 00模自动锁频")
-        self.resize(1180, 820)
-        self.setMinimumSize(980, 700)
+        if embedded:
+            self.setMinimumSize(0, 520)
+        else:
+            self.resize(1180, 820)
+            self.setMinimumSize(980, 700)
         self.setStyleSheet(PEAK_LOCK_STYLE)
 
         scroll = QScrollArea()
         scroll.setObjectName("peakLockScroll")
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarAsNeeded if embedded else Qt.ScrollBarAlwaysOff
+        )
         self.setCentralWidget(scroll)
 
         root = QWidget()
         root.setObjectName("peakLockRoot")
         root.setMinimumHeight(1450)
+        if embedded:
+            # Preserve the control grid instead of letting it paint underneath
+            # the scope pane when the combined workspace is narrow.
+            root.setMinimumWidth(680)
         scroll.setWidget(root)
         page = QVBoxLayout(root)
         page.setContentsMargins(20, 18, 20, 20)
@@ -312,7 +346,20 @@ class AdcPeakBalanceWindow(QMainWindow):
         self.offset_step = ParameterDoubleSpinBox()
         self.offset_step.setRange(0.000001, 1_000_000.0)
         self.offset_step.setDecimals(6)
-        self.offset_step.setValue(0.01)
+        self.offset_step.setValue(0.05)
+        self.search_frequency = ParameterDoubleSpinBox()
+        self.search_frequency.setRange(0.01, 1000.0)
+        self.search_frequency.setDecimals(2)
+        self.search_frequency.setValue(10.0)
+        self.search_frequency.setSuffix(" Hz")
+        self.initial_search_amplitude = ParameterDoubleSpinBox()
+        self.initial_search_amplitude.setRange(0.000001, 1_000_000.0)
+        self.initial_search_amplitude.setDecimals(6)
+        self.initial_search_amplitude.setValue(2.5)
+        self.initial_offset_search_step = ParameterDoubleSpinBox()
+        self.initial_offset_search_step.setRange(0.000001, 1_000_000.0)
+        self.initial_offset_search_step.setDecimals(6)
+        self.initial_offset_search_step.setValue(1.0)
         self.min_offset_step = ParameterDoubleSpinBox()
         self.min_offset_step.setRange(0.000001, 1_000_000.0)
         self.min_offset_step.setDecimals(6)
@@ -320,11 +367,7 @@ class AdcPeakBalanceWindow(QMainWindow):
         self.offset_range = ParameterDoubleSpinBox()
         self.offset_range.setRange(0.000001, 1_000_000.0)
         self.offset_range.setDecimals(6)
-        self.offset_range.setValue(0.2)
-        self.shrink_ratio = ParameterDoubleSpinBox()
-        self.shrink_ratio.setRange(0.20, 0.99)
-        self.shrink_ratio.setValue(0.75)
-        self.shrink_ratio.setDecimals(2)
+        self.offset_range.setValue(0.5)
         self.target_amplitude = ParameterDoubleSpinBox()
         self.target_amplitude.setRange(0.000001, 1_000_000.0)
         self.target_amplitude.setDecimals(6)
@@ -333,38 +376,64 @@ class AdcPeakBalanceWindow(QMainWindow):
         self.max_search_factor.setRange(1.0, 10.0)
         self.max_search_factor.setDecimals(2)
         self.max_search_factor.setValue(2.0)
-        self.min_fraction = ParameterDoubleSpinBox()
-        self.min_fraction.setRange(1.0, 90.0)
-        self.min_fraction.setValue(5.0)
-        self.min_fraction.setSuffix(" %")
-        self.safety_margin = ParameterDoubleSpinBox()
-        self.safety_margin.setRange(0.0, 200.0)
-        self.safety_margin.setValue(25.0)
-        self.safety_margin.setSuffix(" %")
+        self.search_tolerance = ParameterDoubleSpinBox()
+        self.search_tolerance.setRange(0.1, 25.0)
+        self.search_tolerance.setValue(8.0)
+        self.search_tolerance.setSuffix(" %")
+        self.prediction_gain = ParameterDoubleSpinBox()
+        self.prediction_gain.setRange(0.01, 1.0)
+        self.prediction_gain.setDecimals(2)
+        self.prediction_gain.setValue(0.8)
+        self.model_corrections = ParameterSpinBox()
+        self.model_corrections.setRange(0, 10)
+        self.model_corrections.setValue(2)
+        self.final_local_distance = ParameterDoubleSpinBox()
+        self.final_local_distance.setRange(0.001, 1_000_000.0)
+        self.final_local_distance.setDecimals(6)
+        self.final_local_distance.setValue(0.009)
+        self.search_windows = ParameterSpinBox()
+        self.search_windows.setRange(1, 10)
+        self.search_windows.setValue(2)
+        self.final_windows = ParameterSpinBox()
+        self.final_windows.setRange(1, 10)
+        self.final_windows.setValue(3)
         self.balance_tolerance = ParameterDoubleSpinBox()
         self.balance_tolerance.setRange(0.1, 25.0)
-        self.balance_tolerance.setValue(2.0)
+        self.balance_tolerance.setValue(5.0)
         self.balance_tolerance.setSuffix(" %")
+        self._add_parameter_row(left, "方向试探步长", self.offset_step)
+        self._add_parameter_row(left, "快速扫频频率", self.search_frequency)
+        self._add_parameter_row(left, "初始化扫频范围", self.initial_search_amplitude)
+        self._add_parameter_row(left, "初始化无峰Offset步长", self.initial_offset_search_step)
+        self._add_parameter_row(left, "快速寻峰允许不均匀度", self.search_tolerance)
+        self._add_parameter_row(left, "理论预测增益", self.prediction_gain)
+        self._add_parameter_row(left, "快速确认窗口", self.search_windows)
         self._add_parameter_row(right, "Offset最小步长", self.min_offset_step)
         self._add_parameter_row(right, "启动Offset最大偏移", self.offset_range)
         self._add_parameter_row(right, "最终扫频范围目标", self.target_amplitude)
-        self._add_parameter_row(right, "无峰最大扩幅倍数", self.max_search_factor)
-        self._add_parameter_row(right, "最小可靠幅度裕量", self.safety_margin)
+        self._add_parameter_row(right, "重捕获最大扩幅倍数", self.max_search_factor)
+        self._add_parameter_row(right, "模型最大修正次数", self.model_corrections)
+        self._add_parameter_row(right, "最终邻域最大距离", self.final_local_distance)
+        self._add_parameter_row(right, "最终允许不均匀度", self.balance_tolerance)
+        self._add_parameter_row(right, "最终验收窗口", self.final_windows)
         grid.addLayout(left, 0, 0)
         grid.addLayout(right, 0, 1)
-        config.setMinimumHeight(360)
+        config.setMinimumHeight(500)
         page.addWidget(config)
 
         strategy = QFrame()
         strategy.setObjectName("card")
         strategy_box = QVBoxLayout(strategy)
         strategy_box.setContentsMargins(16, 14, 16, 14)
-        strategy_title = QLabel("阶梯缩幅策略（PC Voltage，全部可配置）")
+        strategy_title = QLabel("两级自动居中策略（PC Voltage）")
         strategy_title.setStyleSheet("font-weight:700; font-size:15px;")
         strategy_box.addWidget(strategy_title)
         strategy_note = QLabel(
-            "每一级先达到本级不均匀度门槛和独立窗口数，再按倍率缩幅；"
-            "最终级不再缩幅。Offset反向减半时不会低于下一阶段步长。"
+            "自动模式先写入初始化Amplitude；无峰时以初始化步长左右搜索Offset。"
+            "找到峰后使用三角波峰间隔计算理论中心，只做一次方向试探；"
+            "通过后一步缩到最终幅度，先以0.001 V离散邻域精调；"
+            "按±0.001至±0.009 V搜索；仍无效时保持最终幅度，"
+            "再按±0.01至±0.09 V搜索。"
         )
         strategy_note.setObjectName("muted")
         strategy_note.setWordWrap(True)
@@ -373,54 +442,32 @@ class AdcPeakBalanceWindow(QMainWindow):
         stage_grid.setHorizontalSpacing(9)
         stage_grid.setVerticalSpacing(8)
         for column, text in enumerate((
-            "阶段", "Amplitude下界(Vpp)", "允许不均匀度(%)",
-            "Offset步长(V)", "缩幅倍率", "独立窗口",
+            "阶段", "Amplitude", "允许不均匀度", "Offset策略", "独立窗口",
         )):
             header = QLabel(text)
             header.setStyleSheet("font-weight:700; color:#475569;")
             stage_grid.addWidget(header, 0, column)
         self.strategy_edits = {}
+        self.strategy_labels = {}
         stage_rows = (
-            ("coarse", "宽扫", "2.0", "20", "0.1", "0.70", "1"),
-            ("medium", "中扫", "1.0", "12", "0.05", "0.75", "2"),
-            ("fine", "细扫", "0.5", "8", "0.01", "0.75", "2"),
-            ("narrow", "窄扫", "最终目标", "6", "0.001", "0.80", "2"),
-            ("final", "最终验收", "最终目标", "5", "0.001", "不缩幅", "3"),
+            ("快速寻峰", "启动幅度", "8%", "理论预测 + 单次方向试探", "2"),
+            ("最终锁定", "0.200 Vpp", "5%", "±0.001…0.009 → ±0.01…0.09 V", "3"),
         )
         for row, values in enumerate(stage_rows, start=1):
-            key, name, boundary, tolerance, step, shrink, windows = values
-            stage_grid.addWidget(QLabel(name), row, 0)
-            for column, (field, value) in enumerate((
-                ("boundary", boundary), ("tolerance", tolerance),
-                ("step", step), ("shrink", shrink), ("windows", windows),
-            ), start=1):
-                if value == "不缩幅":
-                    label = QLabel(value)
-                    label.setStyleSheet(
-                        "min-height:32px; padding:0 8px; color:#69758a; "
-                        "background:#f0f2f5; border:1px solid #e0e5ec; "
-                        "border-radius:6px;"
-                    )
-                    stage_grid.addWidget(label, row, column)
-                    continue
-                edit = QLineEdit(
-                    f"{self.target_amplitude.value():.6f}"
-                    if value == "最终目标" else value
-                )
-                edit.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                edit.setProperty("stageParameter", True)
-                edit.setToolTip(
-                    "最终扫频范围目标，单位Vpp；修改后会与另一目标框及上方目标参数同步。"
-                    if value == "最终目标" else {
-                    "boundary": "阶段边界必须依次满足：宽扫 > 中扫 > 细扫 > 最终目标。",
-                    "tolerance": "本阶段允许不均匀度，范围：大于0且小于50%。",
-                    "step": "本阶段Offset起始步长；必须不小于Offset绝对最小步长，且逐级不增大。",
-                    "shrink": "本阶段通过后Amplitude乘以该倍率，范围：0.20～0.99。",
-                    "windows": "必须由多少个完全独立的新数据窗口连续确认，范围：1～10。",
-                    }[field]
-                )
-                self.strategy_edits[f"{key}_{field}"] = edit
-                stage_grid.addWidget(edit, row, column)
+            for column, value in enumerate(values):
+                label = QLabel(value)
+                label.setWordWrap(True)
+                stage_grid.addWidget(label, row, column)
+                self.strategy_labels[(row, column)] = label
+        for control in (
+            self.initial_search_amplitude, self.target_amplitude,
+            self.search_tolerance,
+            self.balance_tolerance, self.min_offset_step,
+            self.final_local_distance, self.search_windows,
+            self.final_windows,
+        ):
+            control.valueChanged.connect(self._update_strategy_summary)
+        self._update_strategy_summary()
         strategy_box.addLayout(stage_grid)
         page.addWidget(strategy)
 
@@ -449,7 +496,7 @@ class AdcPeakBalanceWindow(QMainWindow):
         step_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         status_grid.addWidget(step_label, 6, 1, 1, 3)
         self.values["step"] = step_label
-        status_grid.addWidget(QLabel("当前阶梯"), 7, 0)
+        status_grid.addWidget(QLabel("当前阶段"), 7, 0)
         stage_label = QLabel("--")
         stage_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         status_grid.addWidget(stage_label, 7, 1, 1, 3)
@@ -480,7 +527,8 @@ class AdcPeakBalanceWindow(QMainWindow):
         self.auto_falc = VisibleCheckBox("达到设定标准后自动使能FALC pro")
         self.auto_falc.setToolTip(
             "仅在自动控制模式下生效。停止Scan后按FALC pro当前Path Selection使能，"
-            "不修改增益、滤波或范围参数。"
+            "不修改增益、滤波或范围参数；未勾选时最终验收通过即停止自动调节，"
+            "保持当前Scan和锁定参数。"
         )
         controls.addWidget(self.save_button)
         controls.addWidget(self.start_button)
@@ -508,19 +556,27 @@ class AdcPeakBalanceWindow(QMainWindow):
         self.controller.log_message.connect(self.log.append)
         self.observe_only.toggled.connect(self._mode_changed)
         self.manual_advice_label.clicked.connect(self._show_advice_history)
-        self.strategy_edits["narrow_boundary"].editingFinished.connect(
-            lambda: self._sync_target_from_stage("narrow_boundary")
-        )
-        self.strategy_edits["final_boundary"].editingFinished.connect(
-            lambda: self._sync_target_from_stage("final_boundary")
-        )
-        self.target_amplitude.editingFinished.connect(
-            self._sync_stage_targets_from_primary
-        )
         self._restore_ui_settings()
-        self._sync_stage_targets_from_primary()
         self._mode_changed()
         self._running_changed(False)
+
+    def _update_strategy_summary(self, *_args) -> None:
+        labels = getattr(self, "strategy_labels", {})
+        if not labels:
+            return
+        labels[(1, 2)].setText(f"{self.search_tolerance.value():g}%")
+        labels[(1, 1)].setText(
+            f"{self.initial_search_amplitude.value():.3f} Vpp"
+        )
+        labels[(1, 4)].setText(str(self.search_windows.value()))
+        labels[(2, 1)].setText(f"{self.target_amplitude.value():.3f} Vpp")
+        labels[(2, 2)].setText(f"{self.balance_tolerance.value():g}%")
+        labels[(2, 3)].setText(
+            f"±{self.min_offset_step.value():.3f} V网格，"
+            f"范围±{self.final_local_distance.value():.3f} V；"
+            "无效后±0.010…0.090 V"
+        )
+        labels[(2, 4)].setText(str(self.final_windows.value()))
 
     def _add_parameter_row(self, form: QFormLayout, title: str,
                            control: QWidget) -> None:
@@ -550,33 +606,18 @@ class AdcPeakBalanceWindow(QMainWindow):
     def _numeric_parameter_widgets(self):
         return (
             self.min_prominence, self.noise_sigma, self.dominance,
-            self.offset_step, self.min_offset_step, self.offset_range,
-            self.shrink_ratio, self.target_amplitude, self.max_search_factor,
-            self.min_fraction, self.safety_margin, self.balance_tolerance,
+            self.offset_step, self.search_frequency,
+            self.initial_search_amplitude, self.initial_offset_search_step,
+            self.min_offset_step, self.offset_range,
+            self.target_amplitude, self.max_search_factor,
+            self.search_tolerance, self.prediction_gain,
+            self.model_corrections, self.final_local_distance,
+            self.search_windows, self.balance_tolerance, self.final_windows,
         )
 
     def _commit_parameter_edits(self) -> None:
         for widget in self._numeric_parameter_widgets():
             widget.interpretText()
-
-    def _sync_target_from_stage(self, source_key: str) -> None:
-        text = self.strategy_edits[source_key].text().strip()
-        try:
-            value = float(text)
-        except ValueError:
-            return
-        if value <= 0:
-            return
-        self.target_amplitude.setValue(value)
-        formatted = f"{value:.6f}"
-        self.strategy_edits["narrow_boundary"].setText(formatted)
-        self.strategy_edits["final_boundary"].setText(formatted)
-
-    def _sync_stage_targets_from_primary(self) -> None:
-        self.target_amplitude.interpretText()
-        formatted = f"{float(self.target_amplitude.value()):.6f}"
-        self.strategy_edits["narrow_boundary"].setText(formatted)
-        self.strategy_edits["final_boundary"].setText(formatted)
 
     def _save_parameters(self) -> None:
         try:
@@ -593,60 +634,27 @@ class AdcPeakBalanceWindow(QMainWindow):
         )
 
     def current_settings(self) -> PeakBalanceSettings:
-        def stage_float(key: str) -> float:
-            text = self.strategy_edits[key].text().strip().replace("％", "%")
-            return float(text.rstrip("% "))
-
-        def stage_int(key: str) -> int:
-            value = stage_float(key)
-            if not value.is_integer():
-                raise ValueError("阶梯策略的独立窗口数必须是整数")
-            return int(value)
-
-        coarse_step = stage_float("coarse_step")
-        medium_shrink = stage_float("medium_shrink")
-        final_tolerance = stage_float("final_tolerance") / 100.0
-        final_windows = stage_int("final_windows")
-        narrow_target = stage_float("narrow_boundary")
-        final_target = stage_float("final_boundary")
-        if abs(narrow_target - final_target) > 1e-12:
-            raise ValueError("窄扫与最终验收的目标Amplitude必须一致")
         return PeakBalanceSettings(
             channel=str(self.channel.currentData()),
             polarity=str(self.polarity.currentData()),
             min_prominence_codes=float(self.min_prominence.value()),
             noise_sigma=float(self.noise_sigma.value()),
             carrier_dominance_ratio=float(self.dominance.value()),
-            offset_step=coarse_step,
+            offset_step=float(self.offset_step.value()),
             min_offset_step=float(self.min_offset_step.value()),
             max_offset_deviation=float(self.offset_range.value()),
-            shrink_ratio=medium_shrink,
-            target_amplitude=final_target,
+            target_amplitude=float(self.target_amplitude.value()),
             max_search_amplitude_factor=float(self.max_search_factor.value()),
-            min_amplitude_fraction=float(self.min_fraction.value()) / 100.0,
-            safety_margin=float(self.safety_margin.value()) / 100.0,
-            balance_tolerance=final_tolerance,
-            stable_windows=final_windows,
-            coarse_boundary=stage_float("coarse_boundary"),
-            medium_boundary=stage_float("medium_boundary"),
-            fine_boundary=stage_float("fine_boundary"),
-            coarse_tolerance=stage_float("coarse_tolerance") / 100.0,
-            medium_tolerance=stage_float("medium_tolerance") / 100.0,
-            fine_tolerance=stage_float("fine_tolerance") / 100.0,
-            narrow_tolerance=stage_float("narrow_tolerance") / 100.0,
-            coarse_step=coarse_step,
-            medium_step=stage_float("medium_step"),
-            fine_step=stage_float("fine_step"),
-            narrow_step=stage_float("narrow_step"),
-            final_step=stage_float("final_step"),
-            coarse_shrink=stage_float("coarse_shrink"),
-            medium_shrink=medium_shrink,
-            fine_shrink=stage_float("fine_shrink"),
-            narrow_shrink=stage_float("narrow_shrink"),
-            coarse_windows=stage_int("coarse_windows"),
-            medium_windows=stage_int("medium_windows"),
-            fine_windows=stage_int("fine_windows"),
-            narrow_windows=stage_int("narrow_windows"),
+            balance_tolerance=float(self.balance_tolerance.value()) / 100.0,
+            stable_windows=int(self.final_windows.value()),
+            search_tolerance=float(self.search_tolerance.value()) / 100.0,
+            search_windows=int(self.search_windows.value()),
+            prediction_gain=float(self.prediction_gain.value()),
+            max_model_corrections=int(self.model_corrections.value()),
+            final_local_max_distance=float(self.final_local_distance.value()),
+            search_frequency_hz=float(self.search_frequency.value()),
+            initial_search_amplitude=float(self.initial_search_amplitude.value()),
+            initial_offset_search_step=float(self.initial_offset_search_step.value()),
         ).validated()
 
     def _start(self):
@@ -679,9 +687,13 @@ class AdcPeakBalanceWindow(QMainWindow):
         for widget in (
             self.channel, self.polarity, self.min_prominence,
             self.noise_sigma, self.dominance, self.offset_step,
-            self.min_offset_step, self.offset_range, self.shrink_ratio,
-            self.target_amplitude, self.max_search_factor, self.min_fraction,
-            self.safety_margin, self.balance_tolerance,
+            self.search_frequency,
+            self.initial_search_amplitude, self.initial_offset_search_step,
+            self.min_offset_step, self.offset_range,
+            self.target_amplitude, self.max_search_factor,
+            self.search_tolerance, self.prediction_gain,
+            self.model_corrections, self.final_local_distance,
+            self.search_windows, self.balance_tolerance, self.final_windows,
         ):
             widget.setEnabled(not running)
         for edit in self.strategy_edits.values():
@@ -710,6 +722,17 @@ class AdcPeakBalanceWindow(QMainWindow):
         state_names = {
             "idle": "未开始", "select": "自动选择00模",
             "probe": "试探Offset方向", "center": "居中Offset",
+            "search_direction_probe": "快速寻峰·方向试探",
+            "search_verify": "快速寻峰·理论跳转验证",
+            "search_model_correct": "快速寻峰·模型残差修正",
+            "search_accept": "快速寻峰·粗居中确认",
+            "final_shrink": "一步缩到最终幅度",
+            "final_verify": "最终幅度初次验证",
+            "final_local_search": "0.001 V邻域搜索",
+            "final_local_return": "恢复邻域最佳Offset",
+            "startup_offset_search": "启动Offset左右扩展寻峰",
+            "final_accept": "最终连续窗口验收",
+            "legacy_restore": "恢复大扫幅并进入旧搜索",
             "verify_shrink": "验证缩幅", "local_recover": "小范围左右找峰",
             "restore_amplitude": "恢复扫频范围", "refine": "二分最小可靠幅度",
             "track": "均衡保持与漂移跟踪", "ambiguous": "00模候选不唯一",
@@ -800,37 +823,26 @@ class AdcPeakBalanceWindow(QMainWindow):
             (self.min_prominence, "peak_lock/min_prominence", 50),
             (self.noise_sigma, "peak_lock/noise_sigma", 6.0),
             (self.dominance, "peak_lock/dominance", 2.0),
-            (self.offset_step, "peak_lock/offset_step", 0.01),
+            (self.offset_step, "peak_lock/direction_probe_step", 0.05),
+            (self.search_frequency, "peak_lock/search_frequency_hz", 10.0),
+            (self.initial_search_amplitude, "peak_lock/initial_search_amplitude", 2.5),
+            (self.initial_offset_search_step, "peak_lock/initial_offset_search_step", 1.0),
             (self.min_offset_step, "peak_lock/min_offset_step", 0.001),
-            (self.offset_range, "peak_lock/offset_range", 0.2),
-            (self.shrink_ratio, "peak_lock/shrink_ratio", 0.75),
+            (self.offset_range, "peak_lock/max_start_offset_deviation", 0.5),
             (self.target_amplitude, "peak_lock/target_amplitude", 0.2),
             (self.max_search_factor, "peak_lock/max_search_factor", 2.0),
-            (self.min_fraction, "peak_lock/min_fraction", 5.0),
-            (self.safety_margin, "peak_lock/safety_margin", 25.0),
-            (self.balance_tolerance, "peak_lock/balance_tolerance", 2.0),
+            (self.search_tolerance, "peak_lock/search_tolerance", 8.0),
+            (self.prediction_gain, "peak_lock/prediction_gain", 0.8),
+            (self.model_corrections, "peak_lock/model_corrections", 2),
+            # v2 deliberately ignores the former ±0.005 V persisted default;
+            # the current algorithm always starts with ±0.001..±0.009 V.
+            (self.final_local_distance, "peak_lock/final_local_distance_v2", 0.009),
+            (self.search_windows, "peak_lock/search_windows", 2),
+            (self.balance_tolerance, "peak_lock/final_tolerance", 5.0),
+            (self.final_windows, "peak_lock/final_windows", 3),
         )
         for widget, key, default in numeric:
             widget.setValue(float(s.value(key, default)))
-        stage_defaults = {
-            "coarse_boundary": "2.0", "medium_boundary": "1.0",
-            "fine_boundary": "0.5",
-            "coarse_tolerance": "20", "medium_tolerance": "12",
-            "fine_tolerance": "8", "narrow_tolerance": "6",
-            "final_tolerance": "5",
-            "coarse_step": "0.1", "medium_step": "0.05",
-            "fine_step": "0.01", "narrow_step": "0.001",
-            "final_step": "0.001",
-            "coarse_shrink": "0.70", "medium_shrink": "0.75",
-            "fine_shrink": "0.75", "narrow_shrink": "0.80",
-            "coarse_windows": "1", "medium_windows": "2",
-            "fine_windows": "2", "narrow_windows": "2",
-            "final_windows": "3",
-        }
-        for key, default in stage_defaults.items():
-            self.strategy_edits[key].setText(
-                str(s.value(f"peak_lock/stage/{key}", default))
-            )
 
     def _save_ui_settings(self):
         s = self.settings_store
@@ -842,23 +854,30 @@ class AdcPeakBalanceWindow(QMainWindow):
             (self.min_prominence, "peak_lock/min_prominence"),
             (self.noise_sigma, "peak_lock/noise_sigma"),
             (self.dominance, "peak_lock/dominance"),
-            (self.offset_step, "peak_lock/offset_step"),
+            (self.offset_step, "peak_lock/direction_probe_step"),
+            (self.search_frequency, "peak_lock/search_frequency_hz"),
+            (self.initial_search_amplitude, "peak_lock/initial_search_amplitude"),
+            (self.initial_offset_search_step, "peak_lock/initial_offset_search_step"),
             (self.min_offset_step, "peak_lock/min_offset_step"),
-            (self.offset_range, "peak_lock/offset_range"),
-            (self.shrink_ratio, "peak_lock/shrink_ratio"),
+            (self.offset_range, "peak_lock/max_start_offset_deviation"),
             (self.target_amplitude, "peak_lock/target_amplitude"),
             (self.max_search_factor, "peak_lock/max_search_factor"),
-            (self.min_fraction, "peak_lock/min_fraction"),
-            (self.safety_margin, "peak_lock/safety_margin"),
-            (self.balance_tolerance, "peak_lock/balance_tolerance"),
+            (self.search_tolerance, "peak_lock/search_tolerance"),
+            (self.prediction_gain, "peak_lock/prediction_gain"),
+            (self.model_corrections, "peak_lock/model_corrections"),
+            (self.final_local_distance, "peak_lock/final_local_distance_v2"),
+            (self.search_windows, "peak_lock/search_windows"),
+            (self.balance_tolerance, "peak_lock/final_tolerance"),
+            (self.final_windows, "peak_lock/final_windows"),
         ):
             s.setValue(key, widget.value())
-        for key, edit in self.strategy_edits.items():
-            s.setValue(f"peak_lock/stage/{key}", edit.text().strip())
         s.sync()
 
     def closeEvent(self, event):
+        self.prepare_for_workspace_close()
+        event.accept()
+
+    def prepare_for_workspace_close(self):
         if self.controller.running:
             self.controller.stop("自动锁频窗口关闭")
         self._save_ui_settings()
-        event.accept()

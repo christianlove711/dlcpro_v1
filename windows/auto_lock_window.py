@@ -103,6 +103,7 @@ class AutoLockWaveformWindow(AuxiliaryWindow):
 class AutoLockConfigDialog(QDialog):
     settingsApplied = Signal(object)
     COMMON_PARAMETER_KEYS = {
+        "auto_lock_config_search_frequency",
         "auto_lock_config_wide_amplitude",
         "auto_lock_config_min_amplitude",
         "auto_lock_config_shrink_factor",
@@ -235,6 +236,8 @@ class AutoLockConfigDialog(QDialog):
         strategy_form.addRow(self.strategy_label, strategy_row)
         content_layout.addWidget(self.strategy_group)
 
+        self.search_frequency = self._double(settings.search_frequency, 0.01, 1_000_000.0, 3)
+        self.search_frequency.setSuffix(" Hz")
         self.wide_amplitude = self._double(settings.wide_amplitude, 0.0, 1_000_000.0, 6)
         self.min_amplitude = self._double(settings.min_amplitude, 0.0, 1_000_000.0, 6)
         self.shrink_factor = self._double(settings.shrink_factor, 0.05, 0.99, 3)
@@ -256,6 +259,7 @@ class AutoLockConfigDialog(QDialog):
         self._role_labels: dict[str, QLabel] = {}
         self._group_boxes: dict[str, QGroupBox] = {}
         self._field_rows = (
+            ("auto_lock_config_search_frequency", self.search_frequency),
             ("auto_lock_config_wide_amplitude", self.wide_amplitude),
             ("auto_lock_config_min_amplitude", self.min_amplitude),
             ("auto_lock_config_shrink_factor", self.shrink_factor),
@@ -276,6 +280,7 @@ class AutoLockConfigDialog(QDialog):
             (
                 "auto_lock_config_group_common",
                 (
+                    ("auto_lock_config_search_frequency", self.search_frequency),
                     ("auto_lock_config_wide_amplitude", self.wide_amplitude),
                     ("auto_lock_config_min_amplitude", self.min_amplitude),
                     ("auto_lock_config_shrink_factor", self.shrink_factor),
@@ -424,6 +429,7 @@ class AutoLockConfigDialog(QDialog):
     def load_settings(self, settings: AutoLockSettings) -> None:
         self._set_strategy(settings.strategy)
         values = (
+            (self.search_frequency, settings.search_frequency),
             (self.wide_amplitude, settings.wide_amplitude),
             (self.min_amplitude, settings.min_amplitude),
             (self.shrink_factor, settings.shrink_factor),
@@ -447,6 +453,7 @@ class AutoLockConfigDialog(QDialog):
     def settings(self) -> AutoLockSettings:
         return AutoLockSettings(
             strategy=str(self.strategy_combo.currentData() or "hybrid"),
+            search_frequency=self.search_frequency.value(),
             wide_amplitude=self.wide_amplitude.value(),
             min_amplitude=self.min_amplitude.value(),
             shrink_factor=self.shrink_factor.value(),
@@ -466,6 +473,7 @@ class AutoLockConfigDialog(QDialog):
     def _settings_payload(self, settings: AutoLockSettings) -> dict[str, object]:
         return {
             "strategy": str(settings.strategy),
+            "search_frequency": float(settings.search_frequency),
             "wide_amplitude": float(settings.wide_amplitude),
             "min_amplitude": float(settings.min_amplitude),
             "shrink_factor": float(settings.shrink_factor),
@@ -486,6 +494,7 @@ class AutoLockConfigDialog(QDialog):
         defaults = AutoLockSettings()
         return AutoLockSettings(
             strategy=str(payload.get("strategy", defaults.strategy)),
+            search_frequency=float(payload.get("search_frequency", defaults.search_frequency)),
             wide_amplitude=float(payload.get("wide_amplitude", defaults.wide_amplitude)),
             min_amplitude=float(payload.get("min_amplitude", defaults.min_amplitude)),
             shrink_factor=float(payload.get("shrink_factor", defaults.shrink_factor)),

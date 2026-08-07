@@ -34,6 +34,7 @@ class AutoLockController:
         self._ready_started = False
         self._probe_previous: tuple[float, float] | None = None
         self._offset_to_peak_gain: float | None = None
+        self._frames_to_skip = 0
 
     @property
     def is_running(self) -> bool:
@@ -95,6 +96,7 @@ class AutoLockController:
         self._log(
             "algorithm config updated: "
             f"strategy={self._strategy.key}, "
+            f"search_frequency={settings.search_frequency:.3f}, "
             f"wide={settings.wide_amplitude:.6f}, min={settings.min_amplitude:.6f}, "
             f"offset_step={settings.offset_step:.6f}, "
             f"peak_tol={settings.peak_center_tolerance:.4f}, "
@@ -154,6 +156,7 @@ class AutoLockController:
         self._center_stable = 0
         self._offset_to_peak_gain = None
         self._probe_previous = None
+        self._frames_to_skip = 0
         self._start_offset = float(self.owner.snapshot.sc_offset)
         self._current_offset = self._start_offset
         self._current_amplitude = float(self.owner.snapshot.sc_amplitude)
@@ -163,6 +166,21 @@ class AutoLockController:
         self.owner.set_operation_busy(False)
         self._log("one-click AutoLock started")
         self._set_phase("prepare")
+        target_frequency = self._settings.search_frequency
+        if abs(target_frequency - self._current_scan_frequency()) > 1e-6:
+            self._submit_device(
+                lambda value=target_frequency: self.owner.service.set_sc_frequency(value),
+                self._after_search_frequency_written,
+                f"set fast Scan Frequency {target_frequency:.3f} Hz",
+            )
+            return
+        self._after_search_frequency_written(self.owner.snapshot)
+
+    def _after_search_frequency_written(self, snapshot) -> None:
+        if not self._running:
+            return
+        self.owner.publish_snapshot(snapshot)
+        self._arm_transition_skip()
         if not self.owner.snapshot.sc_enabled:
             self._submit_device(lambda: self.owner.service.set_sc_enabled(True), self._after_scan_enabled, "enable Scan")
             return
@@ -190,6 +208,10 @@ class AutoLockController:
         if self.window is not None:
             self.window.render_frame(frame, analysis)
         if self._running:
+            if self._frames_to_skip > 0:
+                self._frames_to_skip -= 1
+                self._log(f"discard transition frame; remaining={self._frames_to_skip}")
+                return
             self._advance_algorithm(analysis)
 
     def _after_scan_enabled(self, snapshot) -> None:
@@ -215,6 +237,7 @@ class AutoLockController:
         self.owner.publish_snapshot(snapshot)
         self._current_amplitude = float(snapshot.sc_amplitude)
         self._last_good_amplitude = self._current_amplitude
+        self._arm_transition_skip()
         self._set_phase("coarse_search")
         self.start_preview()
 
@@ -311,36 +334,27 @@ class AutoLockController:
             return
         self._ready_started = True
         self._set_phase("ready")
-        self._log(
-            f"Ready for FALC: Scan Offset={self._current_offset:.6f}, "
-            f"Scan Amplitude={self._current_amplitude:.6f}. Closing Scan before FALC enable."
-        )
-        self._submit_device(lambda: self.owner.service.set_sc_enabled(False), self._after_scan_disabled_for_falc, "disable Scan")
-
-    def _after_scan_disabled_for_falc(self, snapshot) -> None:
-        self.owner.publish_snapshot(snapshot)
-        if snapshot.falc1 is None:
+        snapshot = self.owner.snapshot
+        if snapshot is None or snapshot.falc1 is None:
             self._log("FALC module is not available; cannot auto-enable FALC")
             self.stop(silent=True)
             return
         path = int(snapshot.falc1.path_selection)
-        if path == 0:
+        if path not in (1, 2, 3):
             self._log("FALC Path Selection is None; cannot auto-enable FALC")
             self.stop(silent=True)
             return
+        self._log(
+            f"Ready for FALC: Scan Offset={self._current_offset:.6f}, "
+            f"Scan Amplitude={self._current_amplitude:.6f}. "
+            f"Stopping Scan and engaging configured FALC Path Selection={path}."
+        )
         self._set_phase("enable_falc")
-        self._log(f"enabling FALC by current Path Selection={path}")
-        if path == 1:
-            self._submit_device(lambda: self.owner.service.set_falc1_unlim_enabled(True), self._after_falc_enabled, "enable FALC Unlim")
-            return
-        if path == 2:
-            self._submit_device(lambda: self.owner.service.set_falc1_main_enabled(True), self._after_falc_enabled, "enable FALC Main")
-            return
-        self._submit_device(lambda: self.owner.service.set_falc1_unlim_enabled(True), self._after_unlim_enabled_for_falc, "enable FALC Unlim")
-
-    def _after_unlim_enabled_for_falc(self, snapshot) -> None:
-        self.owner.publish_snapshot(snapshot)
-        self._submit_device(lambda: self.owner.service.set_falc1_main_enabled(True), self._after_falc_enabled, "enable FALC Main")
+        self._submit_device(
+            self.owner.service.engage_falc1_configured_paths,
+            self._after_falc_enabled,
+            "engage configured FALC paths",
+        )
 
     def _after_falc_enabled(self, snapshot) -> None:
         self.owner.publish_snapshot(snapshot)
@@ -359,6 +373,7 @@ class AutoLockController:
     def _after_offset_written(self, snapshot) -> None:
         self.owner.publish_snapshot(snapshot)
         self._current_offset = float(snapshot.sc_offset)
+        self._arm_transition_skip()
 
     def _write_amplitude(self, value: float, reason: str) -> None:
         self._log(f"{reason}: Scan Amplitude {self._current_amplitude:.6f}->{value:.6f}")
@@ -367,6 +382,15 @@ class AutoLockController:
     def _after_amplitude_written(self, snapshot) -> None:
         self.owner.publish_snapshot(snapshot)
         self._current_amplitude = float(snapshot.sc_amplitude)
+        self._arm_transition_skip()
+
+    def _arm_transition_skip(self) -> None:
+        # 参数写入后的第一帧可能跨越新旧扫描周期，不能用于下一步判断。
+        self._frames_to_skip = max(self._frames_to_skip, 1)
+
+    def _current_scan_frequency(self) -> float:
+        snapshot = self.owner.snapshot
+        return float(snapshot.sc_frequency) if snapshot is not None else 0.0
 
     def _submit_device(self, fn, on_success, description: str) -> None:
         if not self._running and "FALC" not in description:
@@ -397,8 +421,8 @@ class AutoLockController:
         problems: list[str] = []
         if int(snapshot.sc_output_channel) != 50:
             problems.append(t["auto_lock_scan_invalid_output"].format(value=snapshot.sc_output_channel))
-        if abs(float(snapshot.sc_frequency) - 1.0) > 0.05:
-            problems.append(t["auto_lock_scan_invalid_frequency"].format(value=snapshot.sc_frequency))
+        if not math.isfinite(float(self._settings.search_frequency)) or self._settings.search_frequency <= 0:
+            problems.append(t["auto_lock_scan_invalid_frequency"].format(value=self._settings.search_frequency))
         if int(snapshot.sc_signal_type) != 1:
             problems.append(t["auto_lock_scan_invalid_shape"].format(value=snapshot.sc_signal_type))
         if not problems:

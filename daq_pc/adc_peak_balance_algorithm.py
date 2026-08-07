@@ -8,6 +8,8 @@ import numpy as np
 
 
 Polarity = Literal["auto", "positive", "negative"]
+PC_VOLTAGE_MIN = -1.0
+PC_VOLTAGE_MAX = 140.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,9 +29,9 @@ class PeakBalanceSettings:
     min_prominence_codes: float = 50.0
     noise_sigma: float = 6.0
     carrier_dominance_ratio: float = 2.0
-    offset_step: float = 0.01
+    offset_step: float = 0.05
     min_offset_step: float = 0.001
-    max_offset_deviation: float = 0.2
+    max_offset_deviation: float = 0.5
     shrink_ratio: float = 0.75
     target_amplitude: float = 0.2
     max_search_amplitude_factor: float = 2.0
@@ -37,6 +39,17 @@ class PeakBalanceSettings:
     safety_margin: float = 0.25
     balance_tolerance: float = 0.05
     stable_windows: int = 3
+    search_tolerance: float = 0.08
+    search_windows: int = 2
+    prediction_gain: float = 0.8
+    max_model_corrections: int = 2
+    final_local_max_distance: float = 0.009
+    final_fallback_step: float = 0.01
+    final_fallback_max_distance: float = 0.09
+    final_local_entry_tolerance: float = 0.15
+    search_frequency_hz: float = 10.0
+    initial_search_amplitude: float = 2.5
+    initial_offset_search_step: float = 1.0
     coarse_boundary: float = 2.0
     medium_boundary: float = 1.0
     fine_boundary: float = 0.5
@@ -75,15 +88,34 @@ class PeakBalanceSettings:
             raise ValueError("最小幅度保护比例必须位于0到1之间")
         if self.target_amplitude <= 0:
             raise ValueError("最终扫频范围目标必须大于0")
+        if self.initial_search_amplitude < self.target_amplitude:
+            raise ValueError("初始化扫频范围不能小于最终扫频范围目标")
+        if self.initial_offset_search_step <= 0:
+            raise ValueError("初始化无峰Offset步长必须大于0")
         if not 1.0 <= self.max_search_amplitude_factor <= 10.0:
             raise ValueError("无峰最大扩幅倍数必须位于1到10之间")
         if self.carrier_dominance_ratio <= 1.0:
             raise ValueError("00模/次峰强度比必须大于1")
         if not 0.0 < self.balance_tolerance < 0.5:
             raise ValueError("峰间隔容差必须位于0到0.5之间")
-        if not (self.coarse_boundary > self.medium_boundary
-                > self.fine_boundary > self.target_amplitude):
-            raise ValueError("阶梯幅度边界必须满足：宽扫>中扫>细扫>最终目标")
+        if not 0.0 < self.search_tolerance < 0.5:
+            raise ValueError("快速寻峰允许不均匀度必须位于0到0.5之间")
+        if not 0.0 < self.final_local_entry_tolerance < 0.5:
+            raise ValueError("最终邻域搜索入口必须位于0到0.5之间")
+        if self.final_local_entry_tolerance < self.balance_tolerance:
+            raise ValueError("最终邻域搜索入口不能小于最终验收门槛")
+        if not 0.0 < self.prediction_gain <= 1.0:
+            raise ValueError("理论预测增益必须位于0到1之间")
+        if not 0 <= int(self.max_model_corrections) <= 10:
+            raise ValueError("模型最大修正次数必须位于0到10之间")
+        if self.final_local_max_distance < self.min_offset_step:
+            raise ValueError("最终邻域最大距离不能小于Offset最小步长")
+        if self.final_fallback_step <= self.min_offset_step:
+            raise ValueError("最终扩展搜索步长必须大于Offset最小步长")
+        if self.final_fallback_max_distance < self.final_fallback_step:
+            raise ValueError("最终扩展搜索范围不能小于最终扩展搜索步长")
+        if not 0.01 <= self.search_frequency_hz <= 1000.0:
+            raise ValueError("快速扫频频率必须位于0.01到1000 Hz之间")
         for value in (
             self.coarse_tolerance, self.medium_tolerance,
             self.fine_tolerance, self.narrow_tolerance,
@@ -96,9 +128,6 @@ class PeakBalanceSettings:
         ):
             if value < self.min_offset_step:
                 raise ValueError("各阶段Offset步长不能小于Offset绝对最小步长")
-        if not (self.coarse_step >= self.medium_step >= self.fine_step
-                >= self.narrow_step >= self.final_step):
-            raise ValueError("Offset步长必须随缩幅阶段逐级减小或保持不变")
         for value in (
             self.coarse_shrink, self.medium_shrink,
             self.fine_shrink, self.narrow_shrink,
@@ -106,8 +135,7 @@ class PeakBalanceSettings:
             if not 0.2 <= value < 1.0:
                 raise ValueError("各阶段缩幅倍率必须位于0.2到1之间")
         for value in (
-            self.coarse_windows, self.medium_windows,
-            self.fine_windows, self.narrow_windows, self.stable_windows,
+            self.search_windows, self.stable_windows,
         ):
             if not 1 <= int(value) <= 10:
                 raise ValueError("各阶段连续确认窗口必须位于1到10之间")
@@ -117,27 +145,13 @@ class PeakBalanceSettings:
         amplitude = abs(float(amplitude))
         if amplitude <= amplitude_floor * 1.001:
             return AmplitudeStage(
-                "最终验收", self.balance_tolerance, self.final_step,
+                "最终锁定", self.balance_tolerance, self.min_offset_step,
                 self.min_offset_step, None, self.stable_windows,
             )
-        if amplitude > self.coarse_boundary:
-            return AmplitudeStage(
-                "宽扫", self.coarse_tolerance, self.coarse_step,
-                self.medium_step, self.coarse_shrink, self.coarse_windows,
-            )
-        if amplitude > self.medium_boundary:
-            return AmplitudeStage(
-                "中扫", self.medium_tolerance, self.medium_step,
-                self.fine_step, self.medium_shrink, self.medium_windows,
-            )
-        if amplitude > self.fine_boundary:
-            return AmplitudeStage(
-                "细扫", self.fine_tolerance, self.fine_step,
-                self.narrow_step, self.fine_shrink, self.fine_windows,
-            )
+        direct_ratio = amplitude_floor / max(amplitude, 1e-12)
         return AmplitudeStage(
-            "窄扫", self.narrow_tolerance, self.narrow_step,
-            self.min_offset_step, self.narrow_shrink, self.narrow_windows,
+            "快速寻峰", self.search_tolerance, self.offset_step,
+            self.min_offset_step, direct_ratio, self.search_windows,
         )
 
 
@@ -190,24 +204,61 @@ class ControlAction:
 
 
 def _robust_noise(values: np.ndarray) -> tuple[float, float]:
-    baseline = float(np.median(values))
-    noise = float(np.median(np.abs(values - baseline)) * 1.4826)
+    # At 0.2 Vpp the carrier can occupy much of every scan period.  A global
+    # MAD then mistakes the physical line shape for noise and raises the peak
+    # threshold above the signal.  Estimate the detector floor from the lower
+    # fifth of the envelope so the same criterion remains usable after the
+    # one-step SEARCH→FINAL amplitude change.
+    cutoff = float(np.percentile(values, 20.0))
+    floor = values[values <= cutoff]
+    baseline = float(np.median(floor))
+    noise = float(np.median(np.abs(floor - baseline)) * 1.4826)
     return baseline, noise
 
 
 def _peak_groups(values: np.ndarray, valid: np.ndarray, threshold: float,
-                 bin_seconds: float):
-    mask = valid & (values >= threshold)
-    edges = np.diff(np.pad(mask.astype(np.int8), (1, 1)))
-    starts = np.flatnonzero(edges == 1)
-    stops = np.flatnonzero(edges == -1)
+                 bin_seconds: float, min_distance_bins: int):
+    """Return separated local maxima and their half-prominence widths.
+
+    A narrow scan can keep a broad resonance above one absolute threshold
+    through a triangle-wave turning point.  Threshold-island grouping then
+    joins the forward and reverse crossings into one peak.  Local maxima plus
+    non-maximum suppression retains the two physical crossing times even in
+    that case, while ``min_distance_bins`` rejects several noisy maxima on the
+    same line shape.
+    """
+    if values.size < 3:
+        return []
+    candidates = np.flatnonzero(
+        valid[1:-1]
+        & (values[1:-1] >= threshold)
+        & (values[1:-1] >= values[:-2])
+        & (values[1:-1] > values[2:])
+    ) + 1
+    if candidates.size == 0:
+        return []
+
+    selected: list[int] = []
+    for index in candidates[np.argsort(values[candidates])[::-1]]:
+        index = int(index)
+        if all(abs(index - previous) >= min_distance_bins
+               for previous in selected):
+            selected.append(index)
+
     peaks = []
-    for start, stop in zip(starts, stops):
-        if stop <= start:
-            continue
-        local = values[start:stop]
-        index = int(start + np.argmax(local))
-        peaks.append((index, float(values[index]), (stop - start) * bin_seconds))
+    for index in sorted(selected):
+        half_height = threshold + 0.5 * (float(values[index]) - threshold)
+        start = index
+        while (start > 0 and valid[start - 1]
+               and values[start - 1] >= half_height):
+            start -= 1
+        stop = index + 1
+        while (stop < values.size and valid[stop]
+               and values[stop] >= half_height):
+            stop += 1
+        peaks.append((
+            index, float(values[index]), max(1, stop - start) * bin_seconds,
+        ))
     return peaks
 
 
@@ -254,26 +305,12 @@ def analyze_carrier(history, settings: PeakBalanceSettings,
         float(settings.min_prominence_codes),
         float(settings.noise_sigma) * max(noise, 1e-9),
     )
+    period = 1.0 / float(scan_frequency)
+    merge_bins = max(1, int(round(0.12 * period / history.bin_seconds)))
     groups = _peak_groups(
         values, valid, baseline + prominence_threshold,
-        float(history.bin_seconds),
+        float(history.bin_seconds), merge_bins,
     )
-    period = 1.0 / float(scan_frequency)
-    # Noise can split one broad peak top into two threshold islands. Merge
-    # islands that are far too close to be separate scan crossings before
-    # comparing the carrier family with sidebands.
-    merged = []
-    merge_bins = max(1, int(round(0.12 * period / history.bin_seconds)))
-    for peak in groups:
-        if merged and peak[0] - merged[-1][0] < merge_bins:
-            previous = merged[-1]
-            stronger = peak if peak[1] > previous[1] else previous
-            merged[-1] = (
-                stronger[0], stronger[1], previous[2] + peak[2]
-            )
-        else:
-            merged.append(peak)
-    groups = merged
     duration = (indices[-1] - indices[0] + 1) * float(history.bin_seconds)
     expected_carrier_peaks = max(4, int(round(2.0 * duration / period)))
     if len(groups) < 4:
@@ -363,6 +400,7 @@ class PeakBalanceEngine:
         self.state = "idle"
         self.start_offset = self.current_offset = 0.0
         self.start_amplitude = self.current_amplitude = 0.0
+        self.previous_amplitude = 0.0
         self.last_good_amplitude = 0.0
         self.fail_amplitude: float | None = None
         self.fingerprint: CarrierFingerprint | None = None
@@ -379,6 +417,7 @@ class PeakBalanceEngine:
         self.finalized = False
         self.ambiguous_count = 0
         self.missing_count = 0
+        self.startup_search_attempt = 0
         self.trial_origin_offset: float | None = None
         self.trial_origin_error: float | None = None
         self.trial_direction = 1.0
@@ -389,6 +428,20 @@ class PeakBalanceEngine:
         self.neutral_count = 0
         self.boundary_directions: set[int] = set()
         self.last_decision = ""
+        self.origin_offset: float | None = None
+        self.origin_error: float | None = None
+        self.predicted_distance = 0.0
+        self.physical_direction: int | None = None
+        self.model_correction_count = 0
+        self.model_reference_error: float | None = None
+        self.full_prediction_retried = False
+        self.local_origin_offset: float | None = None
+        self.local_candidates: list[float] = []
+        self.local_best_offset = 0.0
+        self.local_best_error: float | None = None
+        self.local_search_completed = False
+        self.local_search_phase = ""
+        self.final_fallback_started = False
 
     @property
     def offset_limits(self) -> tuple[float, float]:
@@ -413,18 +466,39 @@ class PeakBalanceEngine:
             raise ValueError("启动Scan Amplitude不能为0")
         self.start_offset = self.current_offset = float(offset)
         self.start_amplitude = self.current_amplitude = abs(float(amplitude))
+        self.previous_amplitude = self.current_amplitude
         if self.settings.target_amplitude > self.start_amplitude + 1e-12:
             raise ValueError("最终扫频范围目标不能大于启动Scan Amplitude")
         self.last_good_amplitude = self.current_amplitude
         self.best_offset = self.current_offset
         self.best_error = None
         self.best_observation = None
+        self.origin_offset = None
+        self.origin_error = None
+        self.predicted_distance = 0.0
+        self.physical_direction = None
+        self.model_correction_count = 0
+        self.model_reference_error = None
+        self.full_prediction_retried = False
+        self.local_origin_offset = None
+        self.local_candidates.clear()
+        self.local_best_offset = self.current_offset
+        self.local_best_error = None
+        self.local_search_completed = False
+        self.local_search_phase = ""
+        self.final_fallback_started = False
+        self.finalized = False
+        self.stable_count = 0
+        self.startup_search_attempt = 0
         self._clear_trial()
         self.state = "select"
 
     def sync(self, offset: float, amplitude: float) -> None:
         self.current_offset = float(offset)
-        self.current_amplitude = abs(float(amplitude))
+        amplitude = abs(float(amplitude))
+        if abs(amplitude - self.current_amplitude) > 1e-12:
+            self.previous_amplitude = self.current_amplitude
+        self.current_amplitude = amplitude
 
     def set_offset_step(self, step: float) -> bool:
         """Switch the amplitude-dependent tuning gear without carrying old probes."""
@@ -465,12 +539,31 @@ class PeakBalanceEngine:
         self._clear_trial()
 
     def reset_after_amplitude_change(self) -> None:
-        """Start a fresh direction experiment for the new scan span."""
+        """Preserve the learned Offset direction across the SEARCH→FINAL jump."""
+        if (self.fingerprint is not None and self.current_amplitude > 1e-12
+                and self.previous_amplitude > 1e-12):
+            # For the same spectral peak, its temporal width scales roughly
+            # inversely with triangle-scan amplitude.  Rebase the fingerprint
+            # before validating the first narrow-window observation.
+            self.fingerprint.width_seconds *= (
+                self.previous_amplitude / self.current_amplitude
+            )
         self.best_offset = self.current_offset
         self.best_error = None
         self.best_observation = None
         self.recovery_attempt = 0
         self.recovery_origin = None
+        if self.state == "final_shrink":
+            self.stable_count = 0
+            self.local_origin_offset = self.current_offset
+            self.local_candidates.clear()
+            self.local_best_offset = self.current_offset
+            self.local_best_error = None
+            self.local_search_completed = False
+            self.local_search_phase = ""
+            self.final_fallback_started = False
+            self.state = "final_verify"
+            return
         self.reset_direction_experiment()
 
     def reset_after_frequency_change(self) -> None:
@@ -480,6 +573,7 @@ class PeakBalanceEngine:
         self.best_observation = None
         self.recovery_attempt = 0
         self.recovery_origin = None
+        self.physical_direction = None
         self.reset_direction_experiment()
 
     def _remember_best(self, observation: PeakObservation) -> None:
@@ -495,8 +589,15 @@ class PeakBalanceEngine:
             self.state = state
         return ControlAction(kind, value, reason, self.state)
 
-    def _offset_action(self, target: float, reason: str, state=None):
-        low, high = self.offset_limits
+    def _offset_action(
+        self, target: float, reason: str, state=None, *,
+        physical_bounds: bool = False,
+    ):
+        if physical_bounds:
+            low = PC_VOLTAGE_MIN + 0.5 * self.current_amplitude
+            high = PC_VOLTAGE_MAX - 0.5 * self.current_amplitude
+        else:
+            low, high = self.offset_limits
         target = float(target)
         requested_direction = 1 if target > self.current_offset else -1
         if target < low - 1e-12 or target > high + 1e-12:
@@ -597,20 +698,432 @@ class PeakBalanceEngine:
             "center",
         )
 
-    def _begin_centering(self, observation: PeakObservation):
+    @staticmethod
+    def theoretical_distance(amplitude: float, balance_error: float) -> float:
+        """Triangle-scan geometry: distance from center = A(Vpp)/2 × E."""
+        return 0.5 * abs(float(amplitude)) * abs(float(balance_error))
+
+    def _begin_centering(self, observation: PeakObservation) -> ControlAction:
+        """Start the fast model path with exactly one positive direction probe."""
+        self.origin_offset = self.current_offset
+        self.origin_error = observation.balance_error
+        self.predicted_distance = self.theoretical_distance(
+            self.current_amplitude, observation.balance_error
+        )
+        self.model_reference_error = observation.balance_error
+        self.model_correction_count = 0
+        self.physical_direction = None
+        self.full_prediction_retried = False
         self.previous_error = observation.balance_error
         self._remember_best(observation)
         self.stable_count = 0
         return self._start_trial(
-            observation, self.direction, self.step_size,
-            "试探Offset响应方向", "probe",
+            observation, 1.0, self.settings.offset_step,
+            f"理论距离={self.predicted_distance:.6f} V，单次正向试探确定物理方向",
+            "search_direction_probe", origin_offset=self.origin_offset,
+            origin_error=self.origin_error,
+        )
+
+    def _begin_legacy_centering(
+        self, observation: PeakObservation, reason: str
+    ) -> ControlAction:
+        """Fallback keeps the proven bounded probe/reverse/halve search."""
+        self.previous_error = observation.balance_error
+        self._remember_best(observation)
+        self.stable_count = 0
+        self.physical_direction = None
+        return self._start_trial(
+            observation, self.direction, max(self.step_size, self.settings.min_offset_step),
+            reason, "probe",
+        )
+
+    def _search_acceptance(self, observation: PeakObservation) -> ControlAction:
+        self.stable_count += 1
+        self.state = "search_accept"
+        if self.stable_count < self.settings.search_windows:
+            return self._action(
+                "none", None,
+                f"快速寻峰居中确认 {self.stable_count}/{self.settings.search_windows}",
+            )
+        self.stable_count = 0
+        self.last_good_amplitude = self.current_amplitude
+        return self._action(
+            "amplitude", self.amplitude_floor,
+            f"快速寻峰通过；Amplitude从{self.current_amplitude:.6f} Vpp直接缩到"
+            f"{self.amplitude_floor:.6f} Vpp",
+            "final_shrink",
+        )
+
+    def _startup_offset_search_action(self) -> ControlAction:
+        """Search symmetrically around the startup Offset without changing A."""
+        final_stage = self.current_stage.shrink_ratio is None
+        step = (
+            self.settings.min_offset_step if final_stage
+            else self.settings.initial_offset_search_step
+        )
+        search_span = (
+            min(
+                self.settings.max_offset_deviation,
+                self.settings.final_local_max_distance,
+            )
+            if final_stage else self.settings.max_offset_deviation
+        )
+        if not final_stage:
+            # Manual.md specifies the PC output range as -1 .. +140 V. Keep
+            # the complete triangle (Offset ± A/2) inside that range while
+            # performing the user-requested 1 V symmetric initialization scan.
+            low = PC_VOLTAGE_MIN + 0.5 * self.current_amplitude
+            high = PC_VOLTAGE_MAX - 0.5 * self.current_amplitude
+            max_radius_index = int(np.ceil(
+                max(self.start_offset - low, high - self.start_offset)
+                / step - 1e-12
+            ))
+            while self.startup_search_attempt < 2 * max_radius_index:
+                radius_index = self.startup_search_attempt // 2 + 1
+                sign = 1.0 if self.startup_search_attempt % 2 == 0 else -1.0
+                self.startup_search_attempt += 1
+                target = self.start_offset + sign * radius_index * step
+                if not low <= target <= high:
+                    continue
+                self.previous_offset = self.current_offset
+                return self._action(
+                    "offset", target,
+                    f"初始化范围无透射峰；保持Amplitude="
+                    f"{self.current_amplitude:.6f} Vpp，以{step:.6f} V为单位"
+                    f"围绕初始化Offset搜索到{sign * radius_index * step:+.6f}",
+                    "startup_offset_search",
+                )
+            return self._action(
+                "stop", None,
+                f"已在PC Voltage物理范围[{low:.3f}, {high:.3f}]内完成"
+                "初始化Offset搜索，仍未找到透射峰",
+                "fault",
+            )
+        max_radius_index = int(np.ceil(search_span / step - 1e-12))
+        radius_index = self.startup_search_attempt // 2 + 1
+        if radius_index > max_radius_index:
+            self.local_origin_offset = self.start_offset
+            self.local_best_offset = self.start_offset
+            self.local_best_error = None
+            self.local_search_phase = "fine"
+            return self._begin_final_fallback_search(
+                "最终幅度启动时0.001 V精细邻域未找到透射峰"
+            )
+        sign = 1.0 if self.startup_search_attempt % 2 == 0 else -1.0
+        distance = min(
+            radius_index * step, search_span
+        )
+        self.startup_search_attempt += 1
+        target = self.start_offset + sign * distance
+        return self._offset_action(
+            target,
+            f"启动窗口无透射峰；保持Amplitude={self.current_amplitude:.6f} Vpp，"
+            f"围绕启动Offset以{step:.6f} V步长左右搜索到"
+            f"{sign * distance:+.6f}",
+            "startup_offset_search",
+        )
+
+    def _advance_invalid_final_candidate(self, reason: str) -> ControlAction:
+        """Treat an invalid final-window sample as a rejected grid point."""
+        if self.local_candidates:
+            target = self.local_candidates.pop(0)
+            return self._offset_action(
+                target,
+                f"当前{self._final_search_step():.3f} V候选无效（{reason}），"
+                "继续比较下一候选",
+                "final_local_search",
+            )
+        if self.local_search_phase == "fine":
+            return self._begin_final_fallback_search(
+                f"0.001 V精细邻域没有有效结果（{reason}）"
+            )
+        self.local_search_completed = True
+        if (self.local_best_error is not None
+                and abs(self.current_offset - self.local_best_offset) > 1e-12):
+            return self._offset_action(
+                self.local_best_offset,
+                "最终邻域候选已遍历；恢复最后一个有效最佳Offset",
+                "final_local_return",
+            )
+        return self._action(
+            "stop", None,
+            f"最终0.01 V扩展Offset搜索已遍历至"
+            f"±{self.settings.final_fallback_max_distance:.3f} V，"
+            "仍未得到可验收的有效透射峰；保持最终Amplitude不变",
+            "fault",
+        )
+
+    def _model_target(self, origin: float, signed_move: float) -> float | None:
+        low = PC_VOLTAGE_MIN + 0.5 * self.current_amplitude
+        high = PC_VOLTAGE_MAX - 0.5 * self.current_amplitude
+        target = origin + signed_move
+        if target < low - 1e-12 or target > high + 1e-12:
+            return None
+        return target
+
+    def _retry_full_prediction(self, reason: str) -> ControlAction | None:
+        if (self.full_prediction_retried or self.origin_offset is None
+                or self.physical_direction is None):
+            return None
+        target = self._model_target(
+            self.origin_offset,
+            self.physical_direction * self.predicted_distance,
+        )
+        self.full_prediction_retried = True
+        if target is None or abs(target - self.current_offset) < 1e-12:
+            return None
+        return self._offset_action(
+            target,
+            f"{reason}；直接尝试原始Offset加1.00×完整理论距离",
+            "search_verify",
+            physical_bounds=True,
+        )
+
+    def _handle_direction_probe(self, observation: PeakObservation) -> ControlAction:
+        reference = self.origin_error
+        origin = self.origin_offset
+        if reference is None or origin is None:
+            return self._begin_legacy_centering(observation, "模型基准丢失，进入旧搜索")
+        margin = self._decision_margin(reference)
+        if observation.balance_error < reference - margin:
+            self.physical_direction = 1
+        elif observation.balance_error > reference + margin:
+            self.physical_direction = -1
+        else:
+            self.neutral_count += 1
+            if self.neutral_count < 2:
+                return self._action(
+                    "none", None,
+                    "方向试探变化落在判定死区，等待第二个独立窗口",
+                )
+            return self._begin_legacy_centering(
+                observation, "方向试探无法可靠判定，进入旧搜索"
+            )
+        move = self.settings.prediction_gain * self.predicted_distance
+        target = self._model_target(origin, self.physical_direction * move)
+        if target is None or abs(target - self.current_offset) < 1e-12:
+            return self._begin_legacy_centering(
+                observation, "理论预测触及Offset安全边界，进入旧搜索"
+            )
+        self.model_reference_error = reference
+        self.model_correction_count = 0
+        self._clear_trial()
+        return self._offset_action(
+            target,
+            f"方向={'+' if self.physical_direction > 0 else '-'}；从原始Offset="
+            f"{origin:.6f}直接跳转理论距离×{self.settings.prediction_gain:.2f}",
+            "search_verify",
+            physical_bounds=True,
+        )
+
+    def _handle_model_verify(self, observation: PeakObservation) -> ControlAction:
+        if observation.balance_error <= self.settings.search_tolerance:
+            return self._search_acceptance(observation)
+        reference = self.model_reference_error
+        margin = self._decision_margin(reference or observation.balance_error)
+        if (self.physical_direction is None or reference is None
+                or observation.balance_error >= reference - margin
+                or self.model_correction_count >= self.settings.max_model_corrections):
+            return self._begin_legacy_centering(
+                observation, "理论预测未继续改善，进入旧搜索"
+            )
+        distance = self.theoretical_distance(
+            self.current_amplitude, observation.balance_error
+        )
+        move = self.settings.prediction_gain * distance
+        target = self._model_target(
+            self.current_offset, self.physical_direction * move
+        )
+        if target is None or abs(target - self.current_offset) < 1e-12:
+            return self._begin_legacy_centering(
+                observation, "模型残差修正触及安全边界，进入旧搜索"
+            )
+        self.model_reference_error = observation.balance_error
+        self.model_correction_count += 1
+        return self._offset_action(
+            target,
+            f"按剩余不均匀度直接修正Offset（第{self.model_correction_count}/"
+            f"{self.settings.max_model_corrections}次）",
+            "search_model_correct",
+            physical_bounds=True,
+        )
+
+    def _begin_final_acceptance(self, observation: PeakObservation) -> ControlAction:
+        self.stable_count = 1
+        self.state = "final_accept"
+        if self.stable_count >= self.settings.stable_windows:
+            self.finalized = True
+            return self._action(
+                "none", None, "最终窗口验收通过，允许FALC接管", "track"
+            )
+        return self._action(
+            "none", None,
+            f"最终验收 {self.stable_count}/{self.settings.stable_windows}",
+        )
+
+    def _begin_final_local_search(
+        self, observation: PeakObservation | None = None, *, reason: str = ""
+    ) -> ControlAction:
+        origin = self.current_offset
+        step = self.settings.min_offset_step
+        candidates = self._final_offset_candidates(
+            origin, step, self.settings.final_local_max_distance
+        )
+        self.local_origin_offset = origin
+        self.local_candidates = candidates
+        self.local_best_offset = origin
+        self.local_best_error = (
+            observation.balance_error
+            if observation is not None and observation.valid else None
+        )
+        self.local_search_completed = False
+        self.local_search_phase = "fine"
+        self.final_fallback_started = False
+        self.stable_count = 0
+        if not self.local_candidates:
+            return self._action("stop", None, "最终0.001 V邻域没有可用候选", "fault")
+        target = self.local_candidates.pop(0)
+        prefix = f"{reason}；" if reason else ""
+        return self._offset_action(
+            target,
+            f"{prefix}保持Amplitude={self.current_amplitude:.6f} Vpp，开始最终"
+            f"±{self.settings.final_local_max_distance:.3f} V邻域搜索，"
+            f"固定步长={step:.3f} V",
+            "final_local_search",
+        )
+
+    def _final_offset_candidates(
+        self, origin: float, step: float, span: float
+    ) -> list[float]:
+        configured_low, configured_high = self.offset_limits
+        low = max(
+            configured_low,
+            PC_VOLTAGE_MIN + 0.5 * self.current_amplitude,
+        )
+        high = min(
+            configured_high,
+            PC_VOLTAGE_MAX - 0.5 * self.current_amplitude,
+        )
+        count = int(float(span) / float(step) + 1e-9)
+        candidates: list[float] = []
+        for index in range(1, count + 1):
+            for sign in (1.0, -1.0):
+                candidate = float(origin) + sign * index * float(step)
+                if low <= candidate <= high:
+                    candidates.append(candidate)
+        return candidates
+
+    def _final_search_step(self) -> float:
+        if self.local_search_phase == "fallback":
+            return self.settings.final_fallback_step
+        return self.settings.min_offset_step
+
+    def _begin_final_fallback_search(self, reason: str) -> ControlAction:
+        """Keep final amplitude and expand Offset search with a 10 mV grid."""
+        origin = (
+            self.local_origin_offset
+            if self.local_origin_offset is not None else self.current_offset
+        )
+        step = self.settings.final_fallback_step
+        self.local_candidates = self._final_offset_candidates(
+            origin, step, self.settings.final_fallback_max_distance
+        )
+        self.local_search_phase = "fallback"
+        self.final_fallback_started = True
+        self.local_search_completed = False
+        if not self.local_candidates:
+            return self._action(
+                "stop", None,
+                f"{reason}；最终0.01 V扩展搜索没有可用Offset候选，"
+                "保持最终Amplitude不变",
+                "fault",
+            )
+        target = self.local_candidates.pop(0)
+        return self._offset_action(
+            target,
+            f"{reason}；保持Amplitude={self.current_amplitude:.6f} Vpp，"
+            f"以精细搜索中心Offset={origin:.6f} V为基准，改用"
+            f"{step:.3f} V步长左右扩展搜索至"
+            f"±{self.settings.final_fallback_max_distance:.3f} V",
+            "final_local_search",
+        )
+
+    def _handle_invalid_final_window(self, reason: str) -> ControlAction:
+        """At final amplitude, search Offset locally without widening scan."""
+        if self.state == "final_local_search":
+            return self._advance_invalid_final_candidate(reason)
+        if self.local_search_completed:
+            return self._action(
+                "stop", None,
+                f"最终Offset扩展搜索已完成，当前窗口仍无效（{reason}）；"
+                f"保持Amplitude={self.current_amplitude:.6f} Vpp，不恢复大扫幅",
+                "fault",
+            )
+        return self._begin_final_local_search(
+            reason=f"最终幅度首窗无效（{reason}）"
+        )
+
+    def _handle_final_local_search(
+        self, observation: PeakObservation
+    ) -> ControlAction:
+        if (self.local_best_error is None
+                or observation.balance_error < self.local_best_error):
+            self.local_best_error = observation.balance_error
+            self.local_best_offset = self.current_offset
+        if observation.balance_error <= self.settings.balance_tolerance:
+            return self._begin_final_acceptance(observation)
+        if self.local_candidates:
+            target = self.local_candidates.pop(0)
+            return self._offset_action(
+                target,
+                f"比较下一个{self._final_search_step():.3f} V离散Offset候选",
+                "final_local_search",
+            )
+        if self.local_search_phase == "fine":
+            return self._begin_final_fallback_search(
+                "0.001 V精细邻域已遍历但未达到最终标准"
+            )
+        self.local_search_completed = True
+        if abs(self.current_offset - self.local_best_offset) > 1e-12:
+            return self._offset_action(
+                self.local_best_offset,
+                f"邻域搜索完成，恢复最佳Offset；最佳不均匀度="
+                f"{(self.local_best_error or 1.0) * 100:.2f}%",
+                "final_local_return",
+            )
+        if (self.local_best_error is not None
+                and self.local_best_error <= self.settings.balance_tolerance):
+            return self._begin_final_acceptance(observation)
+        return self._action(
+            "stop", None,
+            f"最终邻域搜索最佳不均匀度={(self.local_best_error or 1.0) * 100:.2f}%"
+            "，未达到验收门槛",
+            "fault",
         )
 
     def update(self, observation: PeakObservation) -> ControlAction:
         s = self.settings
         stage = self.current_stage
+        model_states = {
+            "search_direction_probe", "search_verify",
+            "search_model_correct", "search_accept",
+        }
+        final_states = {
+            "final_verify", "final_accept", "final_local_search",
+            "final_local_return",
+        }
         if observation.ambiguous:
             self.ambiguous_count += 1
+            if self.state in final_states:
+                return self._handle_invalid_final_window(observation.reason)
+            if self.state in model_states and self.best_observation is not None:
+                retry = self._retry_full_prediction("预测位置00模候选不唯一")
+                if retry is not None:
+                    return retry
+                return self._begin_legacy_centering(
+                    self.best_observation,
+                    "模型阶段00模候选不唯一，进入旧搜索",
+                )
             if (self.state in {"probe", "center", "track"}
                     and self.best_error is not None
                     and self.trial_origin_error is not None):
@@ -625,6 +1138,8 @@ class PeakBalanceEngine:
                     "restore_amplitude",
                 )
             if self.fingerprint is None:
+                if self.current_stage.shrink_ratio is None:
+                    return self._startup_offset_search_action()
                 if self.recovery_origin is None:
                     self.recovery_origin = self.start_offset
                 return self._recovery_action(
@@ -639,6 +1154,15 @@ class PeakBalanceEngine:
         if observation.valid:
             self.ambiguous_count = 0
             self.missing_count = 0
+            if self.state == "startup_offset_search":
+                # The coarse initialization search may move by many volts.
+                # Rebase the subsequent ±max_offset_deviation fine-control
+                # safety window at the first valid transmission peak.
+                self.start_offset = self.current_offset
+                self.best_offset = self.current_offset
+                self.best_error = None
+                self.best_observation = None
+                self.state = "select"
             self._remember_best(observation)
         if self.state == "select":
             if not observation.valid:
@@ -650,26 +1174,20 @@ class PeakBalanceEngine:
                             "启动幅度未找到00模，等待第二个独立窗口复核 1/2",
                         )
                     self.missing_count = 0
-                    target = min(
-                        self.search_amplitude_ceiling,
-                        self.current_amplitude * 1.25,
-                    )
-                    if target > self.current_amplitude * 1.001:
-                        return self._action(
-                            "amplitude", target,
-                            "启动幅度未找到00模，扩大Scan Amplitude继续搜索",
-                            "select",
-                        )
-                    return self._action(
-                        "stop", None,
-                        "已达到无峰最大搜索幅度，仍未找到00模", "fault",
-                    )
+                    return self._startup_offset_search_action()
+                if stage.shrink_ratio is None:
+                    return self._startup_offset_search_action()
                 return self._action("none", None, observation.reason)
             self.fingerprint = CarrierFingerprint(
                 observation.prominence, observation.width_seconds,
                 observation.polarity,
             )
-            if observation.balance_error > stage.balance_tolerance:
+            if stage.shrink_ratio is None:
+                if observation.balance_error <= s.balance_tolerance:
+                    return self._begin_final_acceptance(observation)
+                return self._begin_final_local_search(observation)
+            ready_tolerance = stage.balance_tolerance
+            if observation.balance_error > ready_tolerance:
                 return self._begin_centering(observation)
             # A safely centered initial window may enter the stage
             # confirmation directly; a blind direction probe is unnecessary.
@@ -679,7 +1197,27 @@ class PeakBalanceEngine:
             self.state = "center"
 
         if not observation.valid:
-            if self.state in {"verify_shrink", "center", "probe", "track"}:
+            if self.state in final_states:
+                return self._handle_invalid_final_window(observation.reason)
+            if (self.state == "startup_offset_search"
+                    and observation.reason == "未找到足够的00模穿越峰"):
+                return self._startup_offset_search_action()
+            if self.state in model_states:
+                retry = self._retry_full_prediction(
+                    f"预测位置峰无效（{observation.reason}）"
+                )
+                if retry is not None:
+                    return retry
+                if self.best_observation is not None:
+                    return self._begin_legacy_centering(
+                        self.best_observation,
+                        f"模型阶段峰无效（{observation.reason}），进入旧搜索",
+                    )
+                return self._recovery_action(observation.reason)
+            if self.state in {
+                "verify_shrink", "center", "probe", "track",
+                "boundary_recover",
+            }:
                 self.recovery_attempt = 0
                 self.recovery_origin = self.current_offset
                 self.fail_amplitude = (
@@ -716,6 +1254,76 @@ class PeakBalanceEngine:
         if self.fingerprint is not None:
             self.fingerprint.update(observation)
 
+        if self.state == "boundary_recover":
+            # The safety handler has restored the best known Offset. Resume
+            # normal evaluation instead of remaining in an unhandled state.
+            self._clear_trial()
+            self.stable_count = 0
+            self.state = "center"
+
+        if self.state == "search_direction_probe":
+            return self._handle_direction_probe(observation)
+
+        if self.state in {"search_verify", "search_model_correct"}:
+            return self._handle_model_verify(observation)
+
+        if self.state == "search_accept":
+            if observation.balance_error <= s.search_tolerance:
+                return self._search_acceptance(observation)
+            self.stable_count = 0
+            if self.physical_direction is not None:
+                return self._handle_model_verify(observation)
+            return self._begin_centering(observation)
+
+        if self.state == "final_verify":
+            if observation.balance_error <= s.balance_tolerance:
+                return self._begin_final_acceptance(observation)
+            return self._begin_final_local_search(
+                observation,
+                reason=(
+                    f"一步缩幅后不均匀度={observation.balance_error * 100:.2f}%"
+                ),
+            )
+
+        if self.state == "final_local_search":
+            return self._handle_final_local_search(observation)
+
+        if self.state == "final_local_return":
+            if observation.balance_error <= s.balance_tolerance:
+                return self._begin_final_acceptance(observation)
+            return self._action(
+                "stop", None,
+                f"恢复最佳Offset后的不均匀度={observation.balance_error * 100:.2f}%"
+                "，未达到最终验收门槛",
+                "fault",
+            )
+
+        if self.state == "final_accept":
+            if observation.balance_error <= s.balance_tolerance:
+                self.stable_count += 1
+                if self.stable_count >= s.stable_windows:
+                    self.finalized = True
+                    return self._action(
+                        "none", None,
+                        f"最终验收连续{s.stable_windows}个独立窗口通过，允许FALC接管",
+                        "track",
+                    )
+                return self._action(
+                    "none", None,
+                    f"最终验收 {self.stable_count}/{s.stable_windows}",
+                )
+            self.stable_count = 0
+            if not self.local_search_completed:
+                return self._begin_final_local_search(observation)
+            return self._action(
+                "stop", None, "最终验收超差，未允许FALC接管", "fault"
+            )
+
+        if self.state == "legacy_restore":
+            return self._begin_legacy_centering(
+                observation, "已恢复大扫幅，使用旧算法慢速搜索"
+            )
+
         if self.state == "probe":
             reference = self.trial_origin_error
             if reference is None:
@@ -740,7 +1348,8 @@ class PeakBalanceEngine:
             self.state = "center"
 
         if self.state in {"center", "track"}:
-            if observation.balance_error <= stage.balance_tolerance:
+            ready_tolerance = stage.balance_tolerance
+            if observation.balance_error <= ready_tolerance:
                 self.stable_count += 1
                 self.bad_track_count = 0
                 if self.stable_count < stage.stable_windows:
@@ -757,10 +1366,7 @@ class PeakBalanceEngine:
                         "最终幅度与峰间隔连续通过，允许FALC接管", "track",
                     )
                 self.last_good_amplitude = self.current_amplitude
-                target = max(
-                    self.amplitude_floor,
-                    self.current_amplitude * stage.shrink_ratio,
-                )
+                target = self.amplitude_floor
                 if target >= self.current_amplitude * 0.999:
                     self.finalized = True
                     return self._action(
@@ -768,8 +1374,9 @@ class PeakBalanceEngine:
                         "达到最终Scan Amplitude目标并通过峰间隔复核", "track",
                     )
                 return self._action(
-                    "amplitude", target, "00模已居中，缩小Scan Amplitude",
-                    "verify_shrink",
+                    "amplitude", target,
+                    "快速寻峰已居中，Scan Amplitude一步缩到最终目标",
+                    "final_shrink",
                 )
             self.stable_count = 0
             if self.state == "track":

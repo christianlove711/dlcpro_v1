@@ -14,12 +14,12 @@ from pathlib import Path
 
 import h5py
 import numpy as np
-from PySide6.QtCore import QSettings, QThread, QTimer, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtCore import QPointF, QSettings, QThread, QTimer, Qt, Signal
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDoubleSpinBox, QFileDialog, QFrame,
     QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox,
-    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
+    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter,
     QVBoxLayout, QWidget,
 )
 
@@ -41,7 +41,7 @@ from .scan_control_window import DlcScanControlWindow
 
 PL_BOARD_IP = "192.168.20.2"
 PC_PL_IP = "192.168.20.1"
-DISPLAY_FPS = 10
+DISPLAY_FPS = 60
 # At 5 MSPS the built-in 32.55 kHz DAC sine has about 154 samples/period.
 # A 200k-sample min/max window compresses roughly 1,300 periods into 900
 # pixels and therefore looks like a solid vertical band.  Use a scope-like
@@ -314,6 +314,25 @@ QLabel#scopeChannel {
     font-size: 15px;
     font-weight: 700;
 }
+QLabel#scopeWindowTitle {
+    color: #102f57;
+    font-size: 22px;
+    font-weight: 700;
+}
+QPushButton#scopeChannelButton {
+    min-height: 28px;
+    padding: 0 10px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: #25324a;
+    font-size: 15px;
+    font-weight: 700;
+}
+QPushButton#scopeChannelButton:hover {
+    background: #e9f2ff;
+    border-color: #bdd5fa;
+    color: #195ca8;
+}
 QLabel#scopeCaption {
     color: #475569;
     font-weight: 600;
@@ -373,8 +392,11 @@ TIMEBASES_PER_DIV = (
     ("200 ms/div", 200e-3),
     ("500 ms/div", 500e-3),
     ("1 s/div", 1.0),
+    ("2 s/div", 2.0),
+    ("5 s/div", 5.0),
+    ("10 s/div", 10.0),
 )
-DISPLAY_FPS_OPTIONS = (2, 5, 10, 20)
+DISPLAY_FPS_OPTIONS = (10, 20, 30, 60)
 RAW_ENVELOPE_SAMPLE_LIMIT = 500_000
 SCROLL_DIVISORS = (
     ("实时", 1),
@@ -1141,18 +1163,36 @@ class EnvelopePlot(QWidget):
         self.fixed_bounds: tuple[float, float] | None = None
         self.value_scale = 1.0
         self.value_offset = 0.0
+        self.auto_minimum_half_span = 16.0
+        self.vertical_scale_multiplier = 1.0
         self.trigger_enabled = False
         self.trigger_locked = False
         self.smoothing = False
         self.plot_mode = "trace"
+        self._display_signature = None
+        self._auto_bounds_state: tuple[float, float] | None = None
+        self._auto_bounds_time: float | None = None
         self.setMinimumSize(720, 340)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def set_display(self, scale: float, offset: float,
-                    fixed_bounds: tuple[float, float] | None):
+                    fixed_bounds: tuple[float, float] | None,
+                    auto_minimum_half_span: float = 16.0,
+                    vertical_scale_multiplier: float = 1.0):
+        signature = (
+            float(scale), float(offset), fixed_bounds,
+            max(float(auto_minimum_half_span), 1e-12),
+            min(8.0, max(0.001, float(vertical_scale_multiplier))),
+        )
+        if signature != self._display_signature:
+            self._auto_bounds_state = None
+            self._auto_bounds_time = None
+            self._display_signature = signature
         self.value_scale = float(scale)
         self.value_offset = float(offset)
         self.fixed_bounds = fixed_bounds
+        self.auto_minimum_half_span = signature[3]
+        self.vertical_scale_multiplier = signature[4]
 
     def set_envelope(self, minimum, maximum, valid):
         first = np.asarray(minimum, dtype=np.float32) * self.value_scale + self.value_offset
@@ -1200,18 +1240,53 @@ class EnvelopePlot(QWidget):
         return path
 
     @staticmethod
-    def _display_bounds(minimum, maximum, valid):
+    def _display_bounds(
+        minimum,
+        maximum,
+        valid,
+        minimum_half_span: float = 16.0,
+        vertical_scale: float = 1.0,
+    ):
         if not np.any(valid):
             return -1.0, 1.0
+        # Desktop/ZYNQ reference design: use the true visible extrema so a
+        # narrow transmission peak is never discarded by robust statistics.
         low = float(np.min(minimum[valid]))
         high = float(np.max(maximum[valid]))
-        if high <= low:
-            # A DC/constant ADC code is still real data. Put it in the middle
-            # of the plot instead of collapsing it onto the bottom border.
-            padding = max(2.0, abs(low) * 0.02)
-        else:
-            padding = max(1.0, (high - low) * 0.05)
-        return low - padding, high + padding
+        center = (low + high) * 0.5
+        span = max(0.0, high - low)
+        scale = min(8.0, max(0.001, float(vertical_scale)))
+        half_span = max(float(minimum_half_span), span * 0.55) * scale
+        half_span = max(half_span, 1e-12)
+        return center - half_span, center + half_span
+
+    def _stabilize_auto_bounds(
+        self, target: tuple[float, float], now: float | None = None,
+    ) -> tuple[float, float]:
+        """Expand immediately but contract slowly to prevent range flicker."""
+        now = time.monotonic() if now is None else float(now)
+        if self._auto_bounds_state is None or self._auto_bounds_time is None:
+            self._auto_bounds_state = target
+            self._auto_bounds_time = now
+            return target
+        elapsed = min(0.25, max(0.0, now - self._auto_bounds_time))
+        # Roughly 0.8 s time constant: fast enough to follow a changing
+        # baseline, slow enough that peaks leaving a rolling window do not
+        # make the entire trace flash larger on the next frame.
+        alpha = 1.0 - np.exp(-elapsed / 0.8)
+        old_low, old_high = self._auto_bounds_state
+        target_low, target_high = target
+        low = (
+            target_low if target_low < old_low
+            else old_low + (target_low - old_low) * alpha
+        )
+        high = (
+            target_high if target_high > old_high
+            else old_high + (target_high - old_high) * alpha
+        )
+        self._auto_bounds_state = (float(low), float(high))
+        self._auto_bounds_time = now
+        return self._auto_bounds_state
 
     def paintEvent(self, _event):
         painter = QPainter(self)
@@ -1235,8 +1310,12 @@ class EnvelopePlot(QWidget):
             painter.drawText(self.rect(), Qt.AlignCenter, "等待 PL UDP 数据")
             return
         if self.fixed_bounds is None:
-            low, high = self._display_bounds(
-                self.minimum, self.maximum, self.valid
+            low, high = self._stabilize_auto_bounds(
+                self._display_bounds(
+                    self.minimum, self.maximum, self.valid,
+                    self.auto_minimum_half_span,
+                    self.vertical_scale_multiplier,
+                )
             )
         else:
             low, high = self.fixed_bounds
@@ -1244,9 +1323,6 @@ class EnvelopePlot(QWidget):
         envelope_color.setAlpha(130)
         trace_color = QColor(self.color)
         count = len(self.minimum)
-        previous = None
-        smooth_segments = []
-        current_segment = []
         # Interpolation is only used when each horizontal bin represents one
         # real sample. For reduced min/max envelopes it would invent a center
         # trace and conceal real extrema.
@@ -1256,51 +1332,84 @@ class EnvelopePlot(QWidget):
                 self.minimum[self.valid], self.maximum[self.valid]
             )
         )
-        for i in range(count):
-            if not self.valid[i]:
-                if current_segment:
-                    smooth_segments.append(current_segment)
-                    current_segment = []
-                previous = None
-                continue
-            x = int(i * max(1, self.width() - 1) / max(1, count - 1))
-            y0 = int((high - float(self.minimum[i])) * (self.height() - 1) / (high - low))
-            y1 = int((high - float(self.maximum[i])) * (self.height() - 1) / (high - low))
-            midpoint = (x, (y0 + y1) // 2)
-            if self.plot_mode == "envelope":
-                painter.setPen(QPen(envelope_color, 1))
-                painter.drawLine(x, y0, x, y1)
-            elif self.plot_mode == "points":
-                painter.setPen(QPen(trace_color, 2))
-                painter.drawPoint(*midpoint)
-            elif smooth_trace:
-                current_segment.append(midpoint)
-            elif previous is not None:
-                painter.setPen(QPen(trace_color, 2))
-                painter.drawLine(previous[0], previous[1],
-                                 midpoint[0], midpoint[1])
-            previous = midpoint if self.plot_mode == "trace" else None
-        if current_segment:
-            smooth_segments.append(current_segment)
-        if smooth_trace:
+        valid_indices = np.flatnonzero(self.valid)
+        if not valid_indices.size:
+            return
+        x_values = np.rint(
+            valid_indices.astype(np.float64)
+            * max(1, self.width() - 1) / max(1, count - 1)
+        ).astype(np.int32)
+        y0_values = np.rint(
+            (high - self.minimum[valid_indices].astype(np.float64))
+            * (self.height() - 1) / (high - low)
+        ).astype(np.int32)
+        y1_values = np.rint(
+            (high - self.maximum[valid_indices].astype(np.float64))
+            * (self.height() - 1) / (high - low)
+        ).astype(np.int32)
+        midpoint_y = (y0_values + y1_values) // 2
+
+        # One invalid source bin starts a new segment. Building one Qt path
+        # per frame avoids hundreds of Python-to-QPainter calls while keeping
+        # real UDP/PL sample gaps visibly disconnected.
+        segment_starts = np.r_[
+            0, np.flatnonzero(np.diff(valid_indices) > 1) + 1
+        ]
+        segment_ends = np.r_[segment_starts[1:], valid_indices.size]
+
+        if self.plot_mode == "envelope":
+            path = QPainterPath()
+            for x, y0, y1 in zip(x_values, y0_values, y1_values):
+                path.moveTo(float(x), float(y0))
+                path.lineTo(float(x), float(y1))
+            painter.setPen(QPen(envelope_color, 1))
+            painter.drawPath(path)
+        elif self.plot_mode == "points":
+            points = QPolygonF([
+                QPointF(float(x), float(y))
+                for x, y in zip(x_values, midpoint_y)
+            ])
+            painter.setPen(QPen(trace_color, 2))
+            painter.drawPoints(points)
+        elif smooth_trace:
             painter.setRenderHint(QPainter.Antialiasing, True)
             painter.setPen(QPen(trace_color, 2))
-            for segment in smooth_segments:
-                painter.drawPath(self._smooth_path(segment))
+            combined = QPainterPath()
+            for start, end in zip(segment_starts, segment_ends):
+                segment = list(zip(
+                    x_values[start:end].tolist(),
+                    midpoint_y[start:end].tolist(),
+                ))
+                combined.addPath(self._smooth_path(segment))
+            painter.drawPath(combined)
+        else:
+            path = QPainterPath()
+            for start, end in zip(segment_starts, segment_ends):
+                path.moveTo(
+                    float(x_values[start]), float(midpoint_y[start])
+                )
+                for index in range(start + 1, end):
+                    path.lineTo(
+                        float(x_values[index]), float(midpoint_y[index])
+                    )
+            painter.setPen(QPen(trace_color, 2))
+            painter.drawPath(path)
 
 
 class ScopeWindow(QWidget):
     settings_changed = Signal()
     time_settings_changed = Signal()
+    focus_requested = Signal(str)
 
-    def __init__(self, channel: str, color: str):
-        super().__init__()
+    def __init__(self, channel: str, color: str, parent=None, *, embedded=False):
+        super().__init__(parent)
         self.channel = channel
         self.adc_model = 0
         self.frozen = False
         self.trigger_locked = False
         self.setWindowTitle(f"通道 {channel} 示波器")
-        self.setStyleSheet(SCOPE_STYLE)
+        if not embedded:
+            self.setStyleSheet(SCOPE_STYLE)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(10)
@@ -1312,8 +1421,19 @@ class ScopeWindow(QWidget):
         heading = QHBoxLayout()
         channel_dot = QLabel("●")
         channel_dot.setStyleSheet(f"color:{color};font-size:16px")
-        channel_title = QLabel(f"通道 {channel}")
-        channel_title.setObjectName("scopeChannel")
+        if embedded:
+            channel_title = QPushButton(f"通道 {channel}  ·  单通道查看")
+            channel_title.setObjectName("scopeChannelButton")
+            channel_title.setCursor(Qt.PointingHandCursor)
+            channel_title.setToolTip(f"在当前窗口中放大通道 {channel}")
+            channel_title.clicked.connect(
+                lambda _checked=False, name=channel: self.focus_requested.emit(name)
+            )
+            self.focus_button = channel_title
+        else:
+            channel_title = QLabel(f"通道 {channel}")
+            channel_title.setObjectName("scopeChannel")
+            self.focus_button = None
         heading.addWidget(channel_dot)
         heading.addWidget(channel_title)
         heading.addStretch(1)
@@ -1359,25 +1479,26 @@ class ScopeWindow(QWidget):
         )
         self.freeze_button = QPushButton("暂停显示")
         self.freeze_button.setCheckable(True)
-        for column, (label, widget) in enumerate((
-            ("时基", self.timebase),
-            ("帧率", self.fps),
-            ("滚动", self.scroll_speed),
-            ("纵轴", self.units),
-            ("范围", self.y_range),
-        )):
-            controls.addWidget(QLabel(label), 0, column * 2)
-            controls.addWidget(widget, 0, column * 2 + 1)
-        controls.addWidget(QLabel("触发"), 1, 0)
-        controls.addWidget(self.trigger_mode, 1, 1)
-        controls.addWidget(QLabel("电平"), 1, 2)
-        controls.addWidget(self.trigger_level, 1, 3)
-        controls.addWidget(self.trigger_status, 1, 4, 1, 2)
-        controls.addWidget(QLabel("显示"), 1, 6)
-        controls.addWidget(self.display_mode, 1, 7)
-        controls.addWidget(self.smoothing, 1, 8)
-        controls.setColumnStretch(10, 1)
-        controls.addWidget(self.freeze_button, 1, 9, 1, 2)
+        self.vertical_scale = QDoubleSpinBox()
+        self.vertical_scale.setRange(0.001, 8.0)
+        self.vertical_scale.setDecimals(3)
+        self.vertical_scale.setSingleStep(0.05)
+        self.vertical_scale.setValue(1.0)
+        self.vertical_scale.setSuffix(" ×")
+        self.vertical_scale.setToolTip(
+            "仅调整当前通道的显示纵轴倍率，不改变ADC原始数据"
+        )
+        self.controls_layout = controls
+        self.control_labels = {
+            key: QLabel(text) for key, text in (
+                ("timebase", "时基"), ("fps", "帧率"),
+                ("scroll", "滚动"), ("units", "纵轴"),
+                ("range", "范围"), ("scale", "Y倍率"),
+                ("trigger", "触发"), ("level", "电平"),
+                ("display", "显示"),
+            )
+        }
+        self.set_compact_controls(embedded)
         toolbar_layout.addLayout(controls)
         self.caption = QLabel(f"通道 {channel}：--")
         self.caption.setObjectName("scopeCaption")
@@ -1390,7 +1511,10 @@ class ScopeWindow(QWidget):
         layout.addWidget(toolbar)
         layout.addWidget(readout)
         layout.addWidget(self.plot, 1)
-        self.resize(1040, 650)
+        if embedded:
+            self.plot.setMinimumSize(320, 220)
+        else:
+            self.resize(1040, 650)
 
         # The two channels share one sampled time axis, so only horizontal
         # display controls are linked.  Vertical scaling and trigger/display
@@ -1400,6 +1524,7 @@ class ScopeWindow(QWidget):
         self.scroll_speed.currentIndexChanged.connect(self.time_settings_changed)
         self.units.currentIndexChanged.connect(self._display_changed)
         self.y_range.currentIndexChanged.connect(self._range_changed)
+        self.vertical_scale.valueChanged.connect(self._range_changed)
         self.trigger_mode.currentIndexChanged.connect(self._trigger_changed)
         self.trigger_level.valueChanged.connect(self._trigger_changed)
         self.display_mode.currentIndexChanged.connect(
@@ -1410,6 +1535,71 @@ class ScopeWindow(QWidget):
         self.plot.set_smoothing(self.smoothing.isChecked())
         self.plot.set_plot_mode(self.display_mode.currentData())
         self.configure_model(1)
+
+    def set_compact_controls(self, compact: bool):
+        """Reflow controls for half-width combined or full-width scope mode."""
+        controls = self.controls_layout
+        while controls.count():
+            item = controls.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.hide()
+        for column in range(12):
+            controls.setColumnStretch(column, 0)
+
+        fields = {
+            "timebase": self.timebase,
+            "fps": self.fps,
+            "scroll": self.scroll_speed,
+            "units": self.units,
+            "range": self.y_range,
+            "scale": self.vertical_scale,
+            "trigger": self.trigger_mode,
+            "level": self.trigger_level,
+            "display": self.display_mode,
+        }
+        if compact:
+            rows = (
+                (("timebase", fields["timebase"]), ("fps", fields["fps"])),
+                (("scroll", fields["scroll"]), ("units", fields["units"])),
+                (("range", fields["range"]), ("scale", fields["scale"])),
+                (("trigger", fields["trigger"]), ("level", fields["level"])),
+                (("display", fields["display"]),),
+            )
+            for row, pairs in enumerate(rows):
+                for column, (key, widget) in enumerate(pairs):
+                    controls.addWidget(self.control_labels[key], row, column * 2)
+                    controls.addWidget(widget, row, column * 2 + 1)
+            controls.addWidget(self.trigger_status, 3, 4)
+            controls.addWidget(self.smoothing, 4, 2)
+            controls.addWidget(self.freeze_button, 4, 4)
+            controls.setColumnStretch(4, 1)
+        else:
+            for column, key in enumerate((
+                "timebase", "fps", "scroll", "units", "range",
+            )):
+                controls.addWidget(self.control_labels[key], 0, column * 2)
+                controls.addWidget(fields[key], 0, column * 2 + 1)
+            controls.addWidget(self.control_labels["trigger"], 1, 0)
+            controls.addWidget(self.trigger_mode, 1, 1)
+            controls.addWidget(self.control_labels["level"], 1, 2)
+            controls.addWidget(self.trigger_level, 1, 3)
+            controls.addWidget(self.trigger_status, 1, 4, 1, 2)
+            controls.addWidget(self.control_labels["display"], 1, 6)
+            controls.addWidget(self.display_mode, 1, 7)
+            controls.addWidget(self.smoothing, 1, 8)
+            controls.addWidget(self.control_labels["scale"], 1, 9)
+            controls.addWidget(self.vertical_scale, 1, 10)
+            controls.addWidget(self.freeze_button, 1, 11)
+            controls.setColumnStretch(11, 1)
+
+        for widget in (
+            *self.control_labels.values(), *fields.values(),
+            self.trigger_status, self.smoothing, self.freeze_button,
+        ):
+            widget.show()
+        controls.invalidate()
+        self.updateGeometry()
 
     def configure_model(self, model: int):
         self.adc_model = int(model)
@@ -1433,11 +1623,14 @@ class ScopeWindow(QWidget):
             for value in (50.0, 20.0, 10.0, 5.0, 2.0, 1.0):
                 self.y_range.addItem(f"{value:g} code/div", value)
         else:
-            for value in (2.0, 1.0, .5, .2, .1, .05, .02, .01, .005):
+            for value in (
+                10.0, 5.0, 2.0, 1.0, .5, .2, .1, .05, .02, .01,
+                .005, .002, .001, .0005, .0002, .0001,
+            ):
                 text = f"{value:g} V/div" if value >= .1 else f"{value * 1000:g} mV/div"
                 self.y_range.addItem(text, value)
         index = self.y_range.findData(previous)
-        self.y_range.setCurrentIndex(index if index >= 0 else 1)
+        self.y_range.setCurrentIndex(index if index >= 0 else 0)
         self.y_range.blockSignals(False)
         self._apply_display()
 
@@ -1504,12 +1697,21 @@ class ScopeWindow(QWidget):
         if selected == "auto":
             bounds = None
         elif selected == "full" or selected is None:
-            bounds = full
+            center = (full[0] + full[1]) * 0.5
+            half_span = (full[1] - full[0]) * 0.5 * self.vertical_scale.value()
+            bounds = (center - half_span, center + half_span)
         else:
             center = (full[0] + full[1]) / 2.0
-            half_span = float(selected) * 5.0
+            half_span = float(selected) * 5.0 * self.vertical_scale.value()
             bounds = (center - half_span, center + half_span)
-        self.plot.set_display(scale, offset, bounds)
+        auto_minimum_half_span = 16.0 * abs(scale)
+        self.plot.set_display(
+            scale,
+            offset,
+            bounds,
+            auto_minimum_half_span,
+            self.vertical_scale.value(),
+        )
 
     def required_samples(self, rate: float) -> int:
         seconds_per_div = float(self.timebase.currentData() or 50e-6)
@@ -1544,9 +1746,6 @@ class ScopeWindow(QWidget):
             combo.setCurrentIndex(index)
 
     def restore_settings(self, settings: QSettings, prefix: str):
-        geometry = settings.value(f"{prefix}/geometry")
-        if geometry is not None:
-            self.restoreGeometry(geometry)
         self._set_combo_data(
             self.timebase, float(settings.value(
                 f"{prefix}/timebase", self.timebase.currentData()))
@@ -1582,10 +1781,11 @@ class ScopeWindow(QWidget):
         )
         self.trigger_level.setValue(float(settings.value(
             f"{prefix}/trigger_level", self.trigger_level.value())))
+        self.vertical_scale.setValue(float(settings.value(
+            f"{prefix}/vertical_scale", 1.0)))
         self._apply_display()
 
     def save_settings(self, settings: QSettings, prefix: str):
-        settings.setValue(f"{prefix}/geometry", self.saveGeometry())
         settings.setValue(f"{prefix}/timebase", self.timebase.currentData())
         settings.setValue(f"{prefix}/fps", self.fps.currentData())
         settings.setValue(f"{prefix}/scroll", self.scroll_speed.currentData())
@@ -1600,6 +1800,9 @@ class ScopeWindow(QWidget):
         settings.setValue(f"{prefix}/smoothing", self.smoothing.isChecked())
         settings.setValue(
             f"{prefix}/trigger_level", self.trigger_level.value()
+        )
+        settings.setValue(
+            f"{prefix}/vertical_scale", self.vertical_scale.value()
         )
 
     def update_data(self, minimum, maximum, valid, rate,
@@ -1641,6 +1844,140 @@ class ScopeWindow(QWidget):
                 f"当前 {current:.4g} {unit}    最小 {min(valid_min, valid_max):.4g}    "
                 f"最大 {max(valid_min, valid_max):.4g}"
             )
+
+
+class DualScopeWindow(QWidget):
+    """One peer window containing both synchronized ADC channel scopes."""
+
+    def __init__(self, parent=None, embedded: bool = False):
+        super().__init__(parent, Qt.Widget if embedded else Qt.Window)
+        self.setWindowTitle("A/B 双通道示波器")
+        self.setStyleSheet(SCOPE_STYLE)
+        if embedded:
+            self.setMinimumSize(0, 520)
+        else:
+            self.resize(1180, 920)
+            self.setMinimumSize(860, 700)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+        self.focused_channel: str | None = None
+        heading = QHBoxLayout()
+        self.title = QLabel("A/B 双通道示波器")
+        self.title.setObjectName("scopeWindowTitle")
+        self.back_button = QPushButton("返回双通道")
+        self.back_button.setObjectName("primaryButton")
+        self.back_button.hide()
+        self.back_button.clicked.connect(self.show_dual_channel)
+        heading.addWidget(self.title)
+        heading.addStretch(1)
+        heading.addWidget(self.back_button)
+        self.subtitle = QLabel("A/B 共用时间轴；点击通道标题可在当前窗口单独观察")
+        self.subtitle.setObjectName("scopeCaption")
+        layout.addLayout(heading)
+        layout.addWidget(self.subtitle)
+
+        self.splitter = QSplitter(Qt.Vertical)
+        self.scope_a = ScopeWindow("A", "#22d3ee", self.splitter, embedded=True)
+        self.scope_b = ScopeWindow("B", "#fb7185", self.splitter, embedded=True)
+        self.splitter.addWidget(self.scope_a)
+        self.splitter.addWidget(self.scope_b)
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 1)
+        self.scope_a.focus_requested.connect(self.show_single_channel)
+        self.scope_b.focus_requested.connect(self.show_single_channel)
+        layout.addWidget(self.splitter, 1)
+
+    def set_compact_controls(self, compact: bool):
+        self.scope_a.set_compact_controls(compact)
+        self.scope_b.set_compact_controls(compact)
+        self.updateGeometry()
+
+    def show_single_channel(self, channel: str):
+        channel = str(channel).upper()
+        if channel not in {"A", "B"}:
+            return
+        self.focused_channel = channel
+        self.scope_a.setVisible(channel == "A")
+        self.scope_b.setVisible(channel == "B")
+        self.title.setText(f"通道 {channel} 示波器")
+        self.subtitle.setText(
+            f"正在当前窗口单独观察通道 {channel}；采集与另一通道的数据接收不受影响"
+        )
+        self.back_button.show()
+
+    def show_dual_channel(self):
+        self.focused_channel = None
+        self.scope_a.show()
+        self.scope_b.show()
+        self.splitter.setSizes([1, 1])
+        self.title.setText("A/B 双通道示波器")
+        self.subtitle.setText("A/B 共用时间轴；点击通道标题可在当前窗口单独观察")
+        self.back_button.hide()
+
+
+class AutoLockScopeWorkspace(QWidget):
+    """Combined auto-lock and oscilloscope workspace with equal-width panes."""
+
+    def __init__(self, peak_lock_window, scope_window):
+        super().__init__(None, Qt.Window)
+        self.setWindowTitle("自动锁频与 A/B 示波器")
+        self.resize(1280, 760)
+        self.setMinimumSize(900, 600)
+        self.mode = "combined"
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.splitter = QSplitter(Qt.Horizontal, self)
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.addWidget(peak_lock_window)
+        self.splitter.addWidget(scope_window)
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setSizes([1, 1])
+        layout.addWidget(self.splitter)
+
+        self.peak_lock_window = peak_lock_window
+        self.scope_window = scope_window
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(0, self._apply_mode_sizes)
+
+    def show_combined(self):
+        self.mode = "combined"
+        self.setWindowTitle("自动锁频与 A/B 示波器")
+        self.scope_window.set_compact_controls(True)
+        self.peak_lock_window.show()
+        self.scope_window.show()
+        self._apply_mode_sizes()
+        QTimer.singleShot(0, self._apply_mode_sizes)
+
+    def show_scope_only(self):
+        self.mode = "scope"
+        self.setWindowTitle("A/B 双通道示波器")
+        self.scope_window.set_compact_controls(False)
+        self.peak_lock_window.hide()
+        self.scope_window.show()
+        self._apply_mode_sizes()
+        QTimer.singleShot(0, self._apply_mode_sizes)
+
+    def _apply_mode_sizes(self):
+        if self.mode == "combined":
+            available = max(
+                2, self.splitter.width() - self.splitter.handleWidth()
+            )
+            left = available // 2
+            self.splitter.setSizes([left, available - left])
+        else:
+            self.splitter.setSizes([0, max(1, self.splitter.width())])
+
+    def closeEvent(self, event):
+        self.peak_lock_window.prepare_for_workspace_close()
+        event.accept()
 
 
 class MainWindow(QMainWindow):
@@ -1691,8 +2028,9 @@ class MainWindow(QMainWindow):
         self.last_event_time = time.monotonic()
         self.event_rate = 0.0
         self.plot_tick = 0
-        self.scope_a = ScopeWindow("A", "#22d3ee")
-        self.scope_b = ScopeWindow("B", "#fb7185")
+        self.scope_window = DualScopeWindow(embedded=True)
+        self.scope_a = self.scope_window.scope_a
+        self.scope_b = self.scope_window.scope_b
 
         scroll = QScrollArea()
         scroll.setObjectName("appScroll")
@@ -1841,8 +2179,10 @@ class MainWindow(QMainWindow):
         self.scan_control_button = QPushButton("扫频控制")
         self.auto_lock_button = QPushButton("自动锁频")
         self.dlc_status_label = QLabel("DLC pro：未连接")
-        self.scope_a_button = QPushButton("打开通道 A")
-        self.scope_b_button = QPushButton("打开通道 B")
+        self.scope_button = QPushButton("打开 A/B 双通道")
+        # Compatibility aliases for launchers that used the old two-button API.
+        self.scope_a_button = self.scope_button
+        self.scope_b_button = self.scope_button
         self.fpga_select_button = QPushButton("选择bit")
         self.fpga_program_button = QPushButton("下载FPGA")
         self.fpga_path_label = QLabel("未选择bitstream")
@@ -1854,9 +2194,7 @@ class MainWindow(QMainWindow):
         self.fpga_progress.setFormat("等待下载")
         # Scope launchers are peer actions. Keep them visually equal instead
         # of letting the recording-path stretch column make channel A huge.
-        scope_button_width = 150
-        self.scope_a_button.setFixedWidth(scope_button_width)
-        self.scope_b_button.setFixedWidth(scope_button_width)
+        self.scope_button.setMinimumWidth(180)
         self.connect_button.setObjectName("primaryButton")
         self.start_button.setObjectName("startButton")
         self.stop_button.setObjectName("stopButton")
@@ -1871,8 +2209,7 @@ class MainWindow(QMainWindow):
         action_layout.addWidget(self.dlc_status_label, 0, 4)
         action_layout.addWidget(self.scan_control_button, 0, 5)
         action_layout.addWidget(self.auto_lock_button, 0, 6)
-        action_layout.addWidget(self.scope_a_button, 0, 7)
-        action_layout.addWidget(self.scope_b_button, 0, 8)
+        action_layout.addWidget(self.scope_button, 0, 7, 1, 2)
         action_layout.addWidget(QLabel("录制设置"), 1, 0)
         action_layout.addWidget(self.record_channels, 1, 1)
         action_layout.addWidget(self.record_rate, 1, 2)
@@ -1986,8 +2323,7 @@ class MainWindow(QMainWindow):
         self.dlc_settings_button.clicked.connect(self.show_dlc_settings)
         self.scan_control_button.clicked.connect(self.show_scan_control)
         self.auto_lock_button.clicked.connect(self.show_peak_lock)
-        self.scope_a_button.clicked.connect(self.show_scope_a)
-        self.scope_b_button.clicked.connect(self.show_scope_b)
+        self.scope_button.clicked.connect(self.show_scope)
         self.fpga_select_button.clicked.connect(self.choose_fpga_bit)
         self.fpga_program_button.clicked.connect(self.program_fpga)
         self.scope_a.time_settings_changed.connect(
@@ -2007,18 +2343,16 @@ class MainWindow(QMainWindow):
             acquisition_running=lambda: self.stream_id is not None,
             parent=self,
         )
-        # These are peer desktop windows, not owned child windows.  A native
-        # owner makes Windows minimize them together with the main ADC window
-        # and can also raise the main window over the independent scopes when
-        # an owned control window is activated.  Keep strong Python references
-        # here for lifetime management, while deliberately leaving the Qt
-        # parent unset so every scope/control window has independent taskbar,
-        # minimize and Z-order behaviour.
+        # Auto-lock and the synchronized A/B scopes share one desktop workspace.
         self.peak_lock_window = AdcPeakBalanceWindow(
             self.peak_lock_controller,
             self.settings,
             parent=None,
             falc_window_opener=self.falc_window_opener,
+            embedded=True,
+        )
+        self.auto_lock_workspace = AutoLockScopeWorkspace(
+            self.peak_lock_window, self.scope_window
         )
         self.scan_control_window = DlcScanControlWindow(
             self.dlc_session, self.settings, parent=None
@@ -2073,9 +2407,15 @@ class MainWindow(QMainWindow):
         self.channel_swap.setChecked(self._bool_setting(
             self.settings.value("main/channel_swap", False)
         ))
-        self.jumbo.setChecked(self._bool_setting(
+        jumbo_enabled = self._bool_setting(
             self.settings.value("main/jumbo", False)
-        ))
+        )
+        if int(self.rate.currentData() or 0) >= 10_000_000:
+            jumbo_ready, _detail = windows_jumbo_status()
+            if jumbo_ready is True:
+                jumbo_enabled = True
+                self.settings.setValue("main/jumbo", True)
+        self.jumbo.setChecked(jumbo_enabled)
         stored_bit = str(self.settings.value("fpga/bit_path", "")).strip()
         if stored_bit:
             self.fpga_bit_path = Path(stored_bit)
@@ -2093,12 +2433,19 @@ class MainWindow(QMainWindow):
         )
         self.scope_a.restore_settings(self.settings, "scope_a")
         self.scope_b.restore_settings(self.settings, "scope_b")
-        if self._bool_setting(self.settings.value("scope_a/visible", False)):
-            self.scope_a.show()
-        if (model == 1 and
-                self._bool_setting(self.settings.value(
-                    "scope_b/visible", False))):
-            self.scope_b.show()
+        # One-time migration from the former 10 FPS default.  Later manual
+        # choices remain persistent because the migration flag is retained.
+        if not self._bool_setting(
+            self.settings.value("scope/fps_60_default_migrated", False)
+        ):
+            for scope in (self.scope_a, self.scope_b):
+                index = scope.fps.findData(DISPLAY_FPS)
+                if index >= 0:
+                    scope.fps.setCurrentIndex(index)
+            self.settings.setValue("scope/fps_60_default_migrated", True)
+        workspace_geometry = self.settings.value("auto_lock_workspace/geometry")
+        if workspace_geometry is not None:
+            self.auto_lock_workspace.restoreGeometry(workspace_geometry)
     def _save_settings(self):
         self.settings.setValue("main/geometry", self.saveGeometry())
         self.settings.setValue("main/board_ip", self.board_ip.text().strip())
@@ -2120,8 +2467,10 @@ class MainWindow(QMainWindow):
         )
         self.scope_a.save_settings(self.settings, "scope_a")
         self.scope_b.save_settings(self.settings, "scope_b")
-        self.settings.setValue("scope_a/visible", self.scope_a.isVisible())
-        self.settings.setValue("scope_b/visible", self.scope_b.isVisible())
+        self.settings.setValue(
+            "auto_lock_workspace/geometry",
+            self.auto_lock_workspace.saveGeometry(),
+        )
         self.settings.sync()
 
     def _update_fpga_bit_display(self):
@@ -2330,6 +2679,12 @@ class MainWindow(QMainWindow):
         if not self.control or not self.receiver:
             return
         try:
+            selected_rate = int(self.rate.currentData() or 0)
+            if selected_rate >= 10_000_000 and not self.jumbo.isChecked():
+                jumbo_ready, _detail = windows_jumbo_status()
+                if jumbo_ready is True:
+                    self.jumbo.setChecked(True)
+                    self.settings.setValue("main/jumbo", True)
             if self.jumbo.isChecked():
                 jumbo_ready, detail = windows_jumbo_status()
                 if jumbo_ready is False:
@@ -2565,16 +2920,21 @@ class MainWindow(QMainWindow):
         show_window_front(self.dlc_settings_dialog)
 
     def show_peak_lock(self):
-        show_window_front(self.peak_lock_window)
+        self.auto_lock_workspace.show_combined()
+        show_window_front(self.auto_lock_workspace)
 
     def show_scan_control(self):
         show_window_front(self.scan_control_window)
 
+    def show_scope(self):
+        self.auto_lock_workspace.show_scope_only()
+        show_window_front(self.auto_lock_workspace)
+
     def show_scope_a(self):
-        show_window_front(self.scope_a)
+        self.show_scope()
 
     def show_scope_b(self):
-        show_window_front(self.scope_b)
+        self.show_scope()
 
     def _peak_lock_running_changed(self, running: bool):
         owns_scan_writes = running and not self.peak_lock_controller.observe_only
@@ -2832,15 +3192,13 @@ class MainWindow(QMainWindow):
             self._finish_recording()
         if hasattr(self, "peak_lock_controller"):
             self.peak_lock_controller.stop("ADC程序退出")
-        if hasattr(self, "peak_lock_window"):
-            self.peak_lock_window.close()
+        if hasattr(self, "auto_lock_workspace"):
+            self.auto_lock_workspace.close()
         if hasattr(self, "scan_control_window"):
             self.scan_control_window.close()
         self._save_settings()
         self.disconnect_board()
         self.dlc_session.shutdown()
-        self.scope_a.close()
-        self.scope_b.close()
         event.accept()
 
 

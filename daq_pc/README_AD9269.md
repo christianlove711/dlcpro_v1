@@ -43,9 +43,13 @@ python app.py --open-adc
 
 ## ADC 00模自动锁频
 
-此模块直接读取 `int16` 原始码和1 ms min/max历史，只使用透射峰，不使用误差信号。算法控制PZT的 `PC Voltage` 扫描偏置和幅度；宽扫阶段采用宽松门限快速缩幅，窄扫阶段使用更小 Offset 步长精调。
+此模块直接读取 `int16` 原始码和 1 ms min/max 历史，只使用透射峰，不使用误差信号。算法只控制 PZT 的 `PC Voltage` Scan Offset、Amplitude 和快速扫频频率。
 
-首次板测应按“仅观察 → 自动调整但不接管FALC → 自动FALC接管”三步验证。完整公式和恢复策略见 [`reports/adc_peak_balance/ALGORITHM_REPORT.md`](../reports/adc_peak_balance/ALGORITHM_REPORT.md)。
+自动模式默认先切换到 `10 Hz / 2.5 Vpp`。初始化窗口无峰时保持幅度，以 `+1、-1、+2、-2… V` 搜索 Offset；发现透射峰后，用三角波间隔计算理论距离，只做一次方向试探，然后直接跳转并一步缩到 `0.2 Vpp`。
+
+最终 `0.2 Vpp` 阶段不再扩大 Amplitude，也不再使用理论跳转。Offset 围绕缩幅中心依次测试 `±0.001～±0.009 V`，仍未达标再测试 `±0.01～±0.09 V`。任一候选达到最终门槛后立即进入连续窗口验收。
+
+首次板测应按“仅观察 → 自动调整但不接管 FALC → 自动 FALC 接管”三步验证，并人工确认目标不是边带。完整公式和恢复策略见 [`reports/adc_peak_balance/ALGORITHM_REPORT.md`](../reports/adc_peak_balance/ALGORITHM_REPORT.md)。
 
 ## FPGA下载
 

@@ -15,6 +15,12 @@ from .adc_peak_balance_algorithm import (
 
 
 class AdcPeakBalanceController(QObject):
+    ANALYSIS_CYCLES = 2.0
+    SETTLE_CYCLES = 1.0
+    # DLC pro scan-frequency readback is quantized and need not equal the
+    # requested IEEE-754 value bit-for-bit.  Accept 1 mHz (or 10 ppm at high
+    # frequencies); analysis always uses the actual device readback.
+    FREQUENCY_READBACK_TOLERANCE_HZ = 0.001
     running_changed = Signal(bool)
     status_changed = Signal(dict)
     log_message = Signal(str)
@@ -40,11 +46,14 @@ class AdcPeakBalanceController(QObject):
         self.falc_engaged = False
         self.gate_bin: int | None = None
         self.available_after = 0.0
-        self.required_cycles = 4.0
+        self.required_cycles = self.ANALYSIS_CYCLES
         self.scan_frequency = 0.0
         self.observe_only = True
         self.start_offset: float | None = None
         self.start_amplitude: float | None = None
+        self.start_frequency: float | None = None
+        self.restore_offset: float | None = None
+        self.restore_amplitude: float | None = None
         self.scan_unit = ""
         self.step_profile = "用户设定"
         self.last_observation = PeakObservation(False, "尚未开始")
@@ -72,11 +81,15 @@ class AdcPeakBalanceController(QObject):
         snapshot = self.session.snapshot()
         if snapshot is None:
             raise RuntimeError("尚未取得DLC pro扫描参数")
+        settings = settings.validated()
         frequency = float(snapshot.sc_frequency)
         if frequency <= 0:
             raise RuntimeError("DLC pro扫描频率必须大于0")
-        if 4.0 / frequency > self.ring.HISTORY_SECONDS:
-            raise RuntimeError("当前扫描频率过低，原始码历史不足以覆盖4个完整周期")
+        analysis_frequency = (
+            frequency if observe_only else settings.search_frequency_hz
+        )
+        if self.ANALYSIS_CYCLES / analysis_frequency > self.ring.HISTORY_SECONDS:
+            raise RuntimeError("当前扫描频率过低，原始码历史不足以覆盖2个完整周期")
         # The project's verified Scan configuration uses signal type 1 for the
         # triangle waveform required by the alternating-interval algorithm.
         if int(snapshot.sc_signal_type) != 1:
@@ -110,12 +123,62 @@ class AdcPeakBalanceController(QObject):
                 raise RuntimeError(
                     "FALC pro的Path Selection为None；请先打开FALC pro设置选择路径"
                 )
-        settings = settings.validated()
-        if settings.target_amplitude > abs(float(snapshot.sc_amplitude)) + 1e-12:
+        if (observe_only
+                and settings.target_amplitude
+                > abs(float(snapshot.sc_amplitude)) + 1e-12):
             raise RuntimeError(
                 "最终扫频范围目标不能大于当前启动Scan Amplitude"
             )
         self._pending_start = (settings, bool(observe_only), bool(auto_engage_falc))
+        self.start_frequency = frequency
+        self.restore_offset = float(snapshot.sc_offset)
+        self.restore_amplitude = abs(float(snapshot.sc_amplitude))
+        if (not observe_only
+                and not self._frequency_matches(
+                    frequency, settings.search_frequency_hz
+                )):
+            self.running = True
+            self.pending_write = True
+            self.pending_kind = "frequency_start"
+            self.pending_value = settings.search_frequency_hz
+            self.running_changed.emit(True)
+            self.manual_advice = (
+                f"正在把快速寻峰频率从{frequency:g} Hz切换到"
+                f"{settings.search_frequency_hz:g} Hz并等待设备读回"
+            )
+            self._log(self.manual_advice)
+            self.session.set_scan_frequency(settings.search_frequency_hz)
+            return
+        self._continue_start(snapshot)
+
+    @classmethod
+    def _frequency_matches(cls, actual: float, expected: float) -> bool:
+        tolerance = max(
+            cls.FREQUENCY_READBACK_TOLERANCE_HZ,
+            abs(float(expected)) * 1e-5,
+        )
+        return abs(float(actual) - float(expected)) <= tolerance
+
+    def _continue_start(self, snapshot) -> None:
+        if self._pending_start is None:
+            return
+        settings, observe_only, _auto_engage_falc = self._pending_start
+        if (not observe_only
+                and abs(abs(float(snapshot.sc_amplitude))
+                        - settings.initial_search_amplitude) > 5e-7):
+            self.running = True
+            self.pending_write = True
+            self.pending_kind = "amplitude_start"
+            self.pending_value = settings.initial_search_amplitude
+            self.running_changed.emit(True)
+            self.manual_advice = (
+                f"正在把初始化Scan Amplitude从"
+                f"{abs(float(snapshot.sc_amplitude)):.6f} Vpp切换到"
+                f"{settings.initial_search_amplitude:.6f} Vpp并等待设备读回"
+            )
+            self._log(self.manual_advice)
+            self.session.set_scan_amplitude(settings.initial_search_amplitude)
+            return
         if not bool(snapshot.sc_enabled):
             if observe_only:
                 raise RuntimeError("观察模式禁止写入DLC pro；请先手动启用Scan")
@@ -148,7 +211,7 @@ class AdcPeakBalanceController(QObject):
         self.auto_engage_falc = bool(auto_engage_falc and not observe_only)
         self.falc_engaged = False
         self.start_offset = float(snapshot.sc_offset)
-        self.start_amplitude = float(snapshot.sc_amplitude)
+        self.start_amplitude = abs(float(snapshot.sc_amplitude))
         self.pending_write = False
         self.pending_value = None
         self.pending_wait_cycles = 0.0
@@ -156,9 +219,9 @@ class AdcPeakBalanceController(QObject):
         self.settle_until = 0.0
         self.settle_kind = ""
         self.restore_queue.clear()
-        self.manual_advice = "正在采集4个完整扫描周期，请暂时不要调节"
+        self.manual_advice = "正在采集2个完整扫描周期，请暂时不要调节"
         self.gate_bin = self._latest_bin()
-        self._wait_for_new_window(4.0, keep_gate=True)
+        self._wait_for_new_window(self.ANALYSIS_CYCLES, keep_gate=True)
         was_running = self.running
         self.running = True
         if not was_running:
@@ -169,7 +232,7 @@ class AdcPeakBalanceController(QObject):
             f"Amplitude={self.start_amplitude:.6f}，频率={frequency:g} Hz"
         )
         self.timer.start()
-        self._emit_status(PeakObservation(False, "采集4个扫描周期建立00模基准"))
+        self._emit_status(PeakObservation(False, "采集2个扫描周期建立00模基准"))
 
     def stop(self, reason: str = "用户停止") -> None:
         if not self.running:
@@ -188,13 +251,15 @@ class AdcPeakBalanceController(QObject):
         self.stopped.emit(reason)
 
     def restore_start_values(self) -> None:
-        if self.start_offset is None or self.start_amplitude is None:
+        if self.restore_offset is None or self.restore_amplitude is None:
             raise RuntimeError("本次尚未保存启动Offset/Amplitude")
         self.stop("停止自动控制并恢复启动参数")
         self.restore_queue = [
-            ("offset", float(self.start_offset)),
-            ("amplitude", float(self.start_amplitude)),
+            ("offset", float(self.restore_offset)),
+            ("amplitude", float(self.restore_amplitude)),
         ]
+        if self.start_frequency is not None:
+            self.restore_queue.append(("frequency", float(self.start_frequency)))
         self._run_restore_queue()
 
     def _run_restore_queue(self) -> None:
@@ -207,8 +272,10 @@ class AdcPeakBalanceController(QObject):
         self.pending_wait_cycles = 0.0
         if kind == "offset":
             self.session.set_scan_offset(value)
-        else:
+        elif kind == "amplitude":
             self.session.set_scan_amplitude(value)
+        else:
+            self.session.set_scan_frequency(value)
 
     def _latest_bin(self) -> int | None:
         frame = self.ring.raw_history(0.01)
@@ -241,16 +308,16 @@ class AdcPeakBalanceController(QObject):
             self.settle_pending = False
             self.settle_kind = ""
             self.gate_bin = self._latest_bin()
-            self._wait_for_new_window(4.0, keep_gate=True)
+            self._wait_for_new_window(self.ANALYSIS_CYCLES, keep_gate=True)
             self._log(
-                f"{settled_kind}写入后的稳定期结束；从当前ADC bin开始采集4个全新周期"
+                f"{settled_kind}写入后的稳定期结束；从当前ADC bin开始采集2个全新周期"
             )
             return
         if abs(frequency - self.scan_frequency) / max(self.scan_frequency, 1e-12) > 0.02:
             self.scan_frequency = frequency
             self.engine.reset_after_frequency_change()
             self.gate_bin = self._latest_bin()
-            self._wait_for_new_window(4.0, keep_gate=True)
+            self._wait_for_new_window(self.ANALYSIS_CYCLES, keep_gate=True)
             self._log(f"扫描频率变化为{frequency:g} Hz，重新建立峰周期")
             return
         if self.observe_only:
@@ -284,10 +351,10 @@ class AdcPeakBalanceController(QObject):
                     self.engine, self.scan_unit
                 )
                 self.gate_bin = self._latest_bin()
-                self._wait_for_new_window(4.0, keep_gate=True)
+                self._wait_for_new_window(self.ANALYSIS_CYCLES, keep_gate=True)
                 self.manual_advice = (
                     "已检测到人工调节：" + "；".join(changes)
-                    + "。正在等待4个全新扫描周期，期间不要继续改参数。"
+                    + "。正在等待2个全新扫描周期，期间不要继续改参数。"
                 )
                 self._log(self.manual_advice)
                 self._emit_status(PeakObservation(
@@ -335,15 +402,23 @@ class AdcPeakBalanceController(QObject):
             self.stop(action.reason)
         elif action.kind in {"offset", "amplitude"} and action.value is not None:
             self._submit_action(action)
-        elif (self.auto_engage_falc and self.engine.finalized
-              and action.state == "track" and observation.valid
-              and observation.balance_error <= self.engine.settings.balance_tolerance):
-            self._engage_falc()
+        elif (self.engine.finalized and action.state == "track"
+              and observation.valid
+              and observation.balance_error
+              <= self.engine.settings.balance_tolerance):
+            if self.auto_engage_falc:
+                self._engage_falc()
+            else:
+                self.manual_advice = (
+                    "最终验收通过；未勾选自动使能FALC pro。"
+                    "已停止自动调节并保持当前Scan、Offset和Amplitude。"
+                )
+                self.stop(self.manual_advice)
         else:
             # Consume this window. Stable confirmations and tracking checks
             # must never count the same ADC bins more than once.
             self.gate_bin = int(history.bin_indices[-1])
-            self._wait_for_new_window(4.0, keep_gate=True)
+            self._wait_for_new_window(self.ANALYSIS_CYCLES, keep_gate=True)
 
     def _observe(self, observation: PeakObservation) -> ControlAction:
         """Give bounded manual instructions without issuing any device write."""
@@ -357,30 +432,23 @@ class AdcPeakBalanceController(QObject):
             if engine.current_amplitude < engine.last_good_amplitude * 0.999:
                 self.manual_advice = (
                     f"当前峰识别失败（{observation.reason}）。请先把 Scan Amplitude "
-                    f"恢复到最近可靠值 {engine.last_good_amplitude:.6f}，然后等待4个周期。"
+                    f"恢复到最近可靠值 {engine.last_good_amplitude:.6f}，然后等待2个周期。"
                 )
             elif observation.reason == "未找到足够的00模穿越峰":
-                target = min(
-                    engine.search_amplitude_ceiling,
-                    engine.current_amplitude * 1.25,
+                step = max(settings.offset_step, settings.min_offset_step)
+                self.manual_advice = (
+                    "当前没有检测到透射峰。保持 Scan Amplitude="
+                    f"{engine.current_amplitude:.6f} Vpp 不变，以启动Offset="
+                    f"{engine.start_offset:.6f}为中心，按 +{step:.6f}、"
+                    f"-{step:.6f}、+{2 * step:.6f}、-{2 * step:.6f}…"
+                    "左右逐步扩大Offset；每次调节后等待2个新周期。"
+                    f"不要超过±{settings.max_offset_deviation:.6f}的安全范围。"
                 )
-                if target > engine.current_amplitude * 1.001:
-                    self.manual_advice = (
-                        "当前没有检测到足够的00模穿越峰。请保持Offset不动，"
-                        f"把 Scan Amplitude 从 {engine.current_amplitude:.6f} Vpp "
-                        f"扩大到 {target:.6f} Vpp，然后等待4个周期。"
-                    )
-                else:
-                    self.manual_advice = (
-                        f"当前没有检测到00模，且已达到安全搜索上限 "
-                        f"{engine.search_amplitude_ceiling:.6f} Vpp。请检查光路、"
-                        "透射峰通道和峰极性，不要继续扩大。"
-                    )
             else:
                 self.manual_advice = (
                     f"当前峰识别失败（{observation.reason}）。先保持 Offset 不动；"
                     "确认透射峰通道、三角扫描和峰极性。若画面确实扫不到00模，"
-                    "请适当增大 Scan Amplitude 后等待4个周期。"
+                    "请适当增大 Scan Amplitude 后等待2个周期。"
                 )
             return ControlAction("none", None, self.manual_advice, "observe")
 
@@ -424,15 +492,15 @@ class AdcPeakBalanceController(QObject):
                         f"（门槛≤{stage.balance_tolerance * 100:.2f}%）。"
                         "下一步进入缩幅：请把 Scan Amplitude 从 "
                         f"{engine.current_amplitude:.6f} Vpp 调到 {target:.6f} Vpp，"
-                        "然后保持不动等待4个周期；之后会重新居中并继续缩幅，"
-                        f"直至最终目标 {engine.amplitude_floor:.6f} Vpp。"
+                        "然后保持不动等待2个周期；该版本会一步进入最终幅度，"
+                        "不再经过中扫、细扫和窄扫。"
                     )
             else:
                 self.manual_advice = (
                     f"{stage.name}峰间隔已合格（门槛≤"
                     f"{stage.balance_tolerance * 100:.2f}%），正在用独立窗口复核 "
                     f"{engine.stable_count}/{stage.stable_windows}。"
-                    "现在不要调节，等待下一批4个周期。"
+                    "现在不要调节，等待下一批2个周期。"
                 )
             return ControlAction("none", None, self.manual_advice, "observe")
 
@@ -483,7 +551,7 @@ class AdcPeakBalanceController(QObject):
         self.manual_advice = (
             f"当前不均匀度 {observation.balance_error * 100:.2f}%。{explanation}："
             f"请把 Scan Offset 从 {engine.current_offset:.6f} 手动调到 "
-            f"{target:.6f}（步长 {step:.6f}），然后保持不动等待4个周期。"
+            f"{target:.6f}（步长 {step:.6f}），然后保持不动等待2个周期。"
         )
         return ControlAction("none", None, self.manual_advice, "observe")
 
@@ -517,13 +585,13 @@ class AdcPeakBalanceController(QObject):
             self._log(
                 f"仅观察，未执行建议：{action.kind} -> {action.value}"
             )
-            self._wait_for_new_window(4.0)
+            self._wait_for_new_window(self.ANALYSIS_CYCLES)
             return
         self.pending_write = True
         self.pending_kind = action.kind
         self.pending_value = float(action.value)
         self.gate_bin = self._latest_bin()
-        cycles = 3.0 if action.kind == "amplitude" else 2.0
+        cycles = self.SETTLE_CYCLES
         self.pending_wait_cycles = cycles
         if action.kind == "offset":
             self.session.set_scan_offset(float(action.value))
@@ -532,8 +600,47 @@ class AdcPeakBalanceController(QObject):
 
     def _write_completed(self, snapshot) -> None:
         # Shared-session manual writes (especially in observe-only mode) must
-        # be detected by _tick as operator changes and receive a fresh 4-cycle
+            # be detected by _tick as operator changes and receive a fresh 2-cycle
         # window.  Only consume completions initiated by this controller.
+        if self.pending_write and self.pending_kind == "frequency_start":
+            expected = float(self.pending_value or 0.0)
+            actual = float(snapshot.sc_frequency)
+            if not self._frequency_matches(actual, expected):
+                self.pending_write = False
+                self.pending_kind = ""
+                self.pending_value = None
+                self.stop(
+                    f"快速扫频频率写入读回不一致：期望{expected:g} Hz，"
+                    f"实际{actual:g} Hz"
+                )
+                return
+            self.pending_write = False
+            self.pending_kind = ""
+            self.pending_value = None
+            self._log(f"快速扫频频率已切换并读回为{actual:g} Hz")
+            self._continue_start(snapshot)
+            return
+        if self.pending_write and self.pending_kind == "amplitude_start":
+            expected = float(self.pending_value or 0.0)
+            actual = abs(float(snapshot.sc_amplitude))
+            tolerance = max(5e-7, abs(expected) * 1e-9)
+            if abs(actual - expected) > tolerance:
+                self.pending_write = False
+                self.pending_kind = ""
+                self.pending_value = None
+                self.stop(
+                    f"初始化Scan Amplitude写入读回不一致："
+                    f"期望{expected:.9g} Vpp，实际{actual:.9g} Vpp"
+                )
+                return
+            self.pending_write = False
+            self.pending_kind = ""
+            self.pending_value = None
+            self._log(
+                f"初始化Scan Amplitude已切换并读回为{actual:.6f} Vpp"
+            )
+            self._continue_start(snapshot)
+            return
         if self.pending_write and self.pending_kind == "scan_enable":
             if not bool(snapshot.sc_enabled):
                 self.pending_write = False
@@ -543,18 +650,24 @@ class AdcPeakBalanceController(QObject):
             self.pending_write = False
             self.pending_kind = ""
             self.pending_value = None
-            self._log("Scan已自动开启并通过读回校验；开始采集4个全新周期")
+            self._log("Scan已自动开启并通过读回校验；开始采集2个全新周期")
             self._begin_analysis(snapshot)
             return
         if (not self.pending_write
                 or self.pending_kind not in {
-                    "offset", "amplitude", "restore_offset", "restore_amplitude"
+                    "offset", "amplitude", "restore_offset", "restore_amplitude",
+                    "restore_frequency",
                 }):
             return
         pending_kind = self.pending_kind
         pending_value = self.pending_value
         if pending_value is not None:
-            field = "sc_offset" if pending_kind.endswith("offset") else "sc_amplitude"
+            if pending_kind.endswith("offset"):
+                field = "sc_offset"
+            elif pending_kind.endswith("amplitude"):
+                field = "sc_amplitude"
+            else:
+                field = "sc_frequency"
             actual = float(getattr(snapshot, field))
             # DLC pro readback can be quantized below the six decimals shown in
             # the UI.  Half a display LSB is accepted; larger disagreement is
@@ -580,7 +693,12 @@ class AdcPeakBalanceController(QObject):
             self._apply_amplitude_step_profile(self.engine, self.scan_unit)
         was_restore = self.pending_kind.startswith("restore_")
         wait_cycles = self.pending_wait_cycles
-        completed_kind = "Amplitude" if pending_kind.endswith("amplitude") else "Offset"
+        if pending_kind.endswith("amplitude"):
+            completed_kind = "Amplitude"
+        elif pending_kind.endswith("frequency"):
+            completed_kind = "Frequency"
+        else:
+            completed_kind = "Offset"
         self.pending_write = False
         self.pending_kind = ""
         self.pending_value = None
@@ -593,12 +711,13 @@ class AdcPeakBalanceController(QObject):
             self.settle_kind = completed_kind
             self.settle_until = (
                 time.monotonic()
-                + (wait_cycles or 2.0) / max(self.scan_frequency, 1e-12)
+                + (wait_cycles or self.SETTLE_CYCLES) / max(self.scan_frequency, 1e-12)
             )
             self.available_after = self.settle_until
             self._log(
-                f"{completed_kind}写入读回一致；先丢弃{wait_cycles or 2.0:g}个稳定周期，"
-                "随后另取4个新周期计算"
+                f"{completed_kind}写入读回一致；先丢弃"
+                f"{wait_cycles or self.SETTLE_CYCLES:g}个稳定周期，"
+                "随后另取2个新周期计算"
             )
 
     def _engage_falc(self) -> None:

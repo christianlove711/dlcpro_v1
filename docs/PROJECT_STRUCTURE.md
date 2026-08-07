@@ -10,7 +10,7 @@
 | `controllers/` | Laser、Scan&Lock、FALC、Relock 等主流程 |
 | `windows/` | DLC pro 功能独立窗口 |
 | `widgets/` | 功能面板和复用控件 |
-| `daq_pc/` | PL UDP 接收、示波器、HDF5、JTAG 下载、ADC自动找峰 |
+| `daq_pc/` | PL UDP 接收、示波器、HDF5、JTAG 下载、ADC 两级自动找峰与锁定 |
 
 ## 验证与资料
 
@@ -36,6 +36,15 @@
 | `archive/development_previews/` | 旧UI截图、PDF页面提取和预览配置 |
 
 `archive/` 只读追溯，不应被运行代码导入，也不进入发布 ZIP。
+
+ADC 自动锁定的当前核心文件：
+
+| 路径 | 用途 |
+|---|---|
+| `daq_pc/adc_peak_balance_algorithm.py` | 峰识别、理论居中、最终 Offset 网格和状态机 |
+| `daq_pc/adc_peak_balance_controller.py` | DLC pro 写入、读回校验、稳定周期、FALC 接管 |
+| `daq_pc/adc_peak_balance_window.py` | 自动锁定独立窗口、参数与运行日志 |
+| `reports/adc_peak_balance/ALGORITHM_REPORT.md` | 当前算法规格与现场验证要求 |
 
 ## 窗口生命周期
 
