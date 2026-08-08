@@ -10,7 +10,7 @@
 
 ## 算法
 
-- [ADC原始码00模两级自动锁定算法](../reports/adc_peak_balance/ALGORITHM_REPORT.md)：ADC采集页面当前使用的初始化寻峰、理论居中、`0.2 Vpp` 两级 Offset 网格和可选 FALC 接管算法（2026-08-07 更新）。
+- [ADC原始码00模两阶段自动锁定算法](../reports/adc_peak_balance/ALGORITHM_REPORT.md)：ADC采集页面当前使用的21项参数、跨周期峰族、完整理论跳转、最终定向粗/精调、四类CSV日志和可选FALC接管算法（2026-08-08更新）。
 - [主程序双信号自动锁频配置指南](AUTO_LOCK_ALGORITHM_CONFIG_GUIDE.md)：主 DLC pro 控制台中历史形成的透射/误差信号三策略自动锁频模块，与 ADC 页面“00模自动锁频”不是同一个控制器。
 
 ## ADC与PL UDP

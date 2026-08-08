@@ -7,14 +7,18 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
+    QLabel,
     QPushButton,
     QSizePolicy,
     QSpinBox,
     QStyle,
     QStyleOptionSpinBox,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -364,7 +368,72 @@ class StepTargetSpinBoxRow(QWidget):
 
 def create_toggle_button(slot, parent: QWidget | None = None) -> QPushButton:
     button = QPushButton(parent)
+    button.setObjectName("ToggleButton")
     button.setCheckable(True)
-    button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    # Toggle controls represent a state, not a full-width action.  A fixed
+    # footprint keeps header and QFormLayout variants visually identical.
+    button.setFixedSize(104, 36)
+    button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
     button.clicked.connect(slot)
     return button
+
+
+class CompactMessageDialog(QDialog):
+    """Small, predictable alternative to platform-dependent QMessageBox sizing."""
+
+    def __init__(
+        self,
+        parent: QWidget | None,
+        title: str,
+        message: str,
+        *,
+        accept_text: str,
+        reject_text: str | None = None,
+        icon: QStyle.StandardPixmap = QStyle.SP_MessageBoxInformation,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("CompactMessageDialog")
+        self.setWindowTitle(title)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 18, 22, 18)
+        layout.setSpacing(16)
+
+        body = QHBoxLayout()
+        body.setSpacing(16)
+        icon_label = QLabel(self)
+        icon_label.setObjectName("CompactMessageIcon")
+        icon_label.setPixmap(self.style().standardIcon(icon).pixmap(32, 32))
+        icon_label.setFixedSize(36, 36)
+        icon_label.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+        body.addWidget(icon_label, 0, Qt.AlignTop)
+
+        self.message_label = QLabel(message, self)
+        # Keep the historical object name so UI diagnostics can locate it.
+        self.message_label.setObjectName("qt_msgbox_label")
+        self.message_label.setWordWrap(True)
+        self.message_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.message_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        body.addWidget(self.message_label, 1)
+        layout.addLayout(body)
+
+        self.button_box = QDialogButtonBox(self)
+        self.accept_button = self.button_box.addButton(
+            accept_text, QDialogButtonBox.AcceptRole
+        )
+        self.accept_button.setObjectName("PrimaryDialogButton")
+        self.accept_button.clicked.connect(self.accept)
+        self.reject_button: QPushButton | None = None
+        if reject_text is not None:
+            self.reject_button = self.button_box.addButton(
+                reject_text, QDialogButtonBox.RejectRole
+            )
+            self.reject_button.clicked.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+        # Long notices remain readable without ever growing into a screen-wide bar.
+        width = 560 if len(message) > 45 else 460
+        self.message_label.setMinimumWidth(width - 110)
+        self.message_label.setMaximumWidth(width - 110)
+        self.setFixedWidth(width)

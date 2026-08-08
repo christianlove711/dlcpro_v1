@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from PySide6.QtCore import QByteArray, QEvent, QMargins, QObject, QSettings, QSize
+from PySide6.QtCore import (
+    QByteArray, QEvent, QMargins, QObject, QSettings, QSize, QTimer,
+)
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
@@ -52,34 +54,61 @@ def fit_size_to_screen(size: QSize, window: QWidget | None = None, margin: int =
 
 
 def fit_window_to_screen(window: QWidget, margin: int = 16, *, center: bool = False) -> None:
-    """Keep a window visible without changing its position unless it is off-screen."""
+    """Keep the complete native frame, especially its title bar, on-screen."""
 
     screen = _screen_for_window(window)
     if screen is None:
         return
     available = screen.availableGeometry().adjusted(margin, margin, -margin, -margin)
     target = window.frameGeometry()
-    if target.width() > available.width() or target.height() > available.height():
+    frame_extra_width = max(0, target.width() - window.width())
+    frame_extra_height = max(0, target.height() - window.height())
+    maximum_client_width = max(360, available.width() - frame_extra_width)
+    maximum_client_height = max(280, available.height() - frame_extra_height)
+    if (window.width() > maximum_client_width or
+            window.height() > maximum_client_height):
         window.resize(
-            min(target.width(), available.width()),
-            min(target.height(), available.height()),
+            min(window.width(), maximum_client_width),
+            min(window.height(), maximum_client_height),
         )
         target = window.frameGeometry()
     if center:
         target.moveCenter(available.center())
-    if target.right() < available.left() or target.left() > available.right():
+    if target.width() <= available.width():
+        target.moveLeft(max(
+            available.left(),
+            min(target.left(), available.right() - target.width() + 1),
+        ))
+    else:
         target.moveLeft(available.left())
-    if target.bottom() < available.top() or target.top() > available.bottom():
+    # Prioritize the title bar over the bottom edge.  Moving an oversized
+    # window upward to expose its bottom is what previously hid all native
+    # minimize/maximize/close controls above the desktop.
+    if target.height() <= available.height():
+        target.moveTop(max(
+            available.top(),
+            min(target.top(), available.bottom() - target.height() + 1),
+        ))
+    else:
         target.moveTop(available.top())
-    if target.left() < available.left():
-        target.moveLeft(available.left())
-    if target.top() < available.top():
-        target.moveTop(available.top())
-    if target.right() > available.right():
-        target.moveRight(available.right())
-    if target.bottom() > available.bottom():
-        target.moveBottom(available.bottom())
     window.move(target.topLeft())
+
+
+def schedule_window_fit(window: QWidget, margin: int = 16,
+                        *, center: bool = False) -> None:
+    """Fit now and again after Windows has created the decorated native frame."""
+
+    def apply_if_alive() -> None:
+        try:
+            if bool(window.property("suppressScheduledScreenFit")):
+                return
+            fit_window_to_screen(window, margin, center=center)
+        except RuntimeError:
+            return
+
+    apply_if_alive()
+    QTimer.singleShot(0, apply_if_alive)
+    QTimer.singleShot(120, apply_if_alive)
 
 
 def apply_font_scale(app: QApplication, scale: float) -> None:
@@ -110,7 +139,7 @@ def _scaled_size(size: QSize, scale: float) -> QSize:
 
 def scale_widget_metrics(root: QWidget, scale: float) -> None:
     for widget in (root, *root.findChildren(QWidget)):
-        if isinstance(widget, QLabel):
+        if isinstance(widget, QLabel) and not widget.property("preserveSingleLine"):
             widget.setWordWrap(True)
         layout = widget.layout()
         if layout is not None:
@@ -155,10 +184,11 @@ def _metric_stylesheet(scale: float) -> str:
     page_title_size = round(19 * scale)
     section_title_size = round(17 * scale)
     return f"""
-        QPushButton, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
+        QPushButton, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QLabel#StatusBadge {{
             min-height: {control_height}px;
             padding: {vertical_padding}px {horizontal_padding}px;
         }}
+        QLabel#StatusBadge {{ max-height: {control_height}px; }}
         QTabBar::tab {{
             padding: {tab_padding_y}px {tab_padding_x}px;
         }}
@@ -279,6 +309,7 @@ class WindowLayoutManager(QObject):
         if isinstance(watched, QWidget) and watched in registrations:
             if event.type() == QEvent.Type.Show:
                 self.prepare_show(watched)
+                schedule_window_fit(watched)
             elif event.type() in {QEvent.Type.Hide, QEvent.Type.Close}:
                 self.save_window(watched)
         return super().eventFilter(watched, event)

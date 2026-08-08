@@ -8,11 +8,14 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
     QFrame,
     QGridLayout,
     QGroupBox,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -22,7 +25,9 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
+    QStyle,
     QTableWidget,
+    QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -57,8 +62,10 @@ from controllers import (
     LaserController,
     ScanLockController,
 )
-from widgets.common_controls import SafeComboBox, SafeSpinBox
-from ui_scaling import SCALE_OPTIONS, UiScaleManager, WindowLayoutManager
+from widgets.common_controls import CompactMessageDialog, SafeComboBox, SafeSpinBox
+from ui_scaling import (
+    SCALE_OPTIONS, UiScaleManager, WindowLayoutManager, schedule_window_fit,
+)
 from windows import (
     AutoLockWindow,
     FalcProWindow,
@@ -67,6 +74,47 @@ from windows import (
     build_laser_page,
     build_scan_lock_page,
 )
+
+class DeviceParametersDialog(QDialog):
+    """Non-modal full device-parameter view backed by the overview table."""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.resize(720, 520)
+        self.setMinimumSize(520, 360)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+
+        self.table = QTableWidget(0, 2, self)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setSelectionMode(QTableWidget.NoSelection)
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        layout.addWidget(self.table, 1)
+
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Close, self)
+        self.buttons.rejected.connect(self.close)
+        layout.addWidget(self.buttons)
+
+    def apply_texts(self, language: str) -> None:
+        t = TEXT[language]
+        self.setWindowTitle(t["device_parameters"])
+        self.table.setHorizontalHeaderLabels([t["parameter"], t["value"]])
+        self.buttons.button(QDialogButtonBox.Close).setText(t["dialog_close"])
+
+    def sync_from(self, source: QTableWidget) -> None:
+        self.table.setRowCount(source.rowCount())
+        for row in range(source.rowCount()):
+            for column in range(source.columnCount()):
+                item = source.item(row, column)
+                self.table.setItem(
+                    row,
+                    column,
+                    QTableWidgetItem(item.text() if item is not None else ""),
+                )
+
 
 class MainWindow(QMainWindow):
     PRECISION_OPTIONS = [
@@ -180,19 +228,22 @@ class MainWindow(QMainWindow):
         self.language_combo.addItem("中文", "zh")
         self.language_combo.addItem("English", "en")
         self.language_combo.currentIndexChanged.connect(self._on_language_changed)
-        header_layout.addWidget(self.language_label)
-        header_layout.addWidget(self.language_combo)
+        header_layout.addWidget(self.language_label, 0, Qt.AlignVCenter)
+        header_layout.addWidget(self.language_combo, 0, Qt.AlignVCenter)
         self.ui_scale_label = QLabel()
         self.ui_scale_label.setObjectName("heroSubtitle")
         self.ui_scale_combo = SafeComboBox()
         for label, scale in SCALE_OPTIONS:
             self.ui_scale_combo.addItem(label, scale)
         self.ui_scale_combo.currentIndexChanged.connect(self._on_ui_scale_changed)
-        header_layout.addWidget(self.ui_scale_label)
-        header_layout.addWidget(self.ui_scale_combo)
+        header_layout.addWidget(self.ui_scale_label, 0, Qt.AlignVCenter)
+        header_layout.addWidget(self.ui_scale_combo, 0, Qt.AlignVCenter)
         self.status_label = QLabel()
         self.status_label.setObjectName("StatusBadge")
-        header_layout.addWidget(self.status_label)
+        self.status_label.setProperty("preserveSingleLine", True)
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        header_layout.addWidget(self.status_label, 0, Qt.AlignVCenter)
         root.addWidget(hero)
 
         self.connection_group = self._build_connection_group()
@@ -208,10 +259,18 @@ class MainWindow(QMainWindow):
         self.nav_layout.setSpacing(10)
         self.laser_button = self._create_nav_button(self._open_laser_window)
         self.falc_button = self._create_nav_button(self._open_falc_window)
+        self.daq_scan_control_button = self._create_nav_button(
+            self._open_daq_scan_control
+        )
+        self.daq_auto_lock_button = self._create_nav_button(
+            self._open_daq_auto_lock
+        )
         self.daq_button = self._create_nav_button(self._open_daq_window)
         self.nav_buttons = (
             self.laser_button,
             self.falc_button,
+            self.daq_scan_control_button,
+            self.daq_auto_lock_button,
             self.daq_button,
         )
         self._nav_columns = 0
@@ -310,16 +369,35 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.overview_title = QLabel()
-        self.overview_title.setObjectName("PageTitle")
-        layout.addWidget(self.overview_title)
 
-        self.parameter_group = QGroupBox()
-        self.parameter_group.setMinimumHeight(95)
-        self.parameter_group.setMaximumHeight(170)
+        self.parameter_group = QFrame()
+        self.parameter_group.setObjectName("OverviewCard")
+        self.parameter_group.setMinimumHeight(168)
+        self.parameter_group.setMaximumHeight(230)
         self.parameter_group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         group_layout = QVBoxLayout(self.parameter_group)
+        group_layout.setContentsMargins(18, 16, 18, 16)
+        group_layout.setSpacing(12)
+
+        header = QHBoxLayout()
+        heading = QVBoxLayout()
+        heading.setSpacing(2)
+        self.overview_title = QLabel()
+        self.overview_title.setObjectName("OverviewTitle")
+        self.overview_subtitle = QLabel()
+        self.overview_subtitle.setObjectName("OverviewSubtitle")
+        heading.addWidget(self.overview_title)
+        heading.addWidget(self.overview_subtitle)
+        header.addLayout(heading, 1)
+        self.parameter_details_button = QPushButton()
+        self.parameter_details_button.setObjectName("ParameterDetailsButton")
+        self.parameter_details_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.parameter_details_button.clicked.connect(self._open_device_parameters)
+        header.addWidget(self.parameter_details_button, 0, Qt.AlignVCenter)
+        group_layout.addLayout(header)
+
         self.parameter_table = QTableWidget(0, 2)
+        self.parameter_table.setObjectName("ParameterSummaryTable")
         self.parameter_table.setSizeAdjustPolicy(QAbstractScrollArea.AdjustIgnored)
         self.parameter_table.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         self.parameter_table.horizontalHeader().setStretchLastSection(True)
@@ -327,7 +405,17 @@ class MainWindow(QMainWindow):
         self.parameter_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.parameter_table.setSelectionMode(QTableWidget.NoSelection)
         self.parameter_table.setMinimumHeight(0)
+        self.parameter_table.cellDoubleClicked.connect(
+            lambda _row, _column: self._open_device_parameters()
+        )
         group_layout.addWidget(self.parameter_table)
+        self.parameter_empty_label = QLabel()
+        self.parameter_empty_label.setObjectName("ParameterEmptyState")
+        self.parameter_empty_label.setAlignment(Qt.AlignCenter)
+        self.parameter_empty_label.setMinimumHeight(62)
+        group_layout.addWidget(self.parameter_empty_label, 1)
+        self.device_parameters_dialog = DeviceParametersDialog(self)
+        self._sync_parameter_overview_state()
         layout.addWidget(self.parameter_group, 0)
 
         self.runtime_log_group = QGroupBox()
@@ -411,7 +499,7 @@ class MainWindow(QMainWindow):
     def _open_auto_lock_window(self) -> None:
         self._show_auxiliary_window(self.auto_lock_window)
 
-    def _open_daq_window(self) -> None:
+    def _ensure_daq_window(self) -> DaqMainWindow:
         if self.daq_window is None:
             self.daq_window = DaqMainWindow(
                 snapshot_provider=lambda: self.snapshot,
@@ -425,11 +513,38 @@ class MainWindow(QMainWindow):
             # Entering ADC opens only the acquisition console.  The combined
             # auto-lock/scope workspace is opened explicitly from inside it.
             self.daq_window.auto_lock_workspace.hide()
-        self.daq_window.showNormal()
-        self.daq_window.show()
-        self.daq_window.raise_()
-        self.daq_window.activateWindow()
+        return self.daq_window
+
+    def _open_daq_window(self) -> None:
+        daq_window = self._ensure_daq_window()
+        daq_window.showNormal()
+        daq_window.show()
+        schedule_window_fit(daq_window)
+        daq_window.raise_()
+        daq_window.activateWindow()
         self.refresh_visible_snapshot()
+
+    def _open_daq_scan_control(self) -> None:
+        self._ensure_daq_window().show_scan_control()
+        self.refresh_visible_snapshot()
+
+    def _open_daq_auto_lock(self) -> None:
+        self._ensure_daq_window().show_peak_lock()
+        self.refresh_visible_snapshot()
+
+    def _open_device_parameters(self) -> None:
+        self.device_parameters_dialog.sync_from(self.parameter_table)
+        self.device_parameters_dialog.apply_texts(self.language)
+        self.layout_manager.prepare_show(self.device_parameters_dialog)
+        self.device_parameters_dialog.showNormal()
+        self.device_parameters_dialog.show()
+        self.device_parameters_dialog.raise_()
+        self.device_parameters_dialog.activateWindow()
+
+    def _sync_parameter_overview_state(self) -> None:
+        has_parameters = self.parameter_table.rowCount() > 0
+        self.parameter_table.setVisible(has_parameters)
+        self.parameter_empty_label.setVisible(not has_parameters)
 
     def _show_auxiliary_window(self, window: QWidget) -> None:
         self.layout_manager.prepare_show(window)
@@ -673,6 +788,35 @@ class MainWindow(QMainWindow):
                 border: 1px solid #bce6ce;
                 color: #137044;
             }
+            QFrame#OverviewCard {
+                background: #ffffff;
+                border: 1px solid #dce3ed;
+                border-radius: 10px;
+            }
+            QLabel#OverviewTitle {
+                color: #102f57;
+                font-size: 18px;
+                font-weight: 700;
+            }
+            QLabel#OverviewSubtitle { color: #69758a; }
+            QLabel#ParameterEmptyState {
+                background: #f8fafc;
+                border: 1px dashed #cbd5e1;
+                border-radius: 8px;
+                color: #78869a;
+                padding: 10px;
+            }
+            QTableWidget#ParameterSummaryTable {
+                background: #f8fafc;
+                border: 1px solid #dce3ed;
+                border-radius: 8px;
+            }
+            QPushButton#ParameterDetailsButton {
+                background: #e9f2ff;
+                border-color: #bdd5fa;
+                color: #195ca8;
+                min-width: 96px;
+            }
             QLabel#PageTitle {
                 color: #102f57;
                 font-size: 22px;
@@ -690,6 +834,38 @@ class MainWindow(QMainWindow):
             }
             QLabel#SubtleHint, QLabel#PlaceholderBody { color: #69758a; }
             QFrame#Divider { color: #dce3ed; }
+            QPushButton#ToggleButton {
+                min-width: 104px;
+                max-width: 104px;
+                min-height: 36px;
+                max-height: 36px;
+                padding: 0 10px;
+                background: #ffffff;
+                border: 1px solid #b9c7da;
+                color: #36516f;
+            }
+            QPushButton#ToggleButton:checked {
+                background: #e8f7ef;
+                border-color: #75b391;
+                color: #137044;
+            }
+            QPushButton#ToggleButton:disabled {
+                background: #eef2f7;
+                border-color: #d7dee9;
+                color: #8794a8;
+            }
+            QDialog#CompactMessageDialog {
+                background: #ffffff;
+            }
+            QDialog#CompactMessageDialog QLabel#qt_msgbox_label {
+                background: transparent;
+                color: #172033;
+            }
+            QPushButton#PrimaryDialogButton {
+                background: #286bc1;
+                border-color: #286bc1;
+                color: #ffffff;
+            }
             """
         # Apply the exact secondary-window palette last so the main console
         # uses the same blue hero, light canvas, cards and status colors.
@@ -729,6 +905,7 @@ class MainWindow(QMainWindow):
                 self.auto_lock_window.config_window,
                 self.auto_lock_window.waveform_window,
                 self.auto_lock_window.log_window,
+                self.device_parameters_dialog,
             )
         )
         self.layout_manager.register_windows(
@@ -741,6 +918,7 @@ class MainWindow(QMainWindow):
                 (self.auto_lock_window.config_window, "auto-lock-config", 720, 620),
                 (self.auto_lock_window.waveform_window, "auto-lock-waveform", 1040, 700),
                 (self.auto_lock_window.log_window, "auto-lock-log", 920, 620),
+                (self.device_parameters_dialog, "device-parameters", 720, 520),
             )
         )
         selected = self.scale_manager.selected_scale
@@ -770,9 +948,10 @@ class MainWindow(QMainWindow):
 
         self.connection_group.setTitle(t["connection"])
         self.workspace_group.setTitle(t["workspace"])
-        self.parameter_group.setTitle(t["device_parameters"])
         self.runtime_log_group.setTitle(t["runtime_log"])
         self.overview_title.setText(t["device_overview"])
+        self.overview_subtitle.setText(t["device_overview_hint"])
+        self.parameter_empty_label.setText(t["device_parameters_empty"])
 
         self.mode_label.setText(t["mode"])
         self.mode_combo.setItemText(0, t["network"])
@@ -787,9 +966,13 @@ class MainWindow(QMainWindow):
         self.disconnect_button.setText(t["disconnect"])
         self.refresh_button.setText(t["refresh"])
         self.parameter_table.setHorizontalHeaderLabels([t["parameter"], t["value"]])
+        self.parameter_details_button.setText(t["view_all_parameters"])
+        self.device_parameters_dialog.apply_texts(self.language)
 
         self.laser_button.setText(t["laser"])
         self.falc_button.setText(t["falc"])
+        self.daq_scan_control_button.setText(t["frequency_scan_control"])
+        self.daq_auto_lock_button.setText(t["auto_lock"])
         self.daq_button.setText(t["data_acquisition"])
         self.auto_lock_controller.apply_texts()
         self.falc_window.apply_texts(self.language)
@@ -963,10 +1146,11 @@ class MainWindow(QMainWindow):
         button.blockSignals(True)
         button.setChecked(enabled)
         button.setText(f"{TEXT[self.language]['enable']}  {'●' if enabled else '○'}")
-        button.setStyleSheet(
-            "background: #45614c; border: 1px solid #6b9474;" if enabled
-            else "background: #575757; border: 1px solid #757575;"
-        )
+        # Visual state comes from the shared ToggleButton stylesheet.  Inline
+        # dark colors previously overrode the light theme and produced black bars.
+        button.setStyleSheet("")
+        button.style().unpolish(button)
+        button.style().polish(button)
         button.blockSignals(False)
 
     def update_toggle_button(self, button: QPushButton, enabled: bool) -> None:
@@ -1187,7 +1371,7 @@ class MainWindow(QMainWindow):
         if self.auto_lock_controller.is_running:
             self.auto_lock_controller.handle_task_failure(result)
         message = self.service.format_error(result) if isinstance(result, Exception) else str(result)
-        QMessageBox.critical(self, TEXT[self.language]["error_title"], message)
+        self._show_compact_message(TEXT[self.language]["error_title"], message, QStyle.SP_MessageBoxCritical)
 
     def _handle_connection_failure(self, exc: Exception, task_kind: str) -> bool:
         if task_kind != "poll":
@@ -1198,8 +1382,23 @@ class MainWindow(QMainWindow):
             return True
         self.connection_loss_notified = True
         t = TEXT[self.language]
-        QMessageBox.critical(self, t["connection_lost_title"], self.service.format_error(exc))
+        self._show_compact_message(
+            t["connection_lost_title"],
+            self.service.format_error(exc),
+            QStyle.SP_MessageBoxCritical,
+        )
         return True
+
+    def _show_compact_message(
+        self, title: str, message: str, icon: QStyle.StandardPixmap
+    ) -> None:
+        CompactMessageDialog(
+            self,
+            title,
+            message,
+            accept_text=TEXT[self.language]["dialog_ok"],
+            icon=icon,
+        ).exec()
 
     def _on_language_changed(self) -> None:
         self.language = self.language_combo.currentData()
@@ -1312,10 +1511,10 @@ class MainWindow(QMainWindow):
         else:
             target = str(self.serial_port_combo.currentData() or "").strip()
         if not target:
-            QMessageBox.warning(
-                self,
+            self._show_compact_message(
                 TEXT[self.language]["warning_title"],
                 "Please enter a connection target / 请输入连接目标",
+                QStyle.SP_MessageBoxWarning,
             )
             return
         settings = ConnectionSettings(
@@ -1342,16 +1541,17 @@ class MainWindow(QMainWindow):
             self.service.disconnect()
         except Exception as exc:  # noqa: BLE001
             if not silent:
-                QMessageBox.critical(
-                    self,
+                self._show_compact_message(
                     TEXT[self.language]["error_title"],
                     self.service.format_error(exc),
+                    QStyle.SP_MessageBoxCritical,
                 )
             return
         self.auto_lock_controller.handle_disconnect()
         self.snapshot = None
         self.last_device_current_set = None
         self.parameter_table.setRowCount(0)
+        self._sync_parameter_overview_state()
         self.current_set_programmatic_update = True
         self.current_set_spin.setValue(0.0)
         self.current_set_programmatic_update = False
@@ -1438,7 +1638,11 @@ class MainWindow(QMainWindow):
             sections.update({SnapshotSection.SCAN_LOCK, SnapshotSection.FALC})
         if self.falc_window.isVisible():
             sections.add(SnapshotSection.FALC)
-        if self.daq_window is not None and self.daq_window.isVisible():
+        if self.daq_window is not None and (
+            self.daq_window.isVisible()
+            or self.daq_window.scan_control_window.isVisible()
+            or self.daq_window.auto_lock_workspace.isVisible()
+        ):
             sections.add(SnapshotSection.SCAN_LOCK)
         return SnapshotRequest(frozenset(sections))
 
@@ -1457,6 +1661,9 @@ class MainWindow(QMainWindow):
         self.scan_lock_controller.render_snapshot(snapshot)
         self.auto_lock_controller.render_snapshot(snapshot)
         self.falc_window.render_snapshot(snapshot)
+        self._sync_parameter_overview_state()
+        if self.device_parameters_dialog.isVisible():
+            self.device_parameters_dialog.sync_from(self.parameter_table)
         self._restore_scroll_positions(scroll_positions)
 
     def _capture_scroll_positions(self) -> list[tuple[QScrollArea, int, int]]:
@@ -1543,14 +1750,15 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         t = TEXT[self.language]
-        confirmed = QMessageBox.question(
+        confirmed = CompactMessageDialog(
             self,
             t["exit_confirm_title"],
             t["exit_confirm_body"],
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if confirmed != QMessageBox.Yes:
+            accept_text=t["dialog_confirm"],
+            reject_text=t["dialog_cancel"],
+            icon=QStyle.SP_MessageBoxQuestion,
+        ).exec()
+        if confirmed != QDialog.Accepted:
             event.ignore()
             return
         self.layout_manager.save_all()
@@ -1572,19 +1780,16 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
-def create_safety_notice(parent: QWidget) -> QMessageBox:
+def create_safety_notice(parent: QWidget) -> CompactMessageDialog:
     """Build a compact, word-wrapped safety notice without clipping text."""
     t = TEXT[parent.language]
-    box = QMessageBox(QMessageBox.Information, t["safety_title"], "", parent=parent)
-    box.setTextFormat(Qt.PlainText)
-    box.setText(t["safety_text"])
-    box.setStandardButtons(QMessageBox.Ok)
-    text_label = box.findChild(QLabel, "qt_msgbox_label")
-    if text_label is not None:
-        text_label.setWordWrap(True)
-        text_label.setMinimumWidth(380)
-        text_label.setMaximumWidth(520)
-    return box
+    return CompactMessageDialog(
+        parent,
+        t["safety_title"],
+        t["safety_text"],
+        accept_text=t["dialog_ok"],
+        icon=QStyle.SP_MessageBoxInformation,
+    )
 
 
 def main() -> int:

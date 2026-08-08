@@ -60,10 +60,11 @@ PL 协议不响应 ARP/ICMP，`ping` 失败不能单独作为离线判断。20 M
 - 示波器支持原始 ADC 码/电压、独立纵轴、时基、触发、点/连线/min-max 包络显示；
 - HDF5 可选择单通道、记录速率、保存路径，以及是否同步保存 DLC pro 扫描参数；
 - FPGA 可在后台自动连接本机硬件服务器并下载 `.bit`，无需打开 Vivado GUI；
-- ADC 自动锁频只使用透射峰原始码：自动模式先切换到默认 `10 Hz / 2.5 Vpp`，无峰时以 `±1 V` 递增搜索 Offset；找到峰后按 `D=0.5×Amplitude×不均匀度` 快速居中并一步缩到 `0.2 Vpp`。
-- 最终阶段保持 `0.2 Vpp`，依次搜索 `±0.001～±0.009 V` 和 `±0.01～±0.09 V`；不会回到大扫幅。达到最终条件后，可按勾选状态停止调节，或执行 `Scan Off → FALC Main On → FALC Unlim On` 并逐项读回验证。
+- ADC 自动锁频只使用透射峰原始码：自动模式使用界面设置的快速频率和初始化Amplitude（新安装默认 `10 Hz / 2.5 Vpp`）；无峰时以 `±1 V`递增搜索Offset，找到主峰族后按`D=0.5×Amplitude×不均匀度`完整跳转并一步缩到最终Amplitude（默认`0.2 Vpp`）。
+- 最终阶段按改善方向使用`0.01 V → 0.001 V`粗细步长，限制在缩幅入口`±0.09 V`，不会进行正负网格遍历，也不会恢复大扫幅。未勾选FALC时首次达标立即停止写入；勾选后连续确认并执行`Scan Off → Main On → Unlim On`。
+- 自动锁定每次运行只记录`START / MEASURE / WRITE / END`，CSV自动保存到`daq_pc/captures/auto_lock_logs/`。
 
-自动找峰的初始化、理论跳转、两级最终 Offset 网格、独立窗口规则、异常恢复和 FALC 接管顺序见 [当前算法报告](reports/adc_peak_balance/ALGORITHM_REPORT.md)。
+自动找峰的21项参数、峰族识别、理论跳转、最终定向调整、日志字段和FALC接管顺序见[当前算法报告](reports/adc_peak_balance/ALGORITHM_REPORT.md)。
 
 ## 文档入口
 

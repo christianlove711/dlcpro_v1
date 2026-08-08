@@ -74,7 +74,9 @@ class PcPanel(QFrame):
         self.pc_voltage_act_value.setObjectName("ReadValue")
 
         self.pc_precision_label = QLabel()
-        self.pc_precision_row = PrecisionButtonRow(owner.PRECISION_OPTIONS, owner._set_pc_precision)
+        self.pc_precision_row = PrecisionButtonRow(
+            owner.PRECISION_OPTIONS, owner._set_pc_precision, max_columns=5
+        )
         self.pc_precision_buttons = self.pc_precision_row.buttons
 
         pc_form.addRow(self.pc_precision_label, self.pc_precision_row)

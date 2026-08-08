@@ -15,15 +15,17 @@ import h5py
 from PySide6.QtCore import QObject, QSettings, Qt, Signal
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import (
-    QAbstractSpinBox, QApplication, QFileDialog, QMessageBox,
+    QAbstractSpinBox, QApplication, QFileDialog, QLabel, QMessageBox,
 )
 
 from daq_pc.unified_daq_gui import (
+    AcquisitionStarter,
     CsvRecorder,
     EnvelopePlot,
     Hdf5Recorder,
     MainWindow,
     ScopeWindow,
+    ad9269_config_channel_swap,
 )
 from daq_pc.dlcpro_settings_dialog import (
     DlcProSettingsDialog,
@@ -35,6 +37,8 @@ from daq_pc.scan_control_window import (
 )
 from dlcpro_service import ConnectionSettings
 from daq_pc.daq_udp_dual import DualSampleRingBuffer
+from daq_pc.daq_protocol_v2 import CONFIG_CHANNEL_SWAP, Command
+from daq_pc.adc_peak_balance_window import ParameterHelpDialog
 
 
 class FakeFpgaProgrammer(QObject):
@@ -86,6 +90,7 @@ class UnifiedGuiTest(unittest.TestCase):
         self.assertEqual(window.model.currentData(), 1)
         self.assertFalse(window.model.isEnabled())
         self.assertEqual(window.rate.count(), 3)
+        self.assertEqual(window.rate.currentData(), 10_000_000)
         self.assertEqual(
             [window.rate.itemData(index) for index in range(window.rate.count())],
             [5_000_000, 10_000_000, 20_000_000],
@@ -103,8 +108,31 @@ class UnifiedGuiTest(unittest.TestCase):
             ],
         )
         self.assertTrue(window.record_content.isEnabled())
-        self.assertIs(window.scope_a_button, window.scope_b_button)
-        self.assertGreaterEqual(window.scope_button.minimumWidth(), 180)
+        self.assertFalse(hasattr(window, "dlc_settings_button"))
+        self.assertTrue(hasattr(window, "dlc_status_label"))
+        self.assertIsNot(window.scope_a_button, window.scope_b_button)
+        self.assertEqual(window.scope_a_button.text(), "打开通道 A")
+        self.assertEqual(window.scope_b_button.text(), "打开通道 B")
+        self.assertGreaterEqual(window.scope_a_button.minimumWidth(), 150)
+        self.assertGreaterEqual(window.scope_b_button.minimumWidth(), 150)
+        self.assertLessEqual(window.record_path_button.maximumWidth(), 220)
+        record_path_index = window.action_card.layout().indexOf(
+            window.record_path_button
+        )
+        record_button_index = window.action_card.layout().indexOf(
+            window.record_button
+        )
+        scope_b_index = window.action_card.layout().indexOf(
+            window.scope_b_button
+        )
+        self.assertEqual(
+            window.action_card.layout().getItemPosition(record_path_index)[2:],
+            (1, 1),
+        )
+        self.assertEqual(
+            window.action_card.layout().getItemPosition(record_button_index)[1],
+            window.action_card.layout().getItemPosition(scope_b_index)[1],
+        )
         self.assertTrue(window.fpga_card.isAncestorOf(window.fpga_select_button))
         self.assertTrue(window.fpga_card.isAncestorOf(window.fpga_program_button))
         self.assertFalse(window.action_card.isAncestorOf(window.fpga_select_button))
@@ -536,32 +564,108 @@ class UnifiedGuiTest(unittest.TestCase):
         self.assertGreater(contracted[1], 5.0)
         plot.close()
 
-    def test_ten_msps_auto_enables_available_jumbo_frames(self):
+    def test_scope_axes_use_voltage_and_time_divisions(self):
+        scope = ScopeWindow("A", "#22d3ee")
+        scope.timebase.setCurrentIndex(scope.timebase.findData(200e-3))
+        scope._apply_display()
+        self.assertEqual(scope.plot.axis_unit, "V")
+        self.assertAlmostEqual(scope.plot.seconds_per_div, 200e-3)
+        self.assertEqual(EnvelopePlot._time_axis_scale(200e-3), (1e3, "ms"))
+        self.assertGreater(scope.plot._plot_rect().left(), 0)
+        self.assertLess(scope.plot._plot_rect().bottom(), scope.plot.height())
+        scope.close()
+
+    def test_default_channel_mapping_corrects_physical_edges(self):
+        self.assertEqual(ad9269_config_channel_swap(False), CONFIG_CHANNEL_SWAP)
+        self.assertEqual(ad9269_config_channel_swap(True), 0)
+
+    def test_acquisition_start_handshake_runs_in_worker(self):
+        class FakeControl:
+            adc_model = 0
+
+            def __init__(self):
+                self.calls = []
+
+            def request(self, command, **kwargs):
+                self.calls.append((command, kwargs))
+                if command == Command.STATUS:
+                    return SimpleNamespace(daq_state=3, stream_id=11)
+                return SimpleNamespace()
+
+        control = FakeControl()
+        worker = AcquisitionStarter(
+            control, sample_rate_hz=20_000_000, flags=7,
+            jumbo_enabled=True, previous_stream=10,
+        )
+        succeeded = QSignalSpy(worker.succeeded)
+        failed = QSignalSpy(worker.failed)
+        worker.start()
+        self.assertTrue(worker.wait(2_000))
+        self.app.processEvents()
+        self.assertEqual(succeeded.count(), 1)
+        self.assertEqual(failed.count(), 0)
+        self.assertEqual(control.adc_model, 1)
+        self.assertEqual(
+            [command for command, _kwargs in control.calls],
+            [Command.STOP, Command.CONFIG, Command.START, Command.STATUS],
+        )
+        self.assertTrue(control.calls[1][1]["jumbo_enable"])
+
+    def test_ten_msps_starts_with_jumbo_frames_unchecked(self):
         self.settings.setValue("main/rate", 10_000_000)
-        self.settings.setValue("main/jumbo", False)
+        self.settings.setValue("main/jumbo", True)
         with mock.patch(
             "daq_pc.unified_daq_gui.windows_jumbo_status",
-            return_value=(True, "test NIC"),
+            side_effect=AssertionError("must not probe jumbo mode while opening"),
         ):
             window = MainWindow(preset_model=1, settings=self.settings)
+        self.assertFalse(window.jumbo.isChecked())
+        self.assertIsNone(self.settings.value("main/jumbo"))
+        window.close()
+
+    def test_selecting_twenty_msps_enables_jumbo_frames(self):
+        window = MainWindow(preset_model=1, settings=self.settings)
+        window.jumbo.setChecked(False)
+        window.rate.setCurrentIndex(window.rate.findData(20_000_000))
         self.assertTrue(window.jumbo.isChecked())
-        self.assertTrue(
-            self.settings.value("main/jumbo", False, type=bool)
-        )
+        window.close()
+
+    def test_startup_ignores_saved_twenty_msps_and_disables_jumbo(self):
+        self.settings.setValue("main/rate", 20_000_000)
+        self.settings.setValue("main/jumbo", True)
+        with mock.patch(
+            "daq_pc.unified_daq_gui.windows_jumbo_status",
+            side_effect=AssertionError("must not probe jumbo mode while opening"),
+        ):
+            window = MainWindow(preset_model=1, settings=self.settings)
+        self.assertEqual(window.rate.currentData(), 10_000_000)
+        self.assertFalse(window.jumbo.isChecked())
+        self.assertIsNone(self.settings.value("main/rate"))
+        self.assertIsNone(self.settings.value("main/jumbo"))
         window.close()
 
     def test_scope_controls_are_lightweight_and_model_aware(self):
         scope = ScopeWindow("A", "#22d3ee")
-        self.assertEqual(scope.refresh_fps, 60)
+        self.assertEqual(scope.refresh_fps, 30)
+        self.assertEqual(
+            [scope.fps.itemData(index) for index in range(scope.fps.count())],
+            [10, 20, 30],
+        )
         self.assertEqual(scope.required_samples(5_000_000), 2_500)
         self.assertEqual(scope.units.currentData(), "module")
-        self.assertTrue(scope.smoothing.isChecked())
-        self.assertTrue(scope.plot.smoothing)
+        self.assertFalse(scope.smoothing.isChecked())
+        self.assertFalse(scope.plot.smoothing)
         scope.configure_model(1)
         self.assertEqual(scope.units.currentData(), "module")
         self.assertEqual(scope.y_range.currentData(), "auto")
-        self.assertGreaterEqual(scope.y_range.findData(10.0), 0)
+        self.assertGreaterEqual(scope.y_range.findData(5.0), 0)
         self.assertGreaterEqual(scope.y_range.findData(0.0001), 0)
+        self.assertEqual(scope.control_labels["range"].text(), "电压范围")
+        one_volt = scope.y_range.findData(1.0)
+        scope.y_range.setCurrentIndex(one_volt)
+        self.assertEqual(scope.plot.fixed_bounds, (-1.0, 1.0))
+        scope.vertical_scale.setValue(2.0)
+        self.assertEqual(scope.plot.fixed_bounds, (-2.0, 2.0))
         self.assertGreaterEqual(scope.timebase.findData(10.0), 0)
         self.assertEqual(scope.vertical_scale.minimum(), 0.001)
         self.assertEqual(scope.vertical_scale.maximum(), 8.0)
@@ -595,24 +699,20 @@ class UnifiedGuiTest(unittest.TestCase):
             self.assertEqual(plot.plot_mode, mode)
         plot.close()
 
-    def test_dual_scope_focuses_one_channel_and_returns_in_same_window(self):
+    def test_channels_are_independent_top_level_scope_windows(self):
         window = MainWindow(preset_model=1, settings=self.settings)
-        scope_window = window.scope_window
-        self.assertIsNotNone(window.scope_a.focus_button)
-        self.assertIsNotNone(window.scope_b.focus_button)
-
-        window.scope_a.focus_button.click()
-        self.assertEqual(scope_window.focused_channel, "A")
-        self.assertFalse(window.scope_a.isHidden())
-        self.assertTrue(window.scope_b.isHidden())
-        self.assertFalse(scope_window.back_button.isHidden())
-        self.assertIs(window.scope_a.window(), window.auto_lock_workspace)
-
-        scope_window.back_button.click()
-        self.assertIsNone(scope_window.focused_channel)
-        self.assertFalse(window.scope_a.isHidden())
-        self.assertFalse(window.scope_b.isHidden())
-        self.assertTrue(scope_window.back_button.isHidden())
+        self.assertIsNone(window.scope_a.parentWidget())
+        self.assertIsNone(window.scope_b.parentWidget())
+        self.assertTrue(window.scope_a.isWindow())
+        self.assertTrue(window.scope_b.isWindow())
+        window.show_scope_a()
+        self.app.processEvents()
+        self.assertTrue(window.scope_a.isVisible())
+        self.assertFalse(window.scope_b.isVisible())
+        window.show_scope_b()
+        self.app.processEvents()
+        self.assertTrue(window.scope_a.isVisible())
+        self.assertTrue(window.scope_b.isVisible())
         window.close()
 
     def test_adc_windows_keep_light_theme_inside_dark_host_application(self):
@@ -719,23 +819,19 @@ class UnifiedGuiTest(unittest.TestCase):
         ) as foreground:
             window.auto_lock_button.click()
             foreground.assert_called_with(window.auto_lock_workspace)
-            self.assertEqual(window.auto_lock_workspace.mode, "combined")
-            self.assertFalse(window.peak_lock_window.isHidden())
+            self.assertIs(window.auto_lock_workspace, window.peak_lock_window)
             foreground.reset_mock()
             window.scan_control_button.click()
             foreground.assert_called_with(window.scan_control_window)
             foreground.reset_mock()
             window.scope_a_button.click()
-            foreground.assert_called_with(window.auto_lock_workspace)
-            self.assertEqual(window.auto_lock_workspace.mode, "scope")
-            self.assertTrue(window.peak_lock_window.isHidden())
-            self.assertFalse(window.scope_window.isHidden())
+            foreground.assert_called_with(window.scope_a)
             foreground.reset_mock()
             window.scope_b_button.click()
-            foreground.assert_called_with(window.auto_lock_workspace)
+            foreground.assert_called_with(window.scope_b)
         window.close()
 
-    def test_auto_lock_and_scope_share_equal_width_workspace(self):
+    def test_auto_lock_and_scopes_remain_independent_windows(self):
         window = MainWindow(preset_model=1, settings=self.settings)
         auxiliary_windows = (
             window.auto_lock_workspace,
@@ -746,26 +842,26 @@ class UnifiedGuiTest(unittest.TestCase):
             self.assertIsNone(auxiliary.parentWidget())
             self.assertTrue(auxiliary.isWindow())
             self.assertEqual(auxiliary.windowType(), Qt.Window)
-        self.assertTrue(window.scope_window.isAncestorOf(window.scope_a))
-        self.assertTrue(window.scope_window.isAncestorOf(window.scope_b))
-        self.assertTrue(
-            window.auto_lock_workspace.isAncestorOf(window.peak_lock_window)
-        )
-        self.assertTrue(
-            window.auto_lock_workspace.isAncestorOf(window.scope_window)
-        )
-        self.assertFalse(window.peak_lock_window.isWindow())
-        self.assertFalse(window.scope_window.isWindow())
-        self.assertEqual(
-            window.auto_lock_workspace.splitter.orientation(), Qt.Horizontal
-        )
+        self.assertIsNone(window.scope_a.parentWidget())
+        self.assertIsNone(window.scope_b.parentWidget())
+        self.assertIs(window.auto_lock_workspace, window.peak_lock_window)
+        self.assertTrue(window.peak_lock_window.isWindow())
 
         window.show()
-        for auxiliary in auxiliary_windows:
-            auxiliary.show()
+        window.show_scope_a()
+        window.show_peak_lock()
+        window.scan_control_window.show()
         self.app.processEvents()
-        sizes = window.auto_lock_workspace.splitter.sizes()
-        self.assertLessEqual(abs(sizes[0] - sizes[1]), 1)
+        self.assertTrue(window.scope_a.isVisible())
+        self.assertIsNone(window.scope_a.parentWidget())
+        self.assertIsNone(window.peak_lock_window.parentWidget())
+        window.peak_lock_window.show_scope_a_button.click()
+        self.app.processEvents()
+        self.assertTrue(window.scope_a.isVisible())
+        self.assertGreaterEqual(
+            window.scope_a.geometry().left(),
+            window.peak_lock_window.geometry().right(),
+        )
         window.showMinimized()
         self.app.processEvents()
         for auxiliary in auxiliary_windows:
@@ -773,26 +869,73 @@ class UnifiedGuiTest(unittest.TestCase):
 
         window.close()
 
-    def test_scope_only_then_auto_lock_restores_equal_split(self):
+    def test_auto_lock_scope_buttons_tile_without_embedding(self):
         window = MainWindow(preset_model=1, settings=self.settings)
-        window.auto_lock_workspace.resize(1280, 760)
-        window.show_scope()
-        self.app.processEvents()
-        self.assertTrue(window.peak_lock_window.isHidden())
-        index = window.scope_a.controls_layout.indexOf(window.scope_a.scroll_speed)
-        self.assertEqual(
-            window.scope_a.controls_layout.getItemPosition(index)[:2], (0, 5)
-        )
-
         window.show_peak_lock()
+        window.peak_lock_window.show_scope_b_button.click()
         self.app.processEvents()
-        sizes = window.auto_lock_workspace.splitter.sizes()
-        self.assertFalse(window.peak_lock_window.isHidden())
-        self.assertLessEqual(abs(sizes[0] - sizes[1]), 1)
-        index = window.scope_a.controls_layout.indexOf(window.scope_a.scroll_speed)
-        self.assertEqual(
-            window.scope_a.controls_layout.getItemPosition(index)[:2], (1, 1)
+        self.assertTrue(window.scope_b.isVisible())
+        self.assertIsNone(window.scope_b.parentWidget())
+        self.assertTrue(window.scope_b.isWindow())
+        self.assertGreaterEqual(
+            window.scope_b.geometry().left(),
+            window.peak_lock_window.geometry().right(),
         )
+        window.peak_lock_window.close()
+        self.assertTrue(window.scope_b.isVisible())
+        window.close()
+
+    def test_auto_lock_scan_button_opens_shared_scan_window(self):
+        window = MainWindow(preset_model=1, settings=self.settings)
+        with mock.patch(
+            "daq_pc.unified_daq_gui.show_window_front"
+        ) as foreground:
+            window.peak_lock_window.scan_control_button.click()
+        foreground.assert_called_once_with(window.scan_control_window)
+        window.close()
+
+    def test_all_21_parameters_have_toggle_and_window_remains_freely_resizable(self):
+        window = MainWindow(preset_model=1, settings=self.settings)
+        panel = window.peak_lock_window
+        self.assertFalse(panel.algorithm_settings_panel.isHidden())
+        self.assertFalse(panel.algorithm_settings_button.isHidden())
+        self.assertTrue(panel.algorithm_settings_button.isChecked())
+        self.assertEqual(panel.algorithm_settings_button.text(), "隐藏算法参数")
+        self.assertGreater(panel.maximumWidth(), 760)
+        self.assertTrue(panel.algorithm_settings_panel.isAncestorOf(
+            panel.save_button
+        ))
+        self.assertEqual(len(panel.parameter_info_buttons), 21)
+        headings = {item.text() for item in panel.findChildren(QLabel)}
+        self.assertTrue({"峰识别参数", "宽扫参数", "最终锁定参数"}.issubset(headings))
+        self.assertEqual(
+            panel.main_scroll.horizontalScrollBarPolicy(),
+            Qt.ScrollBarAsNeeded,
+        )
+        self.assertEqual(panel.channel.itemText(0), "通道 A")
+        self.assertEqual(panel.channel.itemText(1), "通道 B")
+        panel.algorithm_settings_button.click()
+        self.assertTrue(panel.algorithm_settings_panel.isHidden())
+        self.assertEqual(panel.algorithm_settings_button.text(), "显示算法参数")
+        panel.algorithm_settings_button.click()
+        self.assertFalse(panel.algorithm_settings_panel.isHidden())
+        window.close()
+
+    def test_peak_lock_qsettings_migrates_old_values_without_overwriting_1hz_7pct(self):
+        self.settings.setValue("peak_lock/search_frequency_hz", 1.0)
+        self.settings.setValue("peak_lock/final_tolerance", 7.0)
+        self.settings.setValue("peak_lock/direction_probe_step", 0.06)
+        self.settings.setValue("peak_lock/min_offset_step", 0.002)
+        window = MainWindow(preset_model=1, settings=self.settings)
+        panel = window.peak_lock_window
+        self.assertAlmostEqual(panel.search_frequency.value(), 1.0)
+        self.assertAlmostEqual(panel.balance_tolerance.value(), 7.0)
+        self.assertAlmostEqual(panel.offset_step.value(), 0.06)
+        self.assertAlmostEqual(panel.min_offset_step.value(), 0.002)
+        panel._save_ui_settings()
+        self.assertAlmostEqual(float(self.settings.value("peak_lock/wide_probe_step")), 0.06)
+        self.assertAlmostEqual(float(self.settings.value("peak_lock/final_fine_step")), 0.002)
+        self.assertAlmostEqual(float(self.settings.value("peak_lock/final_balance_tolerance")), 7.0)
         window.close()
 
     def test_fpga_bit_selection_is_remembered_and_programming_is_background(self):
@@ -836,23 +979,24 @@ class UnifiedGuiTest(unittest.TestCase):
     def test_peak_lock_parameters_are_manual_only_and_explicitly_saved(self):
         window = MainWindow(preset_model=1, settings=self.settings)
         panel = window.peak_lock_window
-        self.assertAlmostEqual(panel.final_local_distance.value(), 0.009)
+        self.assertAlmostEqual(panel.final_max_offset_deviation.value(), 0.09)
         cases = (
             (panel.min_prominence, "120", 120.0),
             (panel.noise_sigma, "7.5", 7.5),
-            (panel.dominance, "2.50", 2.5),
+            (panel.dominance, "5.50", 5.5),
+            (panel.period_tolerance, "12.0", 12.0),
+            (panel.narrow_main_height_ratio, "6.0", 6.0),
+            (panel.invalid_retry_windows, "4", 4),
             (panel.offset_step, "0.050000", 0.05),
             (panel.search_frequency, "10.00", 10.0),
             (panel.initial_search_amplitude, "2.500000", 2.5),
             (panel.initial_offset_search_step, "1.000000", 1.0),
             (panel.min_offset_step, "0.001000", 0.001),
-            (panel.offset_range, "0.350000", 0.35),
             (panel.target_amplitude, "0.200000", 0.2),
-            (panel.max_search_factor, "2.50", 2.5),
+            (panel.final_coarse_step, "0.010000", 0.01),
+            (panel.final_max_offset_deviation, "0.090000", 0.09),
             (panel.search_tolerance, "8.0", 8.0),
-            (panel.prediction_gain, "0.80", 0.8),
             (panel.model_corrections, "2", 2),
-            (panel.final_local_distance, "0.005000", 0.005),
             (panel.search_windows, "2", 2),
             (panel.balance_tolerance, "5.0", 5.0),
             (panel.final_windows, "3", 3),
@@ -878,7 +1022,7 @@ class UnifiedGuiTest(unittest.TestCase):
 
         # Clicking in a numeric editor must place a normal caret instead of
         # forcing the complete value to remain selected.
-        editor = panel.prediction_gain.lineEdit()
+        editor = panel.final_coarse_step.lineEdit()
         editor.setFocus()
         editor.selectAll()
         QTest.mouseClick(editor, Qt.LeftButton, pos=editor.rect().center())
@@ -889,30 +1033,33 @@ class UnifiedGuiTest(unittest.TestCase):
             panel.save_button.click()
         information.assert_called_once()
         self.assertAlmostEqual(
-            float(self.settings.value("peak_lock/max_start_offset_deviation")),
-            0.35,
+            float(self.settings.value("peak_lock/final_max_offset_deviation")),
+            0.09,
         )
-        self.assertAlmostEqual(
-            float(self.settings.value("peak_lock/prediction_gain")), 0.8
-        )
+        self.assertFalse(self.settings.contains("peak_lock/prediction_gain"))
 
-        self.assertEqual(len(panel.parameter_info_buttons), 20)
-        with mock.patch.object(QMessageBox, "information") as information:
-            panel.parameter_info_buttons["启动Offset最大偏移"].click()
-        message = information.call_args.args[2]
-        self.assertIn("软件允许范围", message)
-        self.assertIn("DLC pro", message)
+        self.assertEqual(len(panel.parameter_info_buttons), 21)
+        with mock.patch.object(ParameterHelpDialog, "exec") as show_help:
+            panel.parameter_info_buttons["最终最大Offset偏移"].click()
+        show_help.assert_called_once()
+        help_dialog = panel.findChild(ParameterHelpDialog)
+        self.assertIsNotNone(help_dialog)
+        self.assertLessEqual(help_dialog.width(), 500)
+        self.assertTrue(help_dialog.description_label.wordWrap())
+        message = help_dialog.description_label.text()
+        self.assertIn("0.09 V", message)
 
         configurable = (
             panel.channel, panel.polarity, panel.min_prominence,
             panel.noise_sigma, panel.dominance,
+            panel.period_tolerance, panel.narrow_main_height_ratio,
+            panel.invalid_retry_windows,
             panel.offset_step, panel.search_frequency,
             panel.initial_search_amplitude,
             panel.initial_offset_search_step,
-            panel.min_offset_step, panel.offset_range,
-            panel.target_amplitude, panel.max_search_factor,
-            panel.search_tolerance, panel.prediction_gain,
-            panel.model_corrections, panel.final_local_distance,
+            panel.target_amplitude, panel.final_coarse_step,
+            panel.min_offset_step, panel.final_max_offset_deviation,
+            panel.search_tolerance, panel.model_corrections,
             panel.search_windows, panel.balance_tolerance,
             panel.final_windows,
         )
@@ -975,11 +1122,12 @@ class UnifiedGuiTest(unittest.TestCase):
         QTest.keyClicks(top_editor, "0.190000")
         QTest.keyClick(top_editor, Qt.Key_Return)
         panel.min_offset_step.setValue(0.001)
-        panel.final_local_distance.setValue(0.005)
+        panel.final_coarse_step.setValue(0.01)
+        panel.final_max_offset_deviation.setValue(0.09)
         self.assertEqual(panel.strategy_labels[(2, 1)].text(), "0.190 Vpp")
-        self.assertIn("±0.001 V网格", panel.strategy_labels[(2, 3)].text())
-        self.assertIn("范围±0.005 V", panel.strategy_labels[(2, 3)].text())
-        self.assertAlmostEqual(panel.current_settings().target_amplitude, 0.19)
+        self.assertIn("定向0.010 V", panel.strategy_labels[(2, 3)].text())
+        self.assertIn("边界±0.090 V", panel.strategy_labels[(2, 3)].text())
+        self.assertAlmostEqual(panel.current_settings().final_amplitude, 0.19)
         window.close()
 
     def test_scope_vertical_ranges_are_independent_but_timebase_is_linked(self):
@@ -1019,7 +1167,8 @@ class UnifiedGuiTest(unittest.TestCase):
 
     def test_one_second_per_div_uses_long_history_cache(self):
         window = MainWindow(preset_model=1, settings=self.settings)
-        window.auto_lock_workspace.show()
+        window.show_scope_a()
+        self.app.processEvents()
         window.scope_a.timebase.setCurrentIndex(
             window.scope_a.timebase.findData(1.0)
         )
@@ -1252,7 +1401,8 @@ class UnifiedGuiTest(unittest.TestCase):
         window.close()
         restored = MainWindow(settings=self.settings)
         self.assertEqual(restored.model.currentData(), 1)
-        self.assertEqual(restored.rate.currentData(), 20_000_000)
+        self.assertEqual(restored.rate.currentData(), 10_000_000)
+        self.assertFalse(restored.jumbo.isChecked())
         self.assertEqual(restored.scope_a.timebase.currentData(), 200e-6)
         self.assertEqual(restored.scope_a.trigger_mode.currentData(), "falling")
         self.assertFalse(restored.scope_a.smoothing.isChecked())

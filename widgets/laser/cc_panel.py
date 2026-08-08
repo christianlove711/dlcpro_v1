@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFormLayout, QFrame, QHBoxLayout, QLabel, QVBoxLayout
+from PySide6.QtWidgets import QFormLayout, QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout
 
 from ui_text import TEXT
 from widgets.common_controls import PrecisionButtonRow, SafeComboBox, SafeDoubleSpinBox, create_toggle_button
@@ -56,7 +56,9 @@ class CcPanel(QFrame):
         top_form.setVerticalSpacing(14)
 
         self.precision_label = QLabel()
-        self.precision_row = PrecisionButtonRow(owner.PRECISION_OPTIONS, owner._set_cc_precision)
+        self.precision_row = PrecisionButtonRow(
+            owner.PRECISION_OPTIONS, owner._set_cc_precision, max_columns=5
+        )
         self.precision_buttons = self.precision_row.buttons
 
         self.current_set_label = QLabel()
@@ -149,7 +151,12 @@ class CcPanel(QFrame):
 
         self.auto_apply_hint_label = QLabel()
         self.auto_apply_hint_label.setObjectName("SubtleHint")
-        layout.addWidget(self.auto_apply_hint_label, alignment=Qt.AlignRight)
+        self.auto_apply_hint_label.setProperty("preserveSingleLine", True)
+        self.auto_apply_hint_label.setWordWrap(False)
+        self.auto_apply_hint_label.setMinimumHeight(28)
+        self.auto_apply_hint_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.auto_apply_hint_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout.addWidget(self.auto_apply_hint_label)
 
     def bind_to(self, owner) -> None:
         # 统一把控件引用挂回主窗口，避免业务逻辑层大面积改名。

@@ -41,9 +41,9 @@ ADC 自动锁定的当前核心文件：
 
 | 路径 | 用途 |
 |---|---|
-| `daq_pc/adc_peak_balance_algorithm.py` | 峰识别、理论居中、最终 Offset 网格和状态机 |
-| `daq_pc/adc_peak_balance_controller.py` | DLC pro 写入、读回校验、稳定周期、FALC 接管 |
-| `daq_pc/adc_peak_balance_window.py` | 自动锁定独立窗口、参数与运行日志 |
+| `daq_pc/adc_peak_balance_algorithm.py` | 跨周期峰族识别、宽扫理论居中、最终定向粗/精调状态机 |
+| `daq_pc/adc_peak_balance_controller.py` | DLC pro写入与读回、稳定周期、四类CSV日志、FALC接管 |
+| `daq_pc/adc_peak_balance_window.py` | 自动锁定独立窗口、21项参数、旧QSettings迁移与状态显示 |
 | `reports/adc_peak_balance/ALGORITHM_REPORT.md` | 当前算法规格与现场验证要求 |
 
 ## 窗口生命周期

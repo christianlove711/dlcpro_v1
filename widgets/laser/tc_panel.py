@@ -61,7 +61,9 @@ class TcPanel(QFrame):
         self.temp_act_value.setObjectName("ReadValue")
 
         self.tc_precision_label = QLabel()
-        self.tc_precision_row = PrecisionButtonRow(owner.PRECISION_OPTIONS, owner._set_tc_precision)
+        self.tc_precision_row = PrecisionButtonRow(
+            owner.PRECISION_OPTIONS, owner._set_tc_precision, max_columns=5
+        )
         self.tc_precision_buttons = self.tc_precision_row.buttons
 
         tc_form.addRow(self.tc_precision_label, self.tc_precision_row)

@@ -14,16 +14,17 @@ from pathlib import Path
 
 import h5py
 import numpy as np
-from PySide6.QtCore import QPointF, QSettings, QThread, QTimer, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QSettings, QThread, QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDoubleSpinBox, QFileDialog, QFrame,
     QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox,
-    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter,
+    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
     QVBoxLayout, QWidget,
 )
 
 from widgets.common_controls import VisibleCheckBox
+from ui_scaling import schedule_window_fit
 
 from .daq_protocol_v2 import CONFIG_CHANNEL_SWAP, CONFIG_TEST_SHIFT, Command
 from .daq_qt_dual import UdpDualReceiver
@@ -41,7 +42,16 @@ from .scan_control_window import DlcScanControlWindow
 
 PL_BOARD_IP = "192.168.20.2"
 PC_PL_IP = "192.168.20.1"
-DISPLAY_FPS = 60
+DISPLAY_FPS = 30
+# The deployed AD9269 input frontend assigns the physical INA/INB samples to
+# the opposite DDR edges.  Keep the wire protocol unchanged and compensate at
+# configuration time so an unchecked UI means the natural mapping INA->A and
+# INB->B.  Checking "manual swap" then intentionally reverses that mapping.
+AD9269_PHYSICAL_EDGE_SWAP = True
+
+
+def ad9269_config_channel_swap(manual_swap: bool) -> int:
+    return CONFIG_CHANNEL_SWAP if bool(manual_swap) ^ AD9269_PHYSICAL_EDGE_SWAP else 0
 # At 5 MSPS the built-in 32.55 kHz DAC sine has about 154 samples/period.
 # A 200k-sample min/max window compresses roughly 1,300 periods into 900
 # pixels and therefore looks like a solid vertical band.  Use a scope-like
@@ -61,12 +71,14 @@ def show_window_front(window: QWidget) -> None:
     if window.windowState() & Qt.WindowMinimized:
         window.setWindowState(window.windowState() & ~Qt.WindowMinimized)
     window.show()
+    schedule_window_fit(window)
     window.raise_()
     window.activateWindow()
 
     def promote_after_native_show():
         if not window.isVisible():
             return
+        schedule_window_fit(window)
         window.raise_()
         window.activateWindow()
         if sys.platform != "win32":
@@ -272,7 +284,6 @@ QMessageBox {
 QMessageBox QLabel {
     background: transparent;
     color: #172033;
-    min-width: 440px;
 }
 QMessageBox QPushButton {
     min-width: 76px;
@@ -396,8 +407,8 @@ TIMEBASES_PER_DIV = (
     ("5 s/div", 5.0),
     ("10 s/div", 10.0),
 )
-DISPLAY_FPS_OPTIONS = (10, 20, 30, 60)
-RAW_ENVELOPE_SAMPLE_LIMIT = 500_000
+DISPLAY_FPS_OPTIONS = (10, 20, 30)
+RAW_ENVELOPE_SAMPLE_LIMIT = 250_000
 SCROLL_DIVISORS = (
     ("实时", 1),
     ("1/2 速", 2),
@@ -451,6 +462,52 @@ class StatusPoller(QThread):
 
     def stop(self):
         self._stop.set()
+
+
+class AcquisitionStarter(QThread):
+    """Run the PL START/STATUS handshake without blocking the GUI thread."""
+
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, control: ControlClient, *, sample_rate_hz: int,
+                 flags: int, jumbo_enabled: bool,
+                 previous_stream: int, parent=None):
+        super().__init__(parent)
+        self.control = control
+        self.sample_rate_hz = int(sample_rate_hz)
+        self.flags = int(flags)
+        self.jumbo_enabled = bool(jumbo_enabled)
+        self.previous_stream = int(previous_stream)
+
+    def run(self):
+        try:
+            self.control.request(Command.STOP)
+            self.control.adc_model = 1
+            self.control.request(
+                Command.CONFIG,
+                sample_rate_hz=self.sample_rate_hz,
+                flags=self.flags,
+                jumbo_enable=self.jumbo_enabled,
+            )
+            self.control.request(Command.START, monitor_enable=True)
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                if self.isInterruptionRequested():
+                    raise RuntimeError("启动已取消")
+                candidate = self.control.request(Command.STATUS)
+                if (candidate.daq_state == 3 and
+                        int(candidate.stream_id) != self.previous_stream):
+                    self.succeeded.emit(candidate)
+                    return
+                self.msleep(20)
+            raise TimeoutError("板卡未在 2 秒内进入 RUNNING 或更新 stream_id")
+        except Exception as exc:
+            try:
+                self.control.request(Command.STOP)
+            except Exception:
+                pass
+            self.failed.emit(str(exc))
 
 
 class CsvRecorder:
@@ -1172,6 +1229,8 @@ class EnvelopePlot(QWidget):
         self._display_signature = None
         self._auto_bounds_state: tuple[float, float] | None = None
         self._auto_bounds_time: float | None = None
+        self.seconds_per_div = 50e-6
+        self.axis_unit = "V"
         self.setMinimumSize(720, 340)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
@@ -1184,7 +1243,8 @@ class EnvelopePlot(QWidget):
             max(float(auto_minimum_half_span), 1e-12),
             min(8.0, max(0.001, float(vertical_scale_multiplier))),
         )
-        if signature != self._display_signature:
+        changed = signature != self._display_signature
+        if changed:
             self._auto_bounds_state = None
             self._auto_bounds_time = None
             self._display_signature = signature
@@ -1193,6 +1253,48 @@ class EnvelopePlot(QWidget):
         self.fixed_bounds = fixed_bounds
         self.auto_minimum_half_span = signature[3]
         self.vertical_scale_multiplier = signature[4]
+        if changed:
+            # Range changes must update the grid labels immediately, including
+            # while acquisition is stopped and no new frame is arriving.
+            self.update()
+
+    def set_axes(self, seconds_per_div: float, unit: str):
+        seconds_per_div = max(1e-12, float(seconds_per_div))
+        unit = str(unit)
+        if (seconds_per_div, unit) != (self.seconds_per_div, self.axis_unit):
+            self.seconds_per_div = seconds_per_div
+            self.axis_unit = unit
+            self.update()
+
+    @staticmethod
+    def _time_axis_scale(seconds_per_div: float) -> tuple[float, str]:
+        seconds_per_div = abs(float(seconds_per_div))
+        if seconds_per_div < 1e-3:
+            return 1e6, "µs"
+        if seconds_per_div < 1.0:
+            return 1e3, "ms"
+        return 1.0, "s"
+
+    @staticmethod
+    def _axis_number(value: float) -> str:
+        magnitude = abs(float(value))
+        if magnitude >= 1000:
+            return f"{value:.4g}"
+        if magnitude >= 10:
+            return f"{value:.3g}"
+        if magnitude >= 1:
+            return f"{value:.3f}".rstrip("0").rstrip(".")
+        if magnitude >= 1e-3:
+            return f"{value:.4f}".rstrip("0").rstrip(".")
+        return f"{value:.3g}"
+
+    def _plot_rect(self) -> QRectF:
+        return QRectF(
+            72.0,
+            12.0,
+            max(1.0, self.width() - 88.0),
+            max(1.0, self.height() - 48.0),
+        )
 
     def set_envelope(self, minimum, maximum, valid):
         first = np.asarray(minimum, dtype=np.float32) * self.value_scale + self.value_offset
@@ -1291,34 +1393,66 @@ class EnvelopePlot(QWidget):
     def paintEvent(self, _event):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#08111f"))
+        plot_rect = self._plot_rect()
         painter.setPen(QPen(QColor("#2c405e"), 1))
         for division in range(0, 11):
-            x = division * max(1, self.width() - 1) / 10
-            y = division * max(1, self.height() - 1) / 10
-            painter.drawLine(int(x), 0, int(x), self.height())
-            painter.drawLine(0, int(y), self.width(), int(y))
+            x = plot_rect.left() + division * plot_rect.width() / 10
+            painter.drawLine(
+                QPointF(x, plot_rect.top()), QPointF(x, plot_rect.bottom())
+            )
+        for division in range(0, 9):
+            y = plot_rect.top() + division * plot_rect.height() / 8
+            painter.drawLine(
+                QPointF(plot_rect.left(), y), QPointF(plot_rect.right(), y)
+            )
+
+        if self.fixed_bounds is None:
+            if self.minimum.size and np.any(self.valid):
+                low, high = self._stabilize_auto_bounds(
+                    self._display_bounds(
+                        self.minimum, self.maximum, self.valid,
+                        self.auto_minimum_half_span,
+                        self.vertical_scale_multiplier,
+                    )
+                )
+            else:
+                low, high = -1.0, 1.0
+        else:
+            low, high = self.fixed_bounds
+
+        painter.setPen(QColor("#9fb0c5"))
+        painter.drawText(8, 18, "电压 (V)" if self.axis_unit == "V" else "ADC code")
+        for division in range(0, 9):
+            y = plot_rect.top() + division * plot_rect.height() / 8
+            value = high - division * (high - low) / 8
+            label_rect = QRectF(2, y - 9, 64, 18)
+            painter.drawText(label_rect, Qt.AlignRight | Qt.AlignVCenter,
+                             self._axis_number(value))
+        time_scale, time_unit = self._time_axis_scale(self.seconds_per_div)
+        for division in range(0, 11):
+            x = plot_rect.left() + division * plot_rect.width() / 10
+            seconds = (division - 10) * self.seconds_per_div
+            label_rect = QRectF(x - 31, plot_rect.bottom() + 4, 62, 18)
+            painter.drawText(label_rect, Qt.AlignHCenter | Qt.AlignTop,
+                             self._axis_number(seconds * time_scale))
+        painter.drawText(
+            QRectF(plot_rect.right() - 120, self.height() - 21, 120, 18),
+            Qt.AlignRight | Qt.AlignVCenter,
+            f"时间 ({time_unit})",
+        )
         if self.trigger_enabled:
-            trigger_x = int(max(1, self.width() - 1) * 0.25)
+            trigger_x = int(plot_rect.left() + plot_rect.width() * 0.25)
             color = QColor("#22c55e" if self.trigger_locked else "#f59e0b")
             painter.setPen(QPen(color, 1, Qt.DashLine))
-            painter.drawLine(trigger_x, 0, trigger_x, self.height())
+            painter.drawLine(trigger_x, int(plot_rect.top()),
+                             trigger_x, int(plot_rect.bottom()))
             painter.setPen(color)
-            painter.drawText(trigger_x + 5, 16,
+            painter.drawText(trigger_x + 5, int(plot_rect.top()) + 16,
                              "TRIG" if self.trigger_locked else "WAIT")
         if not self.minimum.size:
             painter.setPen(QColor("#8190a5"))
-            painter.drawText(self.rect(), Qt.AlignCenter, "等待 PL UDP 数据")
+            painter.drawText(plot_rect, Qt.AlignCenter, "等待 PL UDP 数据")
             return
-        if self.fixed_bounds is None:
-            low, high = self._stabilize_auto_bounds(
-                self._display_bounds(
-                    self.minimum, self.maximum, self.valid,
-                    self.auto_minimum_half_span,
-                    self.vertical_scale_multiplier,
-                )
-            )
-        else:
-            low, high = self.fixed_bounds
         envelope_color = QColor(self.color)
         envelope_color.setAlpha(130)
         trace_color = QColor(self.color)
@@ -1327,7 +1461,7 @@ class EnvelopePlot(QWidget):
         # real sample. For reduced min/max envelopes it would invent a center
         # trace and conceal real extrema.
         smooth_trace = (
-            self.smoothing and np.any(self.valid) and
+            self.smoothing and count <= 200 and np.any(self.valid) and
             np.array_equal(
                 self.minimum[self.valid], self.maximum[self.valid]
             )
@@ -1337,15 +1471,15 @@ class EnvelopePlot(QWidget):
             return
         x_values = np.rint(
             valid_indices.astype(np.float64)
-            * max(1, self.width() - 1) / max(1, count - 1)
+            * plot_rect.width() / max(1, count - 1) + plot_rect.left()
         ).astype(np.int32)
         y0_values = np.rint(
             (high - self.minimum[valid_indices].astype(np.float64))
-            * (self.height() - 1) / (high - low)
+            * plot_rect.height() / (high - low) + plot_rect.top()
         ).astype(np.int32)
         y1_values = np.rint(
             (high - self.maximum[valid_indices].astype(np.float64))
-            * (self.height() - 1) / (high - low)
+            * plot_rect.height() / (high - low) + plot_rect.top()
         ).astype(np.int32)
         midpoint_y = (y0_values + y1_values) // 2
 
@@ -1357,6 +1491,8 @@ class EnvelopePlot(QWidget):
         ]
         segment_ends = np.r_[segment_starts[1:], valid_indices.size]
 
+        painter.save()
+        painter.setClipRect(plot_rect)
         if self.plot_mode == "envelope":
             path = QPainterPath()
             for x, y0, y1 in zip(x_values, y0_values, y1_values):
@@ -1373,7 +1509,7 @@ class EnvelopePlot(QWidget):
             painter.drawPoints(points)
         elif smooth_trace:
             painter.setRenderHint(QPainter.Antialiasing, True)
-            painter.setPen(QPen(trace_color, 2))
+            painter.setPen(QPen(trace_color, 1))
             combined = QPainterPath()
             for start, end in zip(segment_starts, segment_ends):
                 segment = list(zip(
@@ -1383,17 +1519,27 @@ class EnvelopePlot(QWidget):
                 combined.addPath(self._smooth_path(segment))
             painter.drawPath(combined)
         else:
-            path = QPainterPath()
+            # QPainterPath.lineTo() is exceptionally slow for a live trace on
+            # the Windows raster backend.  A polygon submits each continuous
+            # run in one Qt call and keeps real sample gaps disconnected.
+            # A two-pixel polyline is over an order of magnitude slower on the
+            # Windows raster backend because every sharp ADC turn needs a wide
+            # join.  A cosmetic one-pixel trace remains crisp and real-time.
+            painter.setPen(QPen(trace_color, 1))
             for start, end in zip(segment_starts, segment_ends):
-                path.moveTo(
-                    float(x_values[start]), float(midpoint_y[start])
-                )
-                for index in range(start + 1, end):
-                    path.lineTo(
-                        float(x_values[index]), float(midpoint_y[index])
+                if end - start <= 0:
+                    continue
+                polygon = QPolygonF([
+                    QPointF(float(x), float(y))
+                    for x, y in zip(
+                        x_values[start:end], midpoint_y[start:end]
                     )
-            painter.setPen(QPen(trace_color, 2))
-            painter.drawPath(path)
+                ])
+                if polygon.size() == 1:
+                    painter.drawPoints(polygon)
+                else:
+                    painter.drawPolyline(polygon)
+        painter.restore()
 
 
 class ScopeWindow(QWidget):
@@ -1407,6 +1553,8 @@ class ScopeWindow(QWidget):
         self.adc_model = 0
         self.frozen = False
         self.trigger_locked = False
+        self._last_trigger_visual: str | None = None
+        self._last_caption_update = 0.0
         self.setWindowTitle(f"通道 {channel} 示波器")
         if not embedded:
             self.setStyleSheet(SCOPE_STYLE)
@@ -1465,7 +1613,7 @@ class ScopeWindow(QWidget):
         self.trigger_status = QLabel("FREE")
         self.trigger_status.setObjectName("triggerWaiting")
         self.smoothing = VisibleCheckBox("插值平滑")
-        self.smoothing.setChecked(True)
+        self.smoothing.setChecked(False)
         self.smoothing.setToolTip(
             "只平滑屏幕连线，不改变真实采样点、网络数据或 CSV"
         )
@@ -1498,8 +1646,10 @@ class ScopeWindow(QWidget):
                 ("display", "显示"),
             )
         }
-        self.set_compact_controls(embedded)
+        # Attach the layout before reflow calls show()/hide().  Otherwise its
+        # still-parentless controls briefly become native top-level windows.
         toolbar_layout.addLayout(controls)
+        self.set_compact_controls(embedded)
         self.caption = QLabel(f"通道 {channel}：--")
         self.caption.setObjectName("scopeCaption")
         self.plot = EnvelopePlot(color)
@@ -1520,6 +1670,7 @@ class ScopeWindow(QWidget):
         # display controls are linked.  Vertical scaling and trigger/display
         # choices remain local to each scope window.
         self.timebase.currentIndexChanged.connect(self.time_settings_changed)
+        self.timebase.currentIndexChanged.connect(self._update_axes)
         self.fps.currentIndexChanged.connect(self.time_settings_changed)
         self.scroll_speed.currentIndexChanged.connect(self.time_settings_changed)
         self.units.currentIndexChanged.connect(self._display_changed)
@@ -1536,8 +1687,19 @@ class ScopeWindow(QWidget):
         self.plot.set_plot_mode(self.display_mode.currentData())
         self.configure_model(1)
 
+    def _update_axes(self):
+        self.plot.set_axes(
+            float(self.timebase.currentData() or 50e-6),
+            "ADC code" if self.units.currentData() == "raw" else "V",
+        )
+
     def set_compact_controls(self, compact: bool):
         """Reflow controls for half-width combined or full-width scope mode."""
+        if hasattr(self, "plot"):
+            self.plot.setMinimumSize(
+                320 if compact else 720,
+                220 if compact else 340,
+            )
         controls = self.controls_layout
         while controls.count():
             item = controls.takeAt(0)
@@ -1615,19 +1777,28 @@ class ScopeWindow(QWidget):
 
     def _rebuild_y_ranges(self):
         previous = self.y_range.currentData()
+        voltage_mode = self.units.currentData() != "raw"
+        self.control_labels["range"].setText(
+            "电压范围" if voltage_mode else "ADC范围"
+        )
         self.y_range.blockSignals(True)
         self.y_range.clear()
         self.y_range.addItem("自动", "auto")
-        self.y_range.addItem("满量程", "full")
-        if self.units.currentData() == "raw":
-            for value in (50.0, 20.0, 10.0, 5.0, 2.0, 1.0):
-                self.y_range.addItem(f"{value:g} code/div", value)
+        if not voltage_mode:
+            self.y_range.addItem("满量程（±32768 code）", "full")
+            for value in (10_000.0, 5_000.0, 2_000.0, 1_000.0,
+                          500.0, 200.0, 100.0, 50.0, 20.0, 10.0):
+                self.y_range.addItem(f"±{value:g} code", value)
         else:
+            self.y_range.addItem("满量程（±5 V）", "full")
             for value in (
-                10.0, 5.0, 2.0, 1.0, .5, .2, .1, .05, .02, .01,
+                5.0, 2.0, 1.0, .5, .2, .1, .05, .02, .01,
                 .005, .002, .001, .0005, .0002, .0001,
             ):
-                text = f"{value:g} V/div" if value >= .1 else f"{value * 1000:g} mV/div"
+                text = (
+                    f"±{value:g} V" if value >= .1
+                    else f"±{value * 1000:g} mV"
+                )
                 self.y_range.addItem(text, value)
         index = self.y_range.findData(previous)
         self.y_range.setCurrentIndex(index if index >= 0 else 0)
@@ -1702,7 +1873,9 @@ class ScopeWindow(QWidget):
             bounds = (center - half_span, center + half_span)
         else:
             center = (full[0] + full[1]) / 2.0
-            half_span = float(selected) * 5.0 * self.vertical_scale.value()
+            # Numeric entries represent the complete visible voltage/code
+            # half-range directly (±value), not a per-division value.
+            half_span = float(selected) * self.vertical_scale.value()
             bounds = (center - half_span, center + half_span)
         auto_minimum_half_span = 16.0 * abs(scale)
         self.plot.set_display(
@@ -1712,6 +1885,7 @@ class ScopeWindow(QWidget):
             auto_minimum_half_span,
             self.vertical_scale.value(),
         )
+        self._update_axes()
 
     def required_samples(self, rate: float) -> int:
         seconds_per_div = float(self.timebase.currentData() or 50e-6)
@@ -1733,7 +1907,6 @@ class ScopeWindow(QWidget):
         mode = self.trigger_mode.currentData()
         if mode == "off":
             return None
-        self._apply_display()
         raw_level = ((self.trigger_level.value() - self.plot.value_offset) /
                      self.plot.value_scale)
         return (0 if self.channel == "A" else 1,
@@ -1776,7 +1949,7 @@ class ScopeWindow(QWidget):
         )
         self.smoothing.setChecked(
             str(settings.value(
-                f"{prefix}/smoothing", "true"
+                f"{prefix}/smoothing", "false"
             )).lower() in ("1", "true", "yes")
         )
         self.trigger_level.setValue(float(settings.value(
@@ -1809,24 +1982,27 @@ class ScopeWindow(QWidget):
                     trigger_locked: bool | None = None):
         if self.frozen:
             return
-        self._apply_display()
-        enabled = self.trigger_config is not None
+        enabled = self.trigger_mode.currentData() != "off"
         self.trigger_locked = bool(trigger_locked) if enabled else False
         self.plot.set_trigger_state(enabled, self.trigger_locked)
         if enabled:
-            self.trigger_status.setText(
-                "LOCK" if self.trigger_locked else "WAIT"
-            )
-            self.trigger_status.setObjectName(
+            visual = "LOCK" if self.trigger_locked else "WAIT"
+            object_name = (
                 "triggerLocked" if self.trigger_locked else "triggerWaiting"
             )
         else:
-            self.trigger_status.setText("FREE")
-            self.trigger_status.setObjectName("scopeCaption")
-        self.trigger_status.style().unpolish(self.trigger_status)
-        self.trigger_status.style().polish(self.trigger_status)
+            visual = "FREE"
+            object_name = "scopeCaption"
+        if visual != self._last_trigger_visual:
+            self._last_trigger_visual = visual
+            self.trigger_status.setText(visual)
+            self.trigger_status.setObjectName(object_name)
+            self.trigger_status.style().unpolish(self.trigger_status)
+            self.trigger_status.style().polish(self.trigger_status)
         self.plot.set_envelope(minimum, maximum, valid)
-        if np.any(valid):
+        now = time.monotonic()
+        if np.any(valid) and now - self._last_caption_update >= 0.1:
+            self._last_caption_update = now
             valid_indices = np.flatnonzero(valid)
             last = int(valid_indices[-1])
             current_code = (float(minimum[last]) + float(maximum[last])) / 2.0
@@ -1844,140 +2020,6 @@ class ScopeWindow(QWidget):
                 f"当前 {current:.4g} {unit}    最小 {min(valid_min, valid_max):.4g}    "
                 f"最大 {max(valid_min, valid_max):.4g}"
             )
-
-
-class DualScopeWindow(QWidget):
-    """One peer window containing both synchronized ADC channel scopes."""
-
-    def __init__(self, parent=None, embedded: bool = False):
-        super().__init__(parent, Qt.Widget if embedded else Qt.Window)
-        self.setWindowTitle("A/B 双通道示波器")
-        self.setStyleSheet(SCOPE_STYLE)
-        if embedded:
-            self.setMinimumSize(0, 520)
-        else:
-            self.resize(1180, 920)
-            self.setMinimumSize(860, 700)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
-        self.focused_channel: str | None = None
-        heading = QHBoxLayout()
-        self.title = QLabel("A/B 双通道示波器")
-        self.title.setObjectName("scopeWindowTitle")
-        self.back_button = QPushButton("返回双通道")
-        self.back_button.setObjectName("primaryButton")
-        self.back_button.hide()
-        self.back_button.clicked.connect(self.show_dual_channel)
-        heading.addWidget(self.title)
-        heading.addStretch(1)
-        heading.addWidget(self.back_button)
-        self.subtitle = QLabel("A/B 共用时间轴；点击通道标题可在当前窗口单独观察")
-        self.subtitle.setObjectName("scopeCaption")
-        layout.addLayout(heading)
-        layout.addWidget(self.subtitle)
-
-        self.splitter = QSplitter(Qt.Vertical)
-        self.scope_a = ScopeWindow("A", "#22d3ee", self.splitter, embedded=True)
-        self.scope_b = ScopeWindow("B", "#fb7185", self.splitter, embedded=True)
-        self.splitter.addWidget(self.scope_a)
-        self.splitter.addWidget(self.scope_b)
-        self.splitter.setChildrenCollapsible(False)
-        self.splitter.setStretchFactor(0, 1)
-        self.splitter.setStretchFactor(1, 1)
-        self.scope_a.focus_requested.connect(self.show_single_channel)
-        self.scope_b.focus_requested.connect(self.show_single_channel)
-        layout.addWidget(self.splitter, 1)
-
-    def set_compact_controls(self, compact: bool):
-        self.scope_a.set_compact_controls(compact)
-        self.scope_b.set_compact_controls(compact)
-        self.updateGeometry()
-
-    def show_single_channel(self, channel: str):
-        channel = str(channel).upper()
-        if channel not in {"A", "B"}:
-            return
-        self.focused_channel = channel
-        self.scope_a.setVisible(channel == "A")
-        self.scope_b.setVisible(channel == "B")
-        self.title.setText(f"通道 {channel} 示波器")
-        self.subtitle.setText(
-            f"正在当前窗口单独观察通道 {channel}；采集与另一通道的数据接收不受影响"
-        )
-        self.back_button.show()
-
-    def show_dual_channel(self):
-        self.focused_channel = None
-        self.scope_a.show()
-        self.scope_b.show()
-        self.splitter.setSizes([1, 1])
-        self.title.setText("A/B 双通道示波器")
-        self.subtitle.setText("A/B 共用时间轴；点击通道标题可在当前窗口单独观察")
-        self.back_button.hide()
-
-
-class AutoLockScopeWorkspace(QWidget):
-    """Combined auto-lock and oscilloscope workspace with equal-width panes."""
-
-    def __init__(self, peak_lock_window, scope_window):
-        super().__init__(None, Qt.Window)
-        self.setWindowTitle("自动锁频与 A/B 示波器")
-        self.resize(1280, 760)
-        self.setMinimumSize(900, 600)
-        self.mode = "combined"
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        self.splitter = QSplitter(Qt.Horizontal, self)
-        self.splitter.setChildrenCollapsible(False)
-        self.splitter.addWidget(peak_lock_window)
-        self.splitter.addWidget(scope_window)
-        self.splitter.setStretchFactor(0, 1)
-        self.splitter.setStretchFactor(1, 1)
-        self.splitter.setSizes([1, 1])
-        layout.addWidget(self.splitter)
-
-        self.peak_lock_window = peak_lock_window
-        self.scope_window = scope_window
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        QTimer.singleShot(0, self._apply_mode_sizes)
-
-    def show_combined(self):
-        self.mode = "combined"
-        self.setWindowTitle("自动锁频与 A/B 示波器")
-        self.scope_window.set_compact_controls(True)
-        self.peak_lock_window.show()
-        self.scope_window.show()
-        self._apply_mode_sizes()
-        QTimer.singleShot(0, self._apply_mode_sizes)
-
-    def show_scope_only(self):
-        self.mode = "scope"
-        self.setWindowTitle("A/B 双通道示波器")
-        self.scope_window.set_compact_controls(False)
-        self.peak_lock_window.hide()
-        self.scope_window.show()
-        self._apply_mode_sizes()
-        QTimer.singleShot(0, self._apply_mode_sizes)
-
-    def _apply_mode_sizes(self):
-        if self.mode == "combined":
-            available = max(
-                2, self.splitter.width() - self.splitter.handleWidth()
-            )
-            left = available // 2
-            self.splitter.setSizes([left, available - left])
-        else:
-            self.splitter.setSizes([0, max(1, self.splitter.width())])
-
-    def closeEvent(self, event):
-        self.peak_lock_window.prepare_for_workspace_close()
-        event.accept()
 
 
 class MainWindow(QMainWindow):
@@ -2013,6 +2055,7 @@ class MainWindow(QMainWindow):
         self.control: ControlClient | None = None
         self.receiver: UdpDualReceiver | None = None
         self.poller: StatusPoller | None = None
+        self.acquisition_starter: AcquisitionStarter | None = None
         self.stream_id: int | None = None
         self.metrics = {}
         self.latest_status = None
@@ -2028,9 +2071,13 @@ class MainWindow(QMainWindow):
         self.last_event_time = time.monotonic()
         self.event_rate = 0.0
         self.plot_tick = 0
-        self.scope_window = DualScopeWindow(embedded=True)
-        self.scope_a = self.scope_window.scope_a
-        self.scope_b = self.scope_window.scope_b
+        # A and B are independent top-level instruments. Their controls are
+        # fully laid out before either window is shown, avoiding transient
+        # native child windows during ADC-page construction.
+        self.scope_a = ScopeWindow("A", "#22d3ee")
+        self.scope_b = ScopeWindow("B", "#fb7185")
+        # Compatibility for launchers that used the former combined member.
+        self.scope_window = self.scope_a
 
         scroll = QScrollArea()
         scroll.setObjectName("appScroll")
@@ -2096,7 +2143,11 @@ class MainWindow(QMainWindow):
         self.test_mode.addItem("关闭", 0)
         for mode in range(1, 8):
             self.test_mode.addItem(f"测试码 {mode}", mode)
-        self.channel_swap = VisibleCheckBox("交换 AD9269 A/B")
+        self.channel_swap = VisibleCheckBox("手动交换 A/B")
+        self.channel_swap.setToolTip(
+            "默认已自动校正AD9269的DCO边沿顺序：INA显示为通道A，INB显示为通道B。"
+            "仅在需要故意互换两个逻辑通道时勾选。"
+        )
         self.jumbo = VisibleCheckBox("约 9 KB 巨帧（20 MSPS 双通道推荐）")
         # VisibleCheckBox draws its own label, so reserve explicit space for
         # the full text even when Windows display scaling is above 100%.
@@ -2175,14 +2226,19 @@ class MainWindow(QMainWindow):
         )
         self.record_path_button = QPushButton("选择保存路径")
         self.record_path_button.setToolTip("可选择U盘、移动SSD或本地磁盘")
-        self.dlc_settings_button = QPushButton("DLC pro设置")
+        self.record_path_button.setMinimumWidth(150)
+        self.record_path_button.setMaximumWidth(220)
+        self.record_path_button.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Fixed,
+        )
         self.scan_control_button = QPushButton("扫频控制")
         self.auto_lock_button = QPushButton("自动锁频")
         self.dlc_status_label = QLabel("DLC pro：未连接")
-        self.scope_button = QPushButton("打开 A/B 双通道")
-        # Compatibility aliases for launchers that used the old two-button API.
-        self.scope_a_button = self.scope_button
-        self.scope_b_button = self.scope_button
+        self.scope_a_button = QPushButton("打开通道 A")
+        self.scope_b_button = QPushButton("打开通道 B")
+        # Compatibility alias: the generic scope action opens channel A.
+        self.scope_button = self.scope_a_button
         self.fpga_select_button = QPushButton("选择bit")
         self.fpga_program_button = QPushButton("下载FPGA")
         self.fpga_path_label = QLabel("未选择bitstream")
@@ -2194,7 +2250,8 @@ class MainWindow(QMainWindow):
         self.fpga_progress.setFormat("等待下载")
         # Scope launchers are peer actions. Keep them visually equal instead
         # of letting the recording-path stretch column make channel A huge.
-        self.scope_button.setMinimumWidth(180)
+        self.scope_a_button.setMinimumWidth(150)
+        self.scope_b_button.setMinimumWidth(150)
         self.connect_button.setObjectName("primaryButton")
         self.start_button.setObjectName("startButton")
         self.stop_button.setObjectName("stopButton")
@@ -2205,18 +2262,18 @@ class MainWindow(QMainWindow):
         action_layout.addWidget(self.connect_button, 0, 0)
         action_layout.addWidget(self.start_button, 0, 1)
         action_layout.addWidget(self.stop_button, 0, 2)
-        action_layout.addWidget(self.dlc_settings_button, 0, 3)
-        action_layout.addWidget(self.dlc_status_label, 0, 4)
-        action_layout.addWidget(self.scan_control_button, 0, 5)
-        action_layout.addWidget(self.auto_lock_button, 0, 6)
-        action_layout.addWidget(self.scope_button, 0, 7, 1, 2)
+        action_layout.addWidget(self.dlc_status_label, 0, 3)
+        action_layout.addWidget(self.scan_control_button, 0, 4)
+        action_layout.addWidget(self.auto_lock_button, 0, 5)
+        action_layout.addWidget(self.scope_a_button, 0, 6)
+        action_layout.addWidget(self.scope_b_button, 0, 7)
         action_layout.addWidget(QLabel("录制设置"), 1, 0)
         action_layout.addWidget(self.record_channels, 1, 1)
         action_layout.addWidget(self.record_rate, 1, 2)
         action_layout.addWidget(self.record_content, 1, 3, 1, 2)
-        action_layout.addWidget(self.record_path_button, 1, 5, 1, 3)
-        action_layout.addWidget(self.record_button, 1, 8)
-        action_layout.setColumnStretch(4, 1)
+        action_layout.addWidget(self.record_path_button, 1, 5)
+        action_layout.addWidget(self.record_button, 1, 7)
+        action_layout.setColumnStretch(3, 1)
         page.addWidget(action_card)
 
         # FPGA programming is a maintenance operation, separate from normal
@@ -2320,10 +2377,10 @@ class MainWindow(QMainWindow):
         self.record_content.currentIndexChanged.connect(
             self._record_content_changed
         )
-        self.dlc_settings_button.clicked.connect(self.show_dlc_settings)
         self.scan_control_button.clicked.connect(self.show_scan_control)
         self.auto_lock_button.clicked.connect(self.show_peak_lock)
-        self.scope_button.clicked.connect(self.show_scope)
+        self.scope_a_button.clicked.connect(self.show_scope_a)
+        self.scope_b_button.clicked.connect(self.show_scope_b)
         self.fpga_select_button.clicked.connect(self.choose_fpga_bit)
         self.fpga_program_button.clicked.connect(self.program_fpga)
         self.scope_a.time_settings_changed.connect(
@@ -2343,19 +2400,26 @@ class MainWindow(QMainWindow):
             acquisition_running=lambda: self.stream_id is not None,
             parent=self,
         )
-        # Auto-lock and the synchronized A/B scopes share one desktop workspace.
+        # Auto-lock and both scopes remain independent top-level windows.
+        # The scope buttons inside auto-lock only tile windows on the desktop;
+        # no QWidget is reparented or embedded.
         self.peak_lock_window = AdcPeakBalanceWindow(
             self.peak_lock_controller,
             self.settings,
             parent=None,
             falc_window_opener=self.falc_window_opener,
-            embedded=True,
+            embedded=False,
         )
-        self.auto_lock_workspace = AutoLockScopeWorkspace(
-            self.peak_lock_window, self.scope_window
+        # Compatibility alias retained for the main launcher.
+        self.auto_lock_workspace = self.peak_lock_window
+        self.peak_lock_window.scope_requested.connect(
+            self._tile_scope_with_peak_lock
         )
         self.scan_control_window = DlcScanControlWindow(
             self.dlc_session, self.settings, parent=None
+        )
+        self.peak_lock_window.scan_control_requested.connect(
+            self.show_scan_control
         )
         self.peak_lock_controller.running_changed.connect(
             self._peak_lock_running_changed
@@ -2398,24 +2462,30 @@ class MainWindow(QMainWindow):
         model = 1
         self._select_combo_data(self.model, model)
         self._model_changed()
-        self._select_combo_data(
-            self.rate, int(self.settings.value("main/rate", 5_000_000))
-        )
+        # Acquisition always starts from the conservative standard-MTU
+        # baseline.  A previous 20 MSPS session must not silently carry its
+        # high-rate network requirements into the next launch.
+        self._select_combo_data(self.rate, 10_000_000)
+        self.settings.remove("main/rate")
         self._select_combo_data(
             self.test_mode, int(self.settings.value("main/test_mode", 0))
         )
-        self.channel_swap.setChecked(self._bool_setting(
-            self.settings.value("main/channel_swap", False)
-        ))
-        jumbo_enabled = self._bool_setting(
-            self.settings.value("main/jumbo", False)
-        )
-        if int(self.rate.currentData() or 0) >= 10_000_000:
-            jumbo_ready, _detail = windows_jumbo_status()
-            if jumbo_ready is True:
-                jumbo_enabled = True
-                self.settings.setValue("main/jumbo", True)
-        self.jumbo.setChecked(jumbo_enabled)
+        # V2 makes the board's fixed DDR-edge correction automatic.  Do not
+        # carry an old workaround checkbox into the new logical mapping.
+        if not self._bool_setting(
+            self.settings.value("main/channel_mapping_v2", False)
+        ):
+            self.channel_swap.setChecked(False)
+            self.settings.setValue("main/channel_swap", False)
+            self.settings.setValue("main/channel_mapping_v2", True)
+        else:
+            self.channel_swap.setChecked(self._bool_setting(
+                self.settings.value("main/channel_swap", False)
+            ))
+        # Startup is always 10 MSPS with standard MTU.  Selecting 20 MSPS
+        # later in this session still enables jumbo mode in _rate_changed().
+        self.jumbo.setChecked(False)
+        self.settings.remove("main/jumbo")
         stored_bit = str(self.settings.value("fpga/bit_path", "")).strip()
         if stored_bit:
             self.fpga_bit_path = Path(stored_bit)
@@ -2433,6 +2503,15 @@ class MainWindow(QMainWindow):
         )
         self.scope_a.restore_settings(self.settings, "scope_a")
         self.scope_b.restore_settings(self.settings, "scope_b")
+        if not self._bool_setting(
+            self.settings.value("scope/performance_v2_migrated", False)
+        ):
+            for prefix, scope in (
+                ("scope_a", self.scope_a), ("scope_b", self.scope_b)
+            ):
+                scope.smoothing.setChecked(False)
+                self.settings.setValue(f"{prefix}/smoothing", False)
+            self.settings.setValue("scope/performance_v2_migrated", True)
         # One-time migration from the former 10 FPS default.  Later manual
         # choices remain persistent because the migration flag is retained.
         if not self._bool_setting(
@@ -2443,18 +2522,28 @@ class MainWindow(QMainWindow):
                 if index >= 0:
                     scope.fps.setCurrentIndex(index)
             self.settings.setValue("scope/fps_60_default_migrated", True)
-        workspace_geometry = self.settings.value("auto_lock_workspace/geometry")
+        workspace_geometry = self.settings.value("auto_lock_window/geometry")
+        if workspace_geometry is None:
+            workspace_geometry = self.settings.value(
+                "auto_lock_workspace/geometry"
+            )
         if workspace_geometry is not None:
             self.auto_lock_workspace.restoreGeometry(workspace_geometry)
+        for scope, key in (
+            (self.scope_a, "scope_a/geometry"),
+            (self.scope_b, "scope_b/geometry"),
+        ):
+            scope_geometry = self.settings.value(key)
+            if scope_geometry is not None:
+                scope.restoreGeometry(scope_geometry)
     def _save_settings(self):
         self.settings.setValue("main/geometry", self.saveGeometry())
         self.settings.setValue("main/board_ip", self.board_ip.text().strip())
         self.settings.setValue("main/model", self.model.currentData())
-        self.settings.setValue("main/rate", self.rate.currentData())
+        self.settings.remove("main/rate")
         self.settings.setValue("main/test_mode", self.test_mode.currentData())
         self.settings.setValue("main/channel_swap",
                                self.channel_swap.isChecked())
-        self.settings.setValue("main/jumbo", self.jumbo.isChecked())
         self.settings.setValue(
             "fpga/bit_path",
             str(self.fpga_bit_path) if self.fpga_bit_path else "",
@@ -2467,9 +2556,11 @@ class MainWindow(QMainWindow):
         )
         self.scope_a.save_settings(self.settings, "scope_a")
         self.scope_b.save_settings(self.settings, "scope_b")
+        self.settings.setValue("scope_a/geometry", self.scope_a.saveGeometry())
+        self.settings.setValue("scope_b/geometry", self.scope_b.saveGeometry())
         self.settings.setValue(
-            "auto_lock_workspace/geometry",
-            self.auto_lock_workspace.saveGeometry(),
+            "auto_lock_window/geometry",
+            self.peak_lock_window.saveGeometry(),
         )
         self.settings.sync()
 
@@ -2640,6 +2731,8 @@ class MainWindow(QMainWindow):
 
     def _rate_changed(self):
         rate = int(self.rate.currentData() or 0)
+        if rate >= 20_000_000:
+            self.jumbo.setChecked(True)
         self.jumbo.setEnabled(True)
         self.jumbo.setToolTip(
             "PL UDP 仅支持 5/10/20 MSPS；40/80 MSPS 请由 Linux 使用 Scope/Event DMA"
@@ -2676,15 +2769,11 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "连接失败", str(exc))
 
     def start_acquisition(self):
-        if not self.control or not self.receiver:
+        if (not self.control or not self.receiver or
+                (self.acquisition_starter and
+                 self.acquisition_starter.isRunning())):
             return
         try:
-            selected_rate = int(self.rate.currentData() or 0)
-            if selected_rate >= 10_000_000 and not self.jumbo.isChecked():
-                jumbo_ready, _detail = windows_jumbo_status()
-                if jumbo_ready is True:
-                    self.jumbo.setChecked(True)
-                    self.settings.setValue("main/jumbo", True)
             if self.jumbo.isChecked():
                 jumbo_ready, detail = windows_jumbo_status()
                 if jumbo_ready is False:
@@ -2700,54 +2789,60 @@ class MainWindow(QMainWindow):
                     )
                     if answer != QMessageBox.Yes:
                         return
-            # Recover deterministically from an earlier GUI or interrupted
-            # START before committing a new ADC/rate configuration.
-            self.control.request(Command.STOP)
-            self.control.adc_model = 1
             flags = int(self.test_mode.currentData()) << CONFIG_TEST_SHIFT
-            if self.channel_swap.isChecked():
-                flags |= CONFIG_CHANNEL_SWAP
-            self.control.request(Command.CONFIG,
-                                 sample_rate_hz=int(self.rate.currentData()),
-                                 flags=flags, jumbo_enable=self.jumbo.isChecked())
+            flags |= ad9269_config_channel_swap(
+                self.channel_swap.isChecked()
+            )
             previous_stream = int(self.latest_status.stream_id) if self.latest_status else -1
-            monitor_enable = True
-            self.control.request(Command.START, monitor_enable=monitor_enable)
-            deadline = time.monotonic() + 2.0
-            response = None
-            while time.monotonic() < deadline:
-                candidate = self.control.request(Command.STATUS)
-                if candidate.daq_state == 3 and int(candidate.stream_id) != previous_stream:
-                    response = candidate
-                    break
-                time.sleep(0.02)
-            if response is None:
-                raise TimeoutError("板卡未在 2 秒内进入 RUNNING 或更新 stream_id")
-            self.stream_id = int(response.stream_id)
-            self.receiver.prepare_stream(self.stream_id)
             self.model.setEnabled(False)
             self.rate.setEnabled(False)
             self.start_button.setEnabled(False)
-            self.record_button.setEnabled(True)
-            self._status_received(response)
-            self.show_scope_a()
+            self.connect_button.setEnabled(False)
+            self.state_label.setText("正在启动采集…")
+            worker = AcquisitionStarter(
+                self.control,
+                sample_rate_hz=int(self.rate.currentData()),
+                flags=flags,
+                jumbo_enabled=self.jumbo.isChecked(),
+                previous_stream=previous_stream,
+                parent=self,
+            )
+            self.acquisition_starter = worker
+            worker.succeeded.connect(self._acquisition_started)
+            worker.failed.connect(self._acquisition_start_failed)
+            worker.finished.connect(self._acquisition_start_finished)
+            worker.start()
         except Exception as exc:
-            # ACQ_START may already have reached the FPGA even if a later
-            # status/monitor confirmation fails. Return to a known stopped
-            # state so the next START is not rejected as busy.
-            try:
-                if self.control:
-                    self._status_received(self.control.request(Command.STOP))
-            except Exception:
-                pass
-            self.stream_id = None
-            self.model.setEnabled(False)
-            self.rate.setEnabled(True)
-            self.start_button.setEnabled(self.control is not None)
-            self.record_button.setEnabled(False)
-            QMessageBox.critical(self, "启动失败", str(exc))
+            self._acquisition_start_failed(str(exc))
+
+    def _acquisition_started(self, response):
+        if self._closing or self.receiver is None:
+            return
+        self.stream_id = int(response.stream_id)
+        self.receiver.prepare_stream(self.stream_id)
+        self.record_button.setEnabled(True)
+        self._status_received(response)
+        self.show_scope_a()
+
+    def _acquisition_start_failed(self, message: str):
+        self.stream_id = None
+        self.model.setEnabled(False)
+        self.rate.setEnabled(True)
+        self.start_button.setEnabled(self.control is not None)
+        self.record_button.setEnabled(False)
+        if not self._closing:
+            QMessageBox.critical(self, "启动失败", str(message))
+
+    def _acquisition_start_finished(self):
+        worker = self.acquisition_starter
+        self.acquisition_starter = None
+        self.connect_button.setEnabled(True)
+        if worker is not None:
+            worker.deleteLater()
 
     def stop_acquisition(self):
+        if self.acquisition_starter and self.acquisition_starter.isRunning():
+            self.acquisition_starter.requestInterruption()
         if self.peak_lock_controller.running:
             self.peak_lock_controller.stop("ADC采集停止，自动锁频终止")
         if self.control:
@@ -2841,6 +2936,19 @@ class MainWindow(QMainWindow):
         visible_a = self.scope_a.isVisible() and not self.scope_a.frozen
         visible_b = (int(self.model.currentData()) == 1 and
                      self.scope_b.isVisible() and not self.scope_b.frozen)
+        if not visible_a and not visible_b:
+            if self.plot_timer.interval() != 250:
+                self.plot_timer.setInterval(250)
+            self._drain_recorder()
+            return
+        target_interval = max(
+            1, round(1000 / max(
+                self.scope_a.refresh_fps if visible_a else 1,
+                self.scope_b.refresh_fps if visible_b else 1,
+            ))
+        )
+        if self.plot_timer.interval() != target_interval:
+            self.plot_timer.setInterval(target_interval)
         if visible_a or visible_b:
             samples = max(
                 self.scope_a.required_samples(rate) if visible_a else 0,
@@ -2920,25 +3028,97 @@ class MainWindow(QMainWindow):
         show_window_front(self.dlc_settings_dialog)
 
     def show_peak_lock(self):
-        self.auto_lock_workspace.show_combined()
-        show_window_front(self.auto_lock_workspace)
+        show_window_front(self.peak_lock_window)
 
     def show_scan_control(self):
         show_window_front(self.scan_control_window)
 
     def show_scope(self):
-        self.auto_lock_workspace.show_scope_only()
-        show_window_front(self.auto_lock_workspace)
+        self.show_scope_a()
 
     def show_scope_a(self):
-        self.show_scope()
+        self._show_scope_channel(self.scope_a)
 
     def show_scope_b(self):
-        self.show_scope()
+        self._show_scope_channel(self.scope_b)
+
+    def _show_scope_channel(self, scope: ScopeWindow):
+        scope.set_compact_controls(False)
+        show_window_front(scope)
+        if hasattr(self, "plot_timer"):
+            self.plot_timer.setInterval(
+                max(1, round(1000 / scope.refresh_fps))
+            )
+
+    def _tile_scope_with_peak_lock(self, channel: str):
+        scope = self.scope_a if str(channel).upper() == "A" else self.scope_b
+        # Tiling intentionally positions two peer windows as one layout.
+        # Suppress delayed per-window fitting long enough for any timers from
+        # an earlier standalone opening to expire, otherwise they overlap.
+        for peer in (self.peak_lock_window, scope):
+            peer.setProperty("suppressScheduledScreenFit", True)
+        show_window_front(self.peak_lock_window)
+        scope.showNormal()
+        scope.show()
+
+        screen = QApplication.screenAt(
+            self.peak_lock_window.frameGeometry().center()
+        ) or QApplication.primaryScreen()
+        if screen is not None:
+            area = screen.availableGeometry().adjusted(12, 12, -12, -12)
+            gap = 10
+            available_width = max(2, area.width() - gap)
+            if available_width >= 1440:
+                scope.set_compact_controls(False)
+                left_width = available_width // 2
+            else:
+                # On a narrow desktop both remain separate windows, but the
+                # scope toolbar uses its compact layout so side-by-side tiling
+                # still fits instead of overlapping.
+                scope.set_compact_controls(True)
+                left_width = min(
+                    available_width - 320,
+                    max(420, int(available_width * 0.55)),
+                )
+            left_width = min(
+                left_width, self.peak_lock_window.maximumWidth()
+            )
+            right_width = max(1, available_width - left_width)
+            title_inset = max(
+                0,
+                self.peak_lock_window.geometry().top()
+                - self.peak_lock_window.frameGeometry().top(),
+                scope.geometry().top() - scope.frameGeometry().top(),
+            )
+            height = min(
+                max(1, area.height() - title_inset),
+                max(700, self.peak_lock_window.height(), scope.height()),
+            )
+            top = min(
+                max(self.peak_lock_window.y(), area.top() + title_inset),
+                area.bottom() - height + 1,
+            )
+            self.peak_lock_window.setGeometry(
+                area.left(), top, left_width, height
+            )
+            scope.setGeometry(
+                area.left() + left_width + gap,
+                top,
+                right_width,
+                height,
+            )
+        for peer in (self.peak_lock_window, scope):
+            QTimer.singleShot(
+                180,
+                lambda target=peer: target.setProperty(
+                    "suppressScheduledScreenFit", False
+                ),
+            )
+        scope.raise_()
+        scope.activateWindow()
 
     def _peak_lock_running_changed(self, running: bool):
         owns_scan_writes = running and not self.peak_lock_controller.observe_only
-        self.dlc_settings_button.setEnabled(not owns_scan_writes)
         self.scan_control_button.setEnabled(not owns_scan_writes)
         if self.dlc_settings_dialog is not None:
             self.dlc_settings_dialog.set_scan_edit_locked(owns_scan_writes)
@@ -3180,6 +3360,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._closing = True
+        if self.acquisition_starter and self.acquisition_starter.isRunning():
+            self.acquisition_starter.requestInterruption()
+            self.acquisition_starter.wait(2500)
         if self.fpga_programmer and self.fpga_programmer.isRunning():
             self.fpga_programmer.cancel()
             self.fpga_programmer.wait(5000)
@@ -3194,6 +3377,10 @@ class MainWindow(QMainWindow):
             self.peak_lock_controller.stop("ADC程序退出")
         if hasattr(self, "auto_lock_workspace"):
             self.auto_lock_workspace.close()
+        if hasattr(self, "scope_a"):
+            self.scope_a.close()
+        if hasattr(self, "scope_b"):
+            self.scope_b.close()
         if hasattr(self, "scan_control_window"):
             self.scan_control_window.close()
         self._save_settings()

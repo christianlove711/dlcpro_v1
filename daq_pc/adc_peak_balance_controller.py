@@ -1,7 +1,11 @@
 """Qt coordinator for raw-ADC peak balancing and DLC pro scan writes."""
 from __future__ import annotations
 
+import csv
+import json
 import time
+from datetime import datetime
+from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
@@ -14,6 +18,67 @@ from .adc_peak_balance_algorithm import (
 )
 
 
+class _AutoLockCsvSession:
+    """One flushed CSV per run; only the four public event types are stored."""
+
+    FIELDS = (
+        "event", "timestamp", "elapsed_s", "sequence", "mode", "state",
+        "valid", "reason_code", "reason", "frequency_hz", "amplitude_vpp",
+        "offset_v", "scan_low_v", "scan_high_v", "peak_count", "family_count",
+        "main_prominence", "second_prominence", "family_ratio", "snr",
+        "peak_width_s", "expected_period_s", "measured_period_s", "period_error",
+        "delta_t1_s", "delta_t2_s", "signed_error", "balance_error",
+        "balance_tolerance", "reference_value", "step_v", "direction",
+        "theoretical_distance_v", "action", "target_value", "write_kind",
+        "requested_value", "readback_value", "write_tolerance", "write_ok",
+        "result", "settings_json", "device_start_json", "details_json",
+    )
+
+    def __init__(self, directory: Path, *, mode: str, settings: dict,
+                 device_start: dict):
+        directory.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        self.started = time.monotonic()
+        self.sequence = 0
+        self.mode = mode
+        self._partial = directory / f"{stamp}_running.partial.csv"
+        self.path = self._partial
+        self._handle = self._partial.open("w", newline="", encoding="utf-8-sig")
+        self._writer = csv.DictWriter(self._handle, fieldnames=self.FIELDS)
+        self._writer.writeheader()
+        self.write("START", settings_json=json.dumps(settings, ensure_ascii=False),
+                   device_start_json=json.dumps(device_start, ensure_ascii=False))
+
+    def write(self, event: str, **values) -> None:
+        if self._handle.closed:
+            return
+        self.sequence += 1
+        row = {field: "" for field in self.FIELDS}
+        row.update(values)
+        row.update({
+            "event": event,
+            "timestamp": datetime.now().isoformat(timespec="milliseconds"),
+            "elapsed_s": f"{time.monotonic() - self.started:.6f}",
+            "sequence": self.sequence,
+            "mode": self.mode,
+        })
+        self._writer.writerow(row)
+        self._handle.flush()
+
+    def finish(self, result: str, reason: str) -> Path:
+        if self._handle.closed:
+            return self.path
+        self.write("END", result=result, reason=reason)
+        self._handle.close()
+        safe = result.lower().replace(" ", "_") or "ended"
+        final = self._partial.with_name(
+            self._partial.name.replace("_running.partial.csv", f"_{safe}.csv")
+        )
+        self._partial.replace(final)
+        self.path = final
+        return final
+
+
 class AdcPeakBalanceController(QObject):
     ANALYSIS_CYCLES = 2.0
     SETTLE_CYCLES = 1.0
@@ -21,6 +86,7 @@ class AdcPeakBalanceController(QObject):
     # requested IEEE-754 value bit-for-bit.  Accept 1 mHz (or 10 ppm at high
     # frequencies); analysis always uses the actual device readback.
     FREQUENCY_READBACK_TOLERANCE_HZ = 0.001
+    LOG_DIRECTORY = Path(__file__).resolve().parent / "captures" / "auto_lock_logs"
     running_changed = Signal(bool)
     status_changed = Signal(dict)
     log_message = Signal(str)
@@ -58,6 +124,9 @@ class AdcPeakBalanceController(QObject):
         self.step_profile = "用户设定"
         self.last_observation = PeakObservation(False, "尚未开始")
         self.restore_queue: list[tuple[str, float]] = []
+        self.log_session: _AutoLockCsvSession | None = None
+        self.last_log_path: Path | None = None
+        self._last_action = ControlAction("none", None, "", "idle")
         self.manual_advice = "尚未开始观察"
         self.timer = QTimer(self)
         self.timer.setInterval(250)
@@ -124,11 +193,12 @@ class AdcPeakBalanceController(QObject):
                     "FALC pro的Path Selection为None；请先打开FALC pro设置选择路径"
                 )
         if (observe_only
-                and settings.target_amplitude
+                and settings.final_amplitude
                 > abs(float(snapshot.sc_amplitude)) + 1e-12):
             raise RuntimeError(
                 "最终扫频范围目标不能大于当前启动Scan Amplitude"
             )
+        self._begin_log_session(settings, snapshot, observe_only)
         self._pending_start = (settings, bool(observe_only), bool(auto_engage_falc))
         self.start_frequency = frequency
         self.restore_offset = float(snapshot.sc_offset)
@@ -234,8 +304,8 @@ class AdcPeakBalanceController(QObject):
         self.timer.start()
         self._emit_status(PeakObservation(False, "采集2个扫描周期建立00模基准"))
 
-    def stop(self, reason: str = "用户停止") -> None:
-        if not self.running:
+    def stop(self, reason: str = "用户停止", result: str | None = None) -> None:
+        if not self.running and self.log_session is None:
             return
         self.running = False
         self.timer.stop()
@@ -247,7 +317,16 @@ class AdcPeakBalanceController(QObject):
         self.settle_kind = ""
         self._pending_start = None
         self.running_changed.emit(False)
-        self._log(reason)
+        if result is None:
+            if self.falc_engaged:
+                result = "falc_complete"
+            elif self.engine is not None and self.engine.finalized:
+                result = "locked"
+            elif "用户" in reason or "手动" in reason:
+                result = "stopped"
+            else:
+                result = "fault"
+        self._finish_log_session(result, reason)
         self.stopped.emit(reason)
 
     def restore_start_values(self) -> None:
@@ -372,30 +451,27 @@ class AdcPeakBalanceController(QObject):
         )
         self.last_observation = observation
         self._emit_status(observation)
-        if observation.reason in {
-            "等待足够的扫描周期", "分析窗口存在ADC索引空洞"
-        }:
-            if observation.reason.endswith("索引空洞"):
-                self.gate_bin = self._latest_bin()
-                self._wait_for_new_window(cycles, keep_gate=True)
-                retry_seconds = cycles / max(frequency, 1e-12)
-                self._log(
-                    "丢弃包含ADC/网络空洞的分析窗口；"
-                    f"等待{cycles:g}个全新周期后重试（约{retry_seconds:.1f}秒）"
-                )
-            if self.observe_only and observation.reason.endswith("索引空洞"):
-                action = self._observe(observation)
-                self._emit_status(observation, action)
-            elif self.observe_only:
-                self.manual_advice = (
-                    "正在等待一批完整且未分析过的新数据；请保持扫频参数不动。"
-                )
+        if observation.reason_code == "WAITING":
+            if self.observe_only:
+                self.manual_advice = "正在等待一批完整且未分析过的新数据；请保持扫频参数不动。"
                 self._emit_status(observation)
             return
         if self.observe_only:
             action = self._observe(observation)
+            self._log_decision(observation, action)
         else:
             action = self.engine.update(observation)
+            if (not self.auto_engage_falc and observation.valid
+                    and self.engine.current_amplitude
+                    <= self.engine.amplitude_floor * 1.001
+                    and observation.balance_error
+                    <= self.engine.settings.final_balance_tolerance):
+                self.engine.finalized = True
+                action = ControlAction(
+                    "none", None,
+                    "最终窗口首次达标；未启用自动FALC，立即停止写入",
+                    "track", "FINAL_PASS",
+                )
             self._log_decision(observation, action)
         self._emit_status(observation, action)
         if action.kind == "stop":
@@ -405,7 +481,7 @@ class AdcPeakBalanceController(QObject):
         elif (self.engine.finalized and action.state == "track"
               and observation.valid
               and observation.balance_error
-              <= self.engine.settings.balance_tolerance):
+              <= self.engine.settings.final_balance_tolerance):
             if self.auto_engage_falc:
                 self._engage_falc()
             else:
@@ -429,26 +505,25 @@ class AdcPeakBalanceController(QObject):
         settings = engine.settings
         if not observation.valid:
             engine.stable_count = 0
-            if engine.current_amplitude < engine.last_good_amplitude * 0.999:
-                self.manual_advice = (
-                    f"当前峰识别失败（{observation.reason}）。请先把 Scan Amplitude "
-                    f"恢复到最近可靠值 {engine.last_good_amplitude:.6f}，然后等待2个周期。"
-                )
-            elif observation.reason == "未找到足够的00模穿越峰":
-                step = max(settings.offset_step, settings.min_offset_step)
+            if observation.reason_code == "NO_PEAK":
+                step = settings.initial_offset_search_step
+                center = engine.start_offset
+                if engine.current_amplitude <= engine.amplitude_floor * 1.001:
+                    step = settings.final_coarse_step
+                    center = engine.final_origin_offset or engine.current_offset
                 self.manual_advice = (
                     "当前没有检测到透射峰。保持 Scan Amplitude="
-                    f"{engine.current_amplitude:.6f} Vpp 不变，以启动Offset="
-                    f"{engine.start_offset:.6f}为中心，按 +{step:.6f}、"
+                    f"{engine.current_amplitude:.6f} Vpp 不变，以搜索中心Offset="
+                    f"{center:.6f}为中心，连续两窗确认无峰后按 +{step:.6f}、"
                     f"-{step:.6f}、+{2 * step:.6f}、-{2 * step:.6f}…"
                     "左右逐步扩大Offset；每次调节后等待2个新周期。"
-                    f"不要超过±{settings.max_offset_deviation:.6f}的安全范围。"
+                    "实际范围受PC Voltage物理边界限制。"
                 )
             else:
                 self.manual_advice = (
                     f"当前峰识别失败（{observation.reason}）。先保持 Offset 不动；"
-                    "确认透射峰通道、三角扫描和峰极性。若画面确实扫不到00模，"
-                    "请适当增大 Scan Amplitude 后等待2个周期。"
+                    f"原地重新采集，最多复测{settings.invalid_retry_windows}次。"
+                    "确认透射峰通道、三角扫描、峰极性和ADC数据完整性。"
                 )
             return ControlAction("none", None, self.manual_advice, "observe")
 
@@ -468,7 +543,7 @@ class AdcPeakBalanceController(QObject):
             engine.previous_error = observation.balance_error
             engine.previous_offset = engine.current_offset
             if engine.stable_count >= stage.stable_windows:
-                if stage.shrink_ratio is None:
+                if stage.next_amplitude is None:
                     self.manual_advice = (
                         f"已连续{stage.stable_windows}个独立窗口达到最终验收标准："
                         f"Amplitude={engine.current_amplitude:.6f} Vpp，"
@@ -476,10 +551,7 @@ class AdcPeakBalanceController(QObject):
                         "观察模式不会关闭Scan或使能FALC pro；保持当前参数即可验证稳定性。"
                     )
                     return ControlAction("none", None, self.manual_advice, "observe")
-                target = max(
-                    engine.amplitude_floor,
-                    engine.current_amplitude * stage.shrink_ratio,
-                )
+                target = stage.next_amplitude
                 if target >= engine.current_amplitude * 0.999:
                     self.manual_advice = (
                         f"已连续{stage.stable_windows}个独立窗口居中，且Scan "
@@ -508,11 +580,18 @@ class AdcPeakBalanceController(QObject):
         previous_error = engine.previous_error
         previous_offset = engine.previous_offset
         offset_delta = engine.current_offset - previous_offset
-        minimum_step = stage.min_offset_step
+        final_stage = engine.current_amplitude <= engine.amplitude_floor * 1.001
+        target_override = None
         if previous_error is None or abs(offset_delta) < 1e-12:
             direction = engine.direction
-            step = engine.step_size
-            explanation = "单个窗口不能知道DLC pro正负方向，先做一次正向试探"
+            step = (
+                engine._final_step_for(observation)
+                if final_stage else settings.wide_probe_step
+            )
+            explanation = (
+                "最终阶段先按误差选择粗调或精调步长做正向试探"
+                if final_stage else "宽扫先做一次正向方向试探"
+            )
         else:
             changed_direction = 1.0 if offset_delta > 0 else -1.0
             if observation.balance_error < previous_error:
@@ -521,29 +600,41 @@ class AdcPeakBalanceController(QObject):
                 explanation = "刚才的人工调节使不均匀度变小，继续同方向"
             else:
                 direction = -changed_direction
-                step = max(minimum_step, engine.step_size / 2.0)
-                explanation = "刚才的人工调节使不均匀度变大，反向并减小步长"
+                step = (
+                    settings.final_fine_step if final_stage
+                    else settings.wide_probe_step
+                )
+                explanation = (
+                    "刚才的最终调节变差，恢复最佳附近并反向精调"
+                    if final_stage else "宽扫正向试探变差，改用反方向"
+                )
+            if not final_stage:
+                step = engine.theoretical_distance(
+                    engine.current_amplitude, previous_error
+                )
+                target_override = previous_offset + direction * step
+                explanation += "，从试探前Offset跳完整理论距离"
             engine.direction = direction
             engine.step_size = step
         low, high = engine.offset_limits
         if engine.current_offset < low - 1e-12 or engine.current_offset > high + 1e-12:
-            required = abs(engine.current_offset - engine.start_offset)
             self.manual_advice = (
-                f"当前Scan Offset {engine.current_offset:.6f} 已超出启动值允许范围 "
-                f"[{low:.6f}, {high:.6f}]。请先把Offset恢复到范围内，或停止后把"
-                f"‘启动Offset最大偏移’设为至少 {required:.6f} 再重新开始；"
-                "算法不会给出跨越安全边界的调节建议。"
+                f"当前Scan Offset {engine.current_offset:.6f} 已超出允许范围 "
+                f"[{low:.6f}, {high:.6f}]。请恢复到范围内；最终阶段范围由"
+                "‘最终最大Offset偏移’和PC Voltage物理边界共同限制。"
             )
             return ControlAction("none", None, self.manual_advice, "observe")
         target = min(
             high,
-            max(low, engine.current_offset + direction * step),
+            max(low, target_override if target_override is not None else (
+                engine.current_offset + direction * step
+            )),
         )
         if abs(target - engine.current_offset) < 1e-12:
             self.manual_advice = (
                 f"Offset已到允许边界 {target:.6f}，但不均匀度仍为"
-                f"{observation.balance_error * 100:.2f}%。请停止后增大"
-                "‘启动Offset最大偏移’，或先人工恢复到更合适的启动Offset。"
+                f"{observation.balance_error * 100:.2f}%。请停止并检查搜索中心；"
+                "若处于最终阶段，可在确认安全后调整‘最终最大Offset偏移’。"
             )
             return ControlAction("none", None, self.manual_advice, "observe")
         engine.previous_error = observation.balance_error
@@ -605,7 +696,11 @@ class AdcPeakBalanceController(QObject):
         if self.pending_write and self.pending_kind == "frequency_start":
             expected = float(self.pending_value or 0.0)
             actual = float(snapshot.sc_frequency)
+            tolerance = max(
+                self.FREQUENCY_READBACK_TOLERANCE_HZ, abs(expected) * 1e-5
+            )
             if not self._frequency_matches(actual, expected):
+                self._log_write("frequency_start", expected, actual, tolerance, False, snapshot)
                 self.pending_write = False
                 self.pending_kind = ""
                 self.pending_value = None
@@ -614,6 +709,7 @@ class AdcPeakBalanceController(QObject):
                     f"实际{actual:g} Hz"
                 )
                 return
+            self._log_write("frequency_start", expected, actual, tolerance, True, snapshot)
             self.pending_write = False
             self.pending_kind = ""
             self.pending_value = None
@@ -625,6 +721,7 @@ class AdcPeakBalanceController(QObject):
             actual = abs(float(snapshot.sc_amplitude))
             tolerance = max(5e-7, abs(expected) * 1e-9)
             if abs(actual - expected) > tolerance:
+                self._log_write("amplitude_start", expected, actual, tolerance, False, snapshot)
                 self.pending_write = False
                 self.pending_kind = ""
                 self.pending_value = None
@@ -633,6 +730,7 @@ class AdcPeakBalanceController(QObject):
                     f"期望{expected:.9g} Vpp，实际{actual:.9g} Vpp"
                 )
                 return
+            self._log_write("amplitude_start", expected, actual, tolerance, True, snapshot)
             self.pending_write = False
             self.pending_kind = ""
             self.pending_value = None
@@ -643,10 +741,12 @@ class AdcPeakBalanceController(QObject):
             return
         if self.pending_write and self.pending_kind == "scan_enable":
             if not bool(snapshot.sc_enabled):
+                self._log_write("scan_enable", 1.0, 0.0, 0.0, False, snapshot)
                 self.pending_write = False
                 self.pending_kind = ""
                 self.stop("自动开启Scan后设备读回仍为关闭，自动锁频未启动")
                 return
+            self._log_write("scan_enable", 1.0, 1.0, 0.0, True, snapshot)
             self.pending_write = False
             self.pending_kind = ""
             self.pending_value = None
@@ -674,6 +774,7 @@ class AdcPeakBalanceController(QObject):
             # still treated as a failed device write.
             tolerance = max(5e-7, abs(pending_value) * 1e-9)
             if abs(actual - pending_value) > tolerance:
+                self._log_write(pending_kind, pending_value, actual, tolerance, False, snapshot)
                 self.pending_write = False
                 self.pending_kind = ""
                 self.pending_value = None
@@ -683,6 +784,7 @@ class AdcPeakBalanceController(QObject):
                     f"实际{actual:.9g}"
                 )
                 return
+            self._log_write(pending_kind, pending_value, actual, tolerance, True, snapshot)
         if self.engine is not None:
             self.engine.sync(float(snapshot.sc_offset), float(snapshot.sc_amplitude))
             if pending_kind.endswith("amplitude"):
@@ -736,6 +838,7 @@ class AdcPeakBalanceController(QObject):
     def _falc_completed(self, snapshot) -> None:
         falc = getattr(snapshot, "falc1", None)
         if falc is None:
+            self._log_write("falc", 1.0, None, 0.0, False, snapshot)
             self.pending_write = False
             self.stop("FALC pro读回不可用，无法确认使能结果")
             return
@@ -744,14 +847,14 @@ class AdcPeakBalanceController(QObject):
         unlim_ok = not (path & 1) or bool(falc.unlim.enabled)
         scan_stopped = not bool(snapshot.sc_enabled)
         if path not in (1, 2, 3) or not main_ok or not unlim_ok or not scan_stopped:
+            self._log_write("falc", 1.0, 0.0, 0.0, False, snapshot)
             self.pending_write = False
             self.stop("FALC pro使能后读回校验失败，已停止自动流程")
             return
         self.pending_write = False
         self.pending_kind = ""
         self.falc_engaged = True
-        self.running = False
-        self.timer.stop()
+        self._log_write("falc", 1.0, 1.0, 0.0, True, snapshot)
         selected_states = []
         if path & 1:
             selected_states.append(
@@ -766,13 +869,11 @@ class AdcPeakBalanceController(QObject):
             + "，".join(selected_states)
             + "。自动找峰流程已结束，请观察波形并确认锁定状态。"
         )
-        self._log(self.manual_advice)
-        self.running_changed.emit(False)
         self._emit_status(
             self.last_observation,
             ControlAction("none", None, self.manual_advice, "falc_enabled"),
         )
-        self.stopped.emit(self.manual_advice)
+        self.stop(self.manual_advice, result="falc_complete")
 
     def _connection_changed(self, connected: bool, text: str) -> None:
         if self.running and not connected:
@@ -820,40 +921,137 @@ class AdcPeakBalanceController(QObject):
                 stage.balance_tolerance if stage is not None else 0.0
             ),
             "stage_windows": stage.stable_windows if stage is not None else 0,
-            "stage_shrink": stage.shrink_ratio if stage is not None else None,
+            "stage_target_amplitude": (
+                stage.next_amplitude if stage is not None else None
+            ),
             "manual_advice": self.manual_advice,
         })
 
     def _log(self, text: str) -> None:
-        self.log_message.emit(f"{time.strftime('%H:%M:%S')}  {text}")
+        # Waiting/settling guidance belongs to the status area.  Keeping it out
+        # of the event stream makes the four algorithm event types replayable.
+        self.manual_advice = text
+
+    def _emit_event_line(self, event: str, fields: list[str]) -> None:
+        body = "，".join(item for item in fields if item)
+        self.log_message.emit(f"{time.strftime('%H:%M:%S')}  {event}  {body}")
+
+    def _begin_log_session(self, settings: PeakBalanceSettings, snapshot,
+                           observe_only: bool) -> None:
+        device = {
+            "frequency_hz": float(snapshot.sc_frequency),
+            "amplitude_vpp": abs(float(snapshot.sc_amplitude)),
+            "offset_v": float(snapshot.sc_offset),
+            "scan_enabled": bool(snapshot.sc_enabled),
+            "scan_signal_type": int(snapshot.sc_signal_type),
+            "scan_output_channel": int(getattr(snapshot, "sc_output_channel", -1)),
+            "scan_unit": str(getattr(snapshot, "sc_unit", "") or ""),
+        }
+        self.log_session = _AutoLockCsvSession(
+            self.LOG_DIRECTORY,
+            mode="observe" if observe_only else "auto",
+            settings=settings.as_dict(),
+            device_start=device,
+        )
+        self.last_log_path = self.log_session.path
+        self._emit_event_line("START", [
+            f"模式={'观察' if observe_only else '自动'}",
+            f"频率={device['frequency_hz']:.6f} Hz",
+            f"Amplitude={device['amplitude_vpp']:.6f} Vpp",
+            f"Offset={device['offset_v']:.6f} V",
+            "参数=21项已记录",
+        ])
+
+    def _finish_log_session(self, result: str, reason: str) -> None:
+        session = self.log_session
+        self.log_session = None
+        if session is None:
+            return
+        path = session.finish(result, reason)
+        self.last_log_path = path
+        self._emit_event_line("END", [f"结果={result}", f"原因={reason}", f"文件={path}"])
+
+    def _log_write(self, kind: str, requested: float | None, actual: float | None,
+                   tolerance: float | None, ok: bool, snapshot=None) -> None:
+        engine = self.engine
+        amplitude = (
+            abs(float(snapshot.sc_amplitude)) if snapshot is not None
+            else (engine.current_amplitude if engine is not None else "")
+        )
+        offset = (
+            float(snapshot.sc_offset) if snapshot is not None
+            else (engine.current_offset if engine is not None else "")
+        )
+        if self.log_session is not None:
+            self.log_session.write(
+                "WRITE", state=engine.state if engine is not None else "initializing",
+                frequency_hz=(float(snapshot.sc_frequency) if snapshot is not None else self.scan_frequency),
+                amplitude_vpp=amplitude, offset_v=offset, write_kind=kind,
+                requested_value=requested, readback_value=actual,
+                write_tolerance=tolerance, write_ok=int(ok),
+            )
+        self._emit_event_line("WRITE", [
+            f"类型={kind}", f"请求={requested if requested is not None else '--'}",
+            f"读回={actual if actual is not None else '--'}", f"结果={'通过' if ok else '失败'}",
+            f"Amplitude={float(amplitude):.6f} Vpp" if amplitude != "" else "",
+            f"Offset={float(offset):.6f} V" if offset != "" else "",
+        ])
 
     def _log_decision(
         self, observation: PeakObservation, action: ControlAction
     ) -> None:
         engine = self.engine
         if engine is None:
-            self._log(f"{action.reason}：{action.kind} -> {action.value}")
             return
         reference = engine.trial_origin_error
-        reference_text = "--" if reference is None else f"{reference * 100:.2f}%"
-        value_text = "--" if action.value is None else f"{action.value:.6f}"
-        if observation.valid:
-            metrics = (
-                f"Δt1={observation.delta_t1:.6f}s，Δt2={observation.delta_t2:.6f}s，"
-                f"不均匀度={observation.balance_error * 100:.2f}%，"
-                f"参考不均匀度={reference_text}"
-            )
-        else:
-            metrics = (
-                f"窗口无效={observation.reason}，最强峰={observation.prominence:.1f}码，"
-                f"次峰={observation.second_prominence:.1f}码，"
-                f"强度比={observation.dominance_ratio:.2f}/"
-                f"{engine.settings.carrier_dominance_ratio:.2f}，"
-                f"实测周期={observation.measured_period:.6f}s，"
-                f"历史00模指纹={'有' if engine.fingerprint is not None else '无'}"
-            )
-        self._log(
-            f"状态={action.state}，Amplitude={engine.current_amplitude:.6f} Vpp，"
-            f"Offset={engine.current_offset:.6f} V，{metrics}；"
-            f"判定/动作={action.reason}；{action.kind} -> {value_text}"
+        low = engine.current_offset - 0.5 * engine.current_amplitude
+        high = engine.current_offset + 0.5 * engine.current_amplitude
+        theoretical_error = (
+            reference if action.state == "wide_jump" and reference is not None
+            else observation.balance_error
         )
+        theoretical = (
+            engine.theoretical_distance(engine.current_amplitude, theoretical_error)
+            if observation.valid and engine.current_amplitude > engine.amplitude_floor * 1.001
+            else 0.0
+        )
+        stage = engine.current_stage
+        if self.log_session is not None:
+            self.log_session.write(
+                "MEASURE", state=action.state, valid=int(observation.valid),
+                reason_code=observation.reason_code or action.reason_code,
+                reason=observation.reason, frequency_hz=self.scan_frequency,
+                amplitude_vpp=engine.current_amplitude, offset_v=engine.current_offset,
+                scan_low_v=low, scan_high_v=high, peak_count=observation.peak_count,
+                family_count=observation.family_count,
+                main_prominence=observation.prominence,
+                second_prominence=observation.second_prominence,
+                family_ratio=observation.dominance_ratio, snr=observation.snr,
+                peak_width_s=observation.width_seconds,
+                expected_period_s=observation.expected_period,
+                measured_period_s=observation.measured_period,
+                period_error=observation.period_error,
+                delta_t1_s=observation.delta_t1, delta_t2_s=observation.delta_t2,
+                signed_error=observation.signed_error,
+                balance_error=observation.balance_error,
+                balance_tolerance=stage.balance_tolerance,
+                reference_value=reference, step_v=engine.step_size,
+                direction=engine.direction, theoretical_distance_v=theoretical,
+                action=action.kind, target_value=action.value,
+                details_json=json.dumps({"action_reason": action.reason}, ensure_ascii=False),
+            )
+        self._emit_event_line("MEASURE", [
+            f"状态={action.state}", f"有效={int(observation.valid)}",
+            f"原因码={observation.reason_code or action.reason_code or '--'}",
+            f"频率={self.scan_frequency:.6f} Hz",
+            f"Amplitude={engine.current_amplitude:.6f} Vpp",
+            f"Offset={engine.current_offset:.6f} V",
+            f"扫描=[{low:.6f},{high:.6f}] V",
+            f"主/次峰族={observation.prominence:.1f}/{observation.second_prominence:.1f}",
+            f"强度比={observation.dominance_ratio:.2f}",
+            f"周期误差={observation.period_error * 100:.2f}%",
+            f"不均匀度={observation.balance_error * 100:.2f}%",
+            f"门槛={stage.balance_tolerance * 100:.2f}%",
+            f"步长={engine.step_size:.6f} V",
+            f"动作={action.kind}->{action.value if action.value is not None else '--'}",
+        ])

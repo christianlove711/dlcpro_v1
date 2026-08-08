@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSettings
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QWidget
 
-from ui_scaling import SCALE_OPTIONS, UiScaleManager, WindowLayoutManager
+from ui_scaling import (
+    SCALE_OPTIONS,
+    UiScaleManager,
+    WindowLayoutManager,
+    schedule_window_fit,
+)
 
 
 def _settings(path) -> QSettings:
@@ -45,3 +51,19 @@ def test_window_geometry_is_restored(qapp, tmp_path) -> None:
     second_manager.register_window(second, "test", 640, 480)
     second_manager.prepare_show(second)
     assert second.size() == first.size()
+
+
+def test_deferred_fit_keeps_native_title_bar_on_screen(qapp) -> None:
+    screen = qapp.primaryScreen()
+    available = screen.availableGeometry().adjusted(16, 16, -16, -16)
+    window = QWidget()
+    window.resize(min(640, available.width()), min(480, available.height()))
+    window.move(available.left(), available.top() - 400)
+    window.show()
+
+    schedule_window_fit(window)
+    QTest.qWait(180)
+
+    assert window.frameGeometry().top() >= available.top()
+    assert window.frameGeometry().left() >= available.left()
+    window.close()

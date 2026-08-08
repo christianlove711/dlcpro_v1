@@ -147,12 +147,150 @@ class RawHistoryFrame:
     bin_seconds: float
 
 
+class _MinMaxHistory:
+    """Fixed-resolution min/max history with loss-aware bins."""
+
+    def __init__(self, bin_seconds: float, history_seconds: float):
+        self.bin_seconds = float(bin_seconds)
+        self.capacity = max(1, int(history_seconds / bin_seconds))
+        self.minimum_a = np.zeros(self.capacity, np.int16)
+        self.maximum_a = np.zeros(self.capacity, np.int16)
+        self.minimum_b = np.zeros(self.capacity, np.int16)
+        self.maximum_b = np.zeros(self.capacity, np.int16)
+        self.valid = np.zeros(self.capacity, bool)
+        self.bin_pairs = 0
+        self.reset()
+
+    def reset(self) -> None:
+        self.write = 0
+        self.count = 0
+        self.current_index: int | None = None
+        self.current = None
+        self.current_valid = True
+        self.pending_invalid_index: int | None = None
+        self.valid.fill(False)
+
+    def configure(self, sample_rate_hz: int) -> None:
+        self.bin_pairs = max(1, round(sample_rate_hz * self.bin_seconds))
+        self.reset()
+
+    def mark_gap(self, first_missing: int, next_present: int) -> None:
+        if self.bin_pairs <= 0 or next_present <= first_missing:
+            return
+        first_bin = int(first_missing) // self.bin_pairs
+        last_bin = (int(next_present) - 1) // self.bin_pairs
+        if (self.current_index is not None and
+                first_bin <= self.current_index <= last_bin):
+            self.current_valid = False
+        # Intermediate bins are inserted as invalid during update().  The bin
+        # containing the first sample after the gap can be only partly lost,
+        # so remember that it must also remain invalid when it is created.
+        self.pending_invalid_index = (
+            last_bin if int(next_present) % self.bin_pairs else None
+        )
+
+    def _commit(self) -> None:
+        if self.current is None:
+            return
+        min_a, max_a, min_b, max_b = self.current
+        index = self.write
+        self.minimum_a[index] = min_a
+        self.maximum_a[index] = max_a
+        self.minimum_b[index] = min_b
+        self.maximum_b[index] = max_b
+        self.valid[index] = bool(self.current_valid)
+        self.write = (index + 1) % self.capacity
+        self.count = min(self.capacity, self.count + 1)
+
+    def _append_invalid(self, count: int) -> None:
+        count = min(max(0, int(count)), self.capacity)
+        if not count:
+            return
+        first = min(count, self.capacity - self.write)
+        self.valid[self.write:self.write + first] = False
+        if first < count:
+            self.valid[:count - first] = False
+        self.write = (self.write + count) % self.capacity
+        self.count = min(self.capacity, self.count + count)
+
+    def update(self, first_raw_pair: int, pairs: np.ndarray,
+               stride: int) -> None:
+        if not pairs.size or self.bin_pairs <= 0:
+            return
+        raw_position = int(first_raw_pair)
+        offset = 0
+        stride = max(1, int(stride))
+        while offset < len(pairs):
+            bin_index = raw_position // self.bin_pairs
+            bin_end = (bin_index + 1) * self.bin_pairs
+            remaining_raw = max(1, bin_end - raw_position)
+            take = min(
+                len(pairs) - offset,
+                max(1, (remaining_raw + stride - 1) // stride),
+            )
+            segment = pairs[offset:offset + take]
+            extrema = (
+                int(np.min(segment[:, 0])), int(np.max(segment[:, 0])),
+                int(np.min(segment[:, 1])), int(np.max(segment[:, 1])),
+            )
+            invalid = bin_index == self.pending_invalid_index
+            if self.current_index is None:
+                self.current_index = bin_index
+                self.current = extrema
+                self.current_valid = not invalid
+            elif bin_index > self.current_index:
+                previous = self.current_index
+                self._commit()
+                self._append_invalid(bin_index - previous - 1)
+                self.current_index = bin_index
+                self.current = extrema
+                self.current_valid = not invalid
+            elif bin_index == self.current_index:
+                current = self.current
+                self.current = (
+                    min(current[0], extrema[0]), max(current[1], extrema[1]),
+                    min(current[2], extrema[2]), max(current[3], extrema[3]),
+                )
+                if invalid:
+                    self.current_valid = False
+            if invalid:
+                self.pending_invalid_index = None
+            raw_position += take * stride
+            offset += take
+
+    def snapshot(self, seconds: float | None = None):
+        requested = self.capacity if seconds is None else max(
+            1, int(np.ceil(float(seconds) / self.bin_seconds))
+        )
+        include_current = self.current is not None
+        count = min(
+            max(0, requested - (1 if include_current else 0)), self.count
+        )
+        arrays = [
+            DualSampleRingBuffer._copy_ring_values(values, self.write, count)
+            for values in (
+                self.minimum_a, self.maximum_a,
+                self.minimum_b, self.maximum_b, self.valid,
+            )
+        ]
+        if include_current:
+            current = self.current
+            arrays[0] = np.append(arrays[0], current[0])
+            arrays[1] = np.append(arrays[1], current[1])
+            arrays[2] = np.append(arrays[2], current[2])
+            arrays[3] = np.append(arrays[3], current[3])
+            arrays[4] = np.append(arrays[4], self.current_valid)
+        return (*arrays, self.current_index)
+
+
 class DualSampleRingBuffer:
     """Thread-safe two-channel preview ring indexed in received sample pairs."""
     HISTORY_BIN_SECONDS = 0.001
     # Long scope timebases use compact 1 ms min/max bins, so extending the
     # visible history to 100 s costs little memory and supports 10 s/div.
     HISTORY_SECONDS = 100.0
+    PREVIEW_BIN_SECONDS = 25e-6
+    PREVIEW_HISTORY_SECONDS = 5.0
 
     def __init__(self, capacity: int = 10_000_000):
         self.capacity = int(capacity)
@@ -165,21 +303,12 @@ class DualSampleRingBuffer:
         self._expected_raw_pair: int | None = None
         self._sample_rate_hz = 0
         self._stride = 1
-        # Long timebases use one min/max bin per millisecond instead of
-        # repeatedly copying millions of raw samples on every paint tick.
-        self._history_capacity = int(
-            self.HISTORY_SECONDS / self.HISTORY_BIN_SECONDS
+        self._history = _MinMaxHistory(
+            self.HISTORY_BIN_SECONDS, self.HISTORY_SECONDS
         )
-        self._history_min_a = np.zeros(self._history_capacity, np.int16)
-        self._history_max_a = np.zeros(self._history_capacity, np.int16)
-        self._history_min_b = np.zeros(self._history_capacity, np.int16)
-        self._history_max_b = np.zeros(self._history_capacity, np.int16)
-        self._history_valid = np.zeros(self._history_capacity, bool)
-        self._history_write = 0
-        self._history_count = 0
-        self._history_bin_pairs = 0
-        self._history_current_index: int | None = None
-        self._history_current = None
+        self._preview_history = _MinMaxHistory(
+            self.PREVIEW_BIN_SECONDS, self.PREVIEW_HISTORY_SECONDS
+        )
         self._lock = threading.Lock()
 
     @property
@@ -196,82 +325,13 @@ class DualSampleRingBuffer:
             self._reset_history()
 
     def _reset_history(self) -> None:
-        self._history_write = 0
-        self._history_count = 0
-        self._history_current_index = None
-        self._history_current = None
-        self._history_valid.fill(False)
-
-    def _commit_history_bin(self, valid: bool = True) -> None:
-        if self._history_current is None:
-            return
-        min_a, max_a, min_b, max_b = self._history_current
-        index = self._history_write
-        self._history_min_a[index] = min_a
-        self._history_max_a[index] = max_a
-        self._history_min_b[index] = min_b
-        self._history_max_b[index] = max_b
-        self._history_valid[index] = bool(valid)
-        self._history_write = (index + 1) % self._history_capacity
-        self._history_count = min(
-            self._history_capacity, self._history_count + 1
-        )
-
-    def _append_invalid_history_bins(self, count: int) -> None:
-        count = min(max(0, int(count)), self._history_capacity)
-        for _ in range(count):
-            index = self._history_write
-            self._history_min_a[index] = 0
-            self._history_max_a[index] = 0
-            self._history_min_b[index] = 0
-            self._history_max_b[index] = 0
-            self._history_valid[index] = False
-            self._history_write = (index + 1) % self._history_capacity
-            self._history_count = min(
-                self._history_capacity, self._history_count + 1
-            )
+        self._history.reset()
+        self._preview_history.reset()
 
     def _update_history(self, first_raw_pair: int,
                         pairs: np.ndarray) -> None:
-        if not pairs.size or self._history_bin_pairs <= 0:
-            return
-        raw_position = int(first_raw_pair)
-        offset = 0
-        stride = max(1, self._stride)
-        while offset < len(pairs):
-            bin_index = raw_position // self._history_bin_pairs
-            bin_end = (bin_index + 1) * self._history_bin_pairs
-            remaining_raw = max(1, bin_end - raw_position)
-            take = min(
-                len(pairs) - offset,
-                max(1, (remaining_raw + stride - 1) // stride),
-            )
-            segment = pairs[offset:offset + take]
-            segment_extrema = (
-                int(np.min(segment[:, 0])),
-                int(np.max(segment[:, 0])),
-                int(np.min(segment[:, 1])),
-                int(np.max(segment[:, 1])),
-            )
-            if self._history_current_index is None:
-                self._history_current_index = bin_index
-                self._history_current = segment_extrema
-            elif bin_index > self._history_current_index:
-                previous = self._history_current_index
-                self._commit_history_bin(True)
-                self._append_invalid_history_bins(bin_index - previous - 1)
-                self._history_current_index = bin_index
-                self._history_current = segment_extrema
-            elif bin_index == self._history_current_index:
-                current = self._history_current
-                self._history_current = (
-                    min(current[0], segment_extrema[0]),
-                    max(current[1], segment_extrema[1]),
-                    min(current[2], segment_extrema[2]),
-                    max(current[3], segment_extrema[3]),
-                )
-            raw_position += take * stride
-            offset += take
+        self._history.update(first_raw_pair, pairs, self._stride)
+        self._preview_history.update(first_raw_pair, pairs, self._stride)
 
     def _write_values(self, a: np.ndarray, b: np.ndarray, valid: np.ndarray) -> None:
         count = min(int(a.size), self.capacity)
@@ -284,6 +344,25 @@ class DualSampleRingBuffer:
         if first < count:
             rest = count - first
             self._a[:rest], self._b[:rest], self._valid[:rest] = a[first:], b[first:], valid[first:]
+        self._write = (self._write + count) % self.capacity
+        self._count = min(self.capacity, self._count + count)
+        self._total_written += count
+
+    def _write_gap(self, count: int) -> None:
+        """Append missing samples without allocating arrays proportional to loss."""
+        count = min(max(0, int(count)), self.capacity)
+        if not count:
+            return
+        first = min(count, self.capacity - self._write)
+        end = self._write + first
+        self._a[self._write:end] = 0
+        self._b[self._write:end] = 0
+        self._valid[self._write:end] = False
+        if first < count:
+            rest = count - first
+            self._a[:rest] = 0
+            self._b[:rest] = 0
+            self._valid[:rest] = False
         self._write = (self._write + count) % self.capacity
         self._count = min(self.capacity, self._count + count)
         self._total_written += count
@@ -304,17 +383,19 @@ class DualSampleRingBuffer:
             if (new_rate != self._sample_rate_hz or
                     new_stride != self._stride):
                 self._sample_rate_hz, self._stride = new_rate, new_stride
-                self._history_bin_pairs = max(
-                    1, round(new_rate * self.HISTORY_BIN_SECONDS)
-                )
-                self._reset_history()
+                self._history.configure(new_rate)
+                self._preview_history.configure(new_rate)
             else:
                 self._sample_rate_hz, self._stride = new_rate, new_stride
             if self._expected_raw_pair is None:
                 self._expected_raw_pair = int(first_raw_pair)
             if first_raw_pair > self._expected_raw_pair:
                 missing = min(self.capacity, first_raw_pair - self._expected_raw_pair)
-                self._write_values(np.zeros(missing, np.int16), np.zeros(missing, np.int16), np.zeros(missing, bool))
+                self._history.mark_gap(self._expected_raw_pair, first_raw_pair)
+                self._preview_history.mark_gap(
+                    self._expected_raw_pair, first_raw_pair
+                )
+                self._write_gap(missing)
             elif first_raw_pair < self._expected_raw_pair:
                 skip = (self._expected_raw_pair - first_raw_pair + self._stride - 1) // self._stride
                 # Entirely old/reordered datagrams must not move the expected
@@ -354,49 +435,32 @@ class DualSampleRingBuffer:
         return np.concatenate((values[start:], values[:count - first]))
 
     def history_envelope(self, seconds: float, pixels: int):
-        """Return a long-timebase envelope from the 1 ms history cache."""
-        requested = max(1, int(np.ceil(
-            float(seconds) / self.HISTORY_BIN_SECONDS
-        )))
+        """Return an envelope from the finest history that covers the span."""
+        seconds = max(0.0, float(seconds))
         with self._lock:
-            include_current = self._history_current is not None
-            count = min(
-                max(0, requested - (1 if include_current else 0)),
-                self._history_count,
+            # Use the 25 us cache while 1 ms bins would provide fewer source
+            # bins than display pixels.  Beyond that point the coarse cache
+            # preserves all visible extrema with much less copying.
+            history = (
+                self._preview_history
+                if seconds <= min(
+                    self.PREVIEW_HISTORY_SECONDS,
+                    max(1, int(pixels)) * self.HISTORY_BIN_SECONDS,
+                )
+                else self._history
             )
-            min_a = self._copy_ring_values(
-                self._history_min_a, self._history_write, count
-            )
-            max_a = self._copy_ring_values(
-                self._history_max_a, self._history_write, count
-            )
-            min_b = self._copy_ring_values(
-                self._history_min_b, self._history_write, count
-            )
-            max_b = self._copy_ring_values(
-                self._history_max_b, self._history_write, count
-            )
-            valid = self._copy_ring_values(
-                self._history_valid, self._history_write, count
-            )
-            if include_current:
-                current = self._history_current
-                min_a = np.append(min_a, current[0])
-                max_a = np.append(max_a, current[1])
-                min_b = np.append(min_b, current[2])
-                max_b = np.append(max_b, current[3])
-                valid = np.append(valid, True)
+            min_a, max_a, min_b, max_b, valid, _ = history.snapshot(seconds)
         if not min_a.size:
             return None
         bins = min(max(1, int(pixels)), min_a.size)
         bounds = np.linspace(0, min_a.size, bins + 1, dtype=np.int64)
-        starts, widths = bounds[:-1], np.diff(bounds)
+        starts = bounds[:-1]
         return (
             np.minimum.reduceat(min_a, starts),
             np.maximum.reduceat(max_a, starts),
             np.minimum.reduceat(min_b, starts),
             np.maximum.reduceat(max_b, starts),
-            np.add.reduceat(valid.astype(np.uint8), starts) == widths,
+            np.logical_and.reduceat(valid, starts),
         )
 
     def raw_history(self, seconds: float | None = None) -> RawHistoryFrame:
@@ -406,38 +470,10 @@ class DualSampleRingBuffer:
         pixels.  Invalid bins created by PL/network sample gaps are preserved so
         an automatic controller can reject a damaged analysis window.
         """
-        requested = self._history_capacity if seconds is None else max(
-            1, int(np.ceil(float(seconds) / self.HISTORY_BIN_SECONDS))
-        )
         with self._lock:
-            include_current = self._history_current is not None
-            count = min(
-                max(0, requested - (1 if include_current else 0)),
-                self._history_count,
+            min_a, max_a, min_b, max_b, valid, current_index = (
+                self._history.snapshot(seconds)
             )
-            min_a = self._copy_ring_values(
-                self._history_min_a, self._history_write, count
-            )
-            max_a = self._copy_ring_values(
-                self._history_max_a, self._history_write, count
-            )
-            min_b = self._copy_ring_values(
-                self._history_min_b, self._history_write, count
-            )
-            max_b = self._copy_ring_values(
-                self._history_max_b, self._history_write, count
-            )
-            valid = self._copy_ring_values(
-                self._history_valid, self._history_write, count
-            )
-            current_index = self._history_current_index
-            if include_current:
-                current = self._history_current
-                min_a = np.append(min_a, current[0])
-                max_a = np.append(max_a, current[1])
-                min_b = np.append(min_b, current[2])
-                max_b = np.append(max_b, current[3])
-                valid = np.append(valid, True)
             total = int(valid.size)
             if current_index is None or total == 0:
                 indices = np.empty(0, dtype=np.int64)
@@ -465,10 +501,10 @@ class DualSampleRingBuffer:
         if not a.size:
             return None
         bounds = np.linspace(0, a.size, min(max(1, int(pixels)), a.size) + 1, dtype=np.int64)
-        starts, widths = bounds[:-1], np.diff(bounds)
+        starts = bounds[:-1]
         return (np.minimum.reduceat(a, starts), np.maximum.reduceat(a, starts),
                 np.minimum.reduceat(b, starts), np.maximum.reduceat(b, starts),
-                np.add.reduceat(valid.astype(np.uint8), starts) == widths)
+                np.logical_and.reduceat(valid, starts))
 
     def triggered_envelope(self, samples: int, pixels: int, *,
                            channel: int, level: float, rising: bool):
